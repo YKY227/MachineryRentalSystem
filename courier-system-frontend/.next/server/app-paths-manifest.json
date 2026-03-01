@@ -1,9 +1,0 @@
-{
-  "/rental/page": "app/rental/page.js",
-  "/rental/[id]/page": "app/rental/[id]/page.js",
-  "/rental/checkout/page": "app/rental/checkout/page.js",
-  "/(public-pages)/page": "app/(public-pages)/page.js",
-  "/admin/login/page": "app/admin/login/page.js",
-  "/admin/dashboard/page": "app/admin/dashboard/page.js",
-  "/admin/rental/page": "app/admin/rental/page.js"
-}

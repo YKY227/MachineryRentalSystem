@@ -1,0 +1,78 @@
+// src/lib/rental/types.ts
+
+export type EquipmentCategory =
+  | "earthmoving"
+  | "lifting"
+  | "power"
+  | "concreting"
+  | "compaction"
+  | "cleaning";
+
+export type EquipmentPricing = {
+  minDays: number; // e.g. 1 or 3
+  dayRate: number; // per unit per day
+  weekRate?: number; // optional
+  monthRate?: number; // optional
+  deposit?: number; // refundable
+};
+
+export type Equipment = {
+  id: string;
+  title: string;
+  category: EquipmentCategory;
+  brand?: string;
+  model?: string;
+
+  images: string[]; // URLs
+  shortDesc: string;
+
+  // ✅ content blocks for detail page (optional)
+  keyFeatures?: string[];
+  applications?: string[];
+
+  specs: Record<string, string>; // simple now, structured later
+
+  totalUnits: number;
+  isPublished: boolean;
+
+  // ✅ NEW: default post-rental maintenance buffer (days)
+  // Availability logic can treat orders as ending at (endDate + bufferDays)
+  maintenanceBufferDays?: number; // default 7 if undefined
+
+  pricing: EquipmentPricing;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type RentalQuote = {
+  days: number;
+  unitPrice: number;
+  rentalSubtotal: number;
+  deliveryFee: number;
+  collectionFee: number;
+  deposit: number;
+  totalDueNow: number;
+};
+
+export type HoldType = "maintenance" | "repair" | "admin_hold";
+export type HoldStatus = "active" | "completed";
+
+export type EquipmentHold = {
+  id: string;
+  equipmentId: string;
+  qty: number;
+
+  type: HoldType;
+  status: HoldStatus;
+
+  startDate: string; // YYYY-MM-DD
+  endDate: string; // YYYY-MM-DD (planned)
+
+  releasedAt?: string; // ISO timestamp if completed early
+  notes?: string;
+
+  createdAt: string;
+  updatedAt: string;
+};
+
+
