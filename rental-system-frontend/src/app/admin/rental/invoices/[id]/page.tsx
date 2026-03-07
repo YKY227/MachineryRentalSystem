@@ -1,7 +1,7 @@
 // src/app/admin/rental/invoices/[id]/page.tsx
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 
 import type {
@@ -122,6 +122,12 @@ const EMPTY_PAYMENT_TOTALS: InvoicePaymentTotals = {
   status: "unpaid",
 };
 
+type InvoiceActionKey = "send_email" | "send_reminder" | "send_receipt" | "record_payment";
+type BannerState = {
+  kind: "success" | "error";
+  message: string;
+};
+
 export default function AdminInvoiceDetailPage() {
   const router = useRouter();
   const params = useParams();
@@ -133,8 +139,9 @@ export default function AdminInvoiceDetailPage() {
   const [paymentTotals, setPaymentTotals] = useState<InvoicePaymentTotals>(EMPTY_PAYMENT_TOTALS);
   const [loading, setLoading] = useState(true);
   const [paymentsLoading, setPaymentsLoading] = useState(false);
-  const [paymentSubmitting, setPaymentSubmitting] = useState(false);
-  const [banner, setBanner] = useState<string | null>(null);
+  const [activeAction, setActiveAction] = useState<InvoiceActionKey | null>(null);
+  const [banner, setBanner] = useState<BannerState | null>(null);
+  const bannerTimeoutRef = useRef<number | null>(null);
 
   const [billToName, setBillToName] = useState("");
   const [billToEmail, setBillToEmail] = useState("");
@@ -192,7 +199,7 @@ export default function AdminInvoiceDetailPage() {
         totalCents: inv?.totalInclGstCents ?? current.totalCents,
       }));
       const message = e instanceof Error ? e.message : "Failed to load payments";
-      flash(message);
+      flash(message, "error");
     } finally {
       setPaymentsLoading(false);
     }
@@ -231,7 +238,7 @@ export default function AdminInvoiceDetailPage() {
       setPayments([]);
       setPaymentTotals(EMPTY_PAYMENT_TOTALS);
       const message = e instanceof Error ? e.message : "Failed to load invoice";
-      flash(message);
+      flash(message, "error");
     } finally {
       setLoading(false);
     }
@@ -241,6 +248,14 @@ export default function AdminInvoiceDetailPage() {
     reload();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
+
+  useEffect(() => {
+    return () => {
+      if (bannerTimeoutRef.current) {
+        window.clearTimeout(bannerTimeoutRef.current);
+      }
+    };
+  }, []);
 
   const canIssue = useMemo(() => {
     if (!inv) return false;
@@ -287,10 +302,18 @@ export default function AdminInvoiceDetailPage() {
       inv.billTo?.email?.trim() &&
       effectivePaymentTotals.paidCents > 0
   );
+  const isActionBusy = activeAction !== null;
+  const isSendingEmail = activeAction === "send_email";
+  const isSendingReminder = activeAction === "send_reminder";
+  const isSendingReceipt = activeAction === "send_receipt";
+  const isRecordingPayment = activeAction === "record_payment";
 
-  function flash(msg: string) {
-    setBanner(msg);
-    window.setTimeout(() => setBanner(null), 2200);
+  function flash(message: string, kind: BannerState["kind"] = "success") {
+    if (bannerTimeoutRef.current) {
+      window.clearTimeout(bannerTimeoutRef.current);
+    }
+    setBanner({ kind, message });
+    bannerTimeoutRef.current = window.setTimeout(() => setBanner(null), 2600);
   }
 
   function resetPaymentForm() {
@@ -328,10 +351,10 @@ export default function AdminInvoiceDetailPage() {
 
       setInv((data?.invoice ?? null) as Invoice | null);
       await reload();
-      flash("Saved draft.");
+      flash("Saved draft.", "success");
     } catch (e) {
       const message = e instanceof Error ? e.message : "Failed to save draft";
-      flash(message);
+      flash(message, "error");
     }
   }
 
@@ -354,55 +377,59 @@ export default function AdminInvoiceDetailPage() {
       const issued = data?.invoice as Invoice;
       setInv(issued);
       await reload();
-      flash(`Issued ${issued.invoiceNo}`);
+      flash(`Issued ${issued.invoiceNo}`, "success");
     } catch (e) {
       const message = e instanceof Error ? e.message : "Failed to issue invoice";
-      flash(message);
+      flash(message, "error");
     }
   }
 
   async function handleSendInvoiceEmail() {
-    if (!inv || inv.status !== "issued") return;
+    if (!inv || inv.status !== "issued" || isActionBusy) return;
 
     const mode = emails.length ? "resend" : "send";
+    try {
+      setActiveAction("send_email");
+      const res = await fetch("/api/admin/rental/invoices/send", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          invoiceId: inv.id,
+          to: emailTo.trim(),
+          cc: emailCc.trim() || undefined,
+          subject: emailSubject.trim(),
+          message: emailMessage,
+          mode,
+        }),
+      });
 
-    const res = await fetch("/api/admin/rental/invoices/send", {
-      method: "POST",
-      credentials: "include",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        invoiceId: inv.id,
-        to: emailTo.trim(),
-        cc: emailCc.trim() || undefined,
-        subject: emailSubject.trim(),
-        message: emailMessage,
-        mode,
-      }),
-    });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error ?? "Failed to send email");
 
-    const data = await res.json().catch(() => ({}));
-
-    if (!res.ok) {
-      alert(data?.error ?? "Failed to send email");
-      return;
+      setShowEmailModal(false);
+      await reload();
+      const source = data?.pdf?.source ? ` (PDF: ${data.pdf.source})` : "";
+      flash((mode === "resend" ? "Email resent." : "Email sent.") + source, "success");
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "Failed to send email";
+      flash(message, "error");
+    } finally {
+      setActiveAction(null);
     }
-    setShowEmailModal(false);
-    await reload();
-    const source = data?.pdf?.source ? ` (PDF: ${data.pdf.source})` : "";
-    flash((mode === "resend" ? "Email resent." : "Email sent.") + source);
   }
 
   async function onRecordPayment() {
-    if (!inv || !canRecordPayment) return;
+    if (!inv || !canRecordPayment || isActionBusy) return;
 
     const amount = Math.round(Number(paymentAmount) * 100);
     if (!Number.isFinite(amount) || amount <= 0) {
-      flash("Enter a valid payment amount.");
+      flash("Enter a valid payment amount.", "error");
       return;
     }
 
     try {
-      setPaymentSubmitting(true);
+      setActiveAction("record_payment");
       const paidAtIso = paymentDate ? `${paymentDate}T12:00:00.000+08:00` : undefined;
       const res = await fetch(`/api/admin/rental/invoices/${encodeURIComponent(inv.id)}/payments`, {
         method: "POST",
@@ -423,19 +450,20 @@ export default function AdminInvoiceDetailPage() {
       setPaymentTotals((data?.totals ?? EMPTY_PAYMENT_TOTALS) as InvoicePaymentTotals);
       setShowPaymentModal(false);
       resetPaymentForm();
-      flash("Payment recorded.");
+      flash("Payment recorded.", "success");
     } catch (e) {
       const message = e instanceof Error ? e.message : "Failed to record payment";
-      flash(message);
+      flash(message, "error");
     } finally {
-      setPaymentSubmitting(false);
+      setActiveAction(null);
     }
   }
 
   async function onSendReminder() {
-    if (!inv || !canSendReminder) return;
+    if (!inv || !canSendReminder || isActionBusy) return;
 
     try {
+      setActiveAction("send_reminder");
       const res = await fetch("/api/admin/rental/invoices/remind", {
         method: "POST",
         credentials: "include",
@@ -447,17 +475,20 @@ export default function AdminInvoiceDetailPage() {
 
       await reload();
       const source = data?.pdf?.source ? ` (PDF: ${data.pdf.source})` : "";
-      flash(`Reminder sent.${source}`);
+      flash(`Reminder sent.${source}`, "success");
     } catch (e) {
       const message = e instanceof Error ? e.message : "Failed to send reminder";
-      flash(message);
+      flash(message, "error");
+    } finally {
+      setActiveAction(null);
     }
   }
 
   async function onSendReceipt() {
-    if (!inv || !canSendReceipt) return;
+    if (!inv || !canSendReceipt || isActionBusy) return;
 
     try {
+      setActiveAction("send_receipt");
       const res = await fetch("/api/admin/rental/invoices/receipt", {
         method: "POST",
         credentials: "include",
@@ -469,10 +500,12 @@ export default function AdminInvoiceDetailPage() {
 
       await reload();
       const source = data?.pdf?.source ? ` (PDF: ${data.pdf.source})` : "";
-      flash(`Receipt sent.${source}`);
+      flash(`Receipt sent.${source}`, "success");
     } catch (e) {
       const message = e instanceof Error ? e.message : "Failed to send receipt";
-      flash(message);
+      flash(message, "error");
+    } finally {
+      setActiveAction(null);
     }
   }
 
@@ -497,10 +530,10 @@ export default function AdminInvoiceDetailPage() {
 
       setInv((data?.invoice ?? null) as Invoice | null);
       await reload();
-      flash("Invoice voided.");
+      flash("Invoice voided.", "success");
     } catch (e) {
       const message = e instanceof Error ? e.message : "Failed to void invoice";
-      flash(message);
+      flash(message, "error");
     }
   }
 
@@ -574,40 +607,56 @@ export default function AdminInvoiceDetailPage() {
           {inv.status === "issued" && (
             <button
               type="button"
+              disabled={isActionBusy}
               onClick={() => setShowEmailModal(true)}
-              className="rounded-lg bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-700"
+              className={[
+                "rounded-lg px-4 py-2 text-sm font-semibold text-white",
+                isActionBusy ? "bg-sky-300" : "bg-sky-600 hover:bg-sky-700",
+              ].join(" ")}
             >
-              {emails.length ? "Resend Email" : "Send Email"}
+              {isSendingEmail ? "Sending..." : emails.length ? "Resend Email" : "Send Email"}
             </button>
           )}
           {canSendReminder && (
             <button
               type="button"
+              disabled={isActionBusy}
               onClick={onSendReminder}
-              className="rounded-lg bg-amber-500 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-600"
+              className={[
+                "rounded-lg px-4 py-2 text-sm font-semibold text-white",
+                isActionBusy ? "bg-amber-300" : "bg-amber-500 hover:bg-amber-600",
+              ].join(" ")}
             >
-              Send Reminder
+              {isSendingReminder ? "Sending..." : "Send Reminder"}
             </button>
           )}
           {canSendReceipt && (
             <button
               type="button"
+              disabled={isActionBusy}
               onClick={onSendReceipt}
-              className="rounded-lg bg-emerald-500 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-600"
+              className={[
+                "rounded-lg px-4 py-2 text-sm font-semibold text-white",
+                isActionBusy ? "bg-emerald-300" : "bg-emerald-500 hover:bg-emerald-600",
+              ].join(" ")}
             >
-              Send Receipt
+              {isSendingReceipt ? "Sending..." : "Send Receipt"}
             </button>
           )}
           {canRecordPayment && (
             <button
               type="button"
+              disabled={isActionBusy}
               onClick={() => {
                 setPaymentDate(toDateInputValue());
                 setShowPaymentModal(true);
               }}
-              className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700"
+              className={[
+                "rounded-lg px-4 py-2 text-sm font-semibold text-white",
+                isActionBusy ? "bg-emerald-300" : "bg-emerald-600 hover:bg-emerald-700",
+              ].join(" ")}
             >
-              Record Payment
+              {isRecordingPayment ? "Recording..." : "Record Payment"}
             </button>
           )}
           {isDraft && (
@@ -699,8 +748,15 @@ export default function AdminInvoiceDetailPage() {
       </div>
 
       {banner && (
-        <div className="mt-4 rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-800">
-          {banner}
+        <div
+          className={[
+            "mt-4 rounded-xl px-4 py-3 text-sm",
+            banner.kind === "error"
+              ? "border border-rose-200 bg-rose-50 text-rose-700"
+              : "border border-emerald-200 bg-emerald-50 text-emerald-800",
+          ].join(" ")}
+        >
+          {banner.message}
         </div>
       )}
 
@@ -716,6 +772,7 @@ export default function AdminInvoiceDetailPage() {
                 <label className="text-xs font-semibold text-slate-600">To</label>
                 <input
                   value={emailTo}
+                  disabled={isSendingEmail}
                   onChange={(e) => setEmailTo(e.target.value)}
                   className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
                 />
@@ -725,6 +782,7 @@ export default function AdminInvoiceDetailPage() {
                 <label className="text-xs font-semibold text-slate-600">CC</label>
                 <input
                   value={emailCc}
+                  disabled={isSendingEmail}
                   onChange={(e) => setEmailCc(e.target.value)}
                   className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
                 />
@@ -734,6 +792,7 @@ export default function AdminInvoiceDetailPage() {
                 <label className="text-xs font-semibold text-slate-600">Subject</label>
                 <input
                   value={emailSubject}
+                  disabled={isSendingEmail}
                   onChange={(e) => setEmailSubject(e.target.value)}
                   className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
                 />
@@ -744,6 +803,7 @@ export default function AdminInvoiceDetailPage() {
                 <textarea
                   rows={4}
                   value={emailMessage}
+                  disabled={isSendingEmail}
                   onChange={(e) => setEmailMessage(e.target.value)}
                   className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
                 />
@@ -757,16 +817,18 @@ export default function AdminInvoiceDetailPage() {
             <div className="mt-6 flex justify-end gap-2">
               <button
                 onClick={() => setShowEmailModal(false)}
-                className="rounded-lg border border-slate-200 px-4 py-2 text-sm"
+                disabled={isSendingEmail}
+                className="rounded-lg border border-slate-200 px-4 py-2 text-sm disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400"
               >
                 Cancel
               </button>
 
               <button
                 onClick={handleSendInvoiceEmail}
-                className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800"
+                disabled={isSendingEmail}
+                className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-400"
               >
-                Send
+                {isSendingEmail ? "Sending..." : emails.length ? "Confirm Resend" : "Send"}
               </button>
             </div>
           </div>
@@ -787,6 +849,7 @@ export default function AdminInvoiceDetailPage() {
                 <input
                   type="date"
                   value={paymentDate}
+                  disabled={isRecordingPayment}
                   onChange={(e) => setPaymentDate(e.target.value)}
                   className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
                 />
@@ -799,6 +862,7 @@ export default function AdminInvoiceDetailPage() {
                   min="0.01"
                   step="0.01"
                   value={paymentAmount}
+                  disabled={isRecordingPayment}
                   onChange={(e) => setPaymentAmount(e.target.value)}
                   className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
                   placeholder="0.00"
@@ -809,6 +873,7 @@ export default function AdminInvoiceDetailPage() {
                 <label className="text-xs font-semibold text-slate-600">Method</label>
                 <input
                   value={paymentMethod}
+                  disabled={isRecordingPayment}
                   onChange={(e) => setPaymentMethod(e.target.value)}
                   className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
                   placeholder="Bank transfer"
@@ -819,6 +884,7 @@ export default function AdminInvoiceDetailPage() {
                 <label className="text-xs font-semibold text-slate-600">Reference</label>
                 <input
                   value={paymentReference}
+                  disabled={isRecordingPayment}
                   onChange={(e) => setPaymentReference(e.target.value)}
                   className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
                   placeholder="Txn / remittance reference"
@@ -830,6 +896,7 @@ export default function AdminInvoiceDetailPage() {
                 <textarea
                   rows={3}
                   value={paymentNotes}
+                  disabled={isRecordingPayment}
                   onChange={(e) => setPaymentNotes(e.target.value)}
                   className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
                   placeholder="Optional note"
@@ -844,20 +911,21 @@ export default function AdminInvoiceDetailPage() {
                   setShowPaymentModal(false);
                   resetPaymentForm();
                 }}
-                className="rounded-lg border border-slate-200 px-4 py-2 text-sm"
+                disabled={isRecordingPayment}
+                className="rounded-lg border border-slate-200 px-4 py-2 text-sm disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400"
               >
                 Cancel
               </button>
               <button
                 type="button"
-                disabled={paymentSubmitting}
+                disabled={isRecordingPayment}
                 onClick={onRecordPayment}
                 className={[
                   "rounded-lg px-4 py-2 text-sm font-semibold text-white",
-                  paymentSubmitting ? "bg-slate-400" : "bg-emerald-600 hover:bg-emerald-700",
+                  isRecordingPayment ? "bg-slate-400" : "bg-emerald-600 hover:bg-emerald-700",
                 ].join(" ")}
               >
-                {paymentSubmitting ? "Saving..." : "Save Payment"}
+                {isRecordingPayment ? "Recording..." : "Save Payment"}
               </button>
             </div>
           </div>
@@ -1003,13 +1071,17 @@ export default function AdminInvoiceDetailPage() {
               {canRecordPayment && (
                 <button
                   type="button"
+                  disabled={isActionBusy}
                   onClick={() => {
                     setPaymentDate(toDateInputValue());
                     setShowPaymentModal(true);
                   }}
-                  className="w-full rounded-xl bg-emerald-600 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-700"
+                  className={[
+                    "w-full rounded-xl px-3 py-2 text-sm font-semibold text-white",
+                    isActionBusy ? "bg-emerald-300" : "bg-emerald-600 hover:bg-emerald-700",
+                  ].join(" ")}
                 >
-                  Record Payment
+                  {isRecordingPayment ? "Recording..." : "Record Payment"}
                 </button>
               )}
               {!isIssued && (

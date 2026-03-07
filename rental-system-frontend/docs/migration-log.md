@@ -318,3 +318,26 @@ Manual test checklist:
 - [ ] Confirm `q` and `paymentStatus` query params narrow exported rows when provided.
 - [ ] Confirm sorting works for `paid_at`, `created_at`, `amount`, and `invoice_number`.
 - [ ] Confirm logged-out `GET /api/admin/rental/payments/export` still returns 401.
+
+## 2026-03-07 | Scope: rental invoice detail action ux hardening v1
+Summary:
+- Hardened invoice detail actions with shared in-flight button states and consistent success/error banner feedback for send/resend, reminder, receipt, and payment recording flows.
+
+Files changed:
+- `src/app/admin/rental/invoices/[id]/page.tsx`
+- `docs/migration-log.md`
+
+DB / Infra changes:
+- No schema changes.
+- No infrastructure changes.
+
+API changes:
+- No route contract changes.
+- Invoice detail now prevents duplicate client-side submits while existing protected admin APIs remain the source of truth.
+
+Manual test checklist:
+- [ ] On invoice detail, click send/reminder/receipt/payment actions repeatedly and confirm duplicate requests are blocked while the action is in progress.
+- [ ] Confirm action buttons show clearer in-flight labels such as `Sending...` and `Recording...`.
+- [ ] Confirm success messages use the page banner consistently after send/resend, reminder, receipt, and payment record actions.
+- [ ] Confirm failed actions re-enable buttons and show an error banner without leaving the page stuck.
+- [ ] Confirm email history still refreshes after successful email actions and payment history/totals still refresh after recording payment.
