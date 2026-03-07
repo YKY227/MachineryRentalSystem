@@ -1,23 +1,18 @@
+// src/app/api/admin/rental/invoices/send/route.ts
 import { NextResponse } from "next/server";
-import { Resend } from "resend";
-import { createClient } from "@supabase/supabase-js";
 
-import type { Invoice } from "@/lib/rental/invoices/types";
-import { renderInvoicePdf } from "@/lib/rental/invoices/invoice-pdf";
-import { sha256OfBytes } from "@/lib/rental/invoices/hash";
+import {
+  adminUnauthorizedResponse,
+  assertAdmin,
+  isAdminUnauthorized,
+} from "@/lib/auth/admin";
+import { dbInvoiceRepo } from "@/lib/rental/invoices/db-invoice-repo";
+import { deliverInvoiceEmail } from "@/lib/rental/invoices/email-delivery";
 
-export const runtime = "nodejs"; // ensure Node runtime (pdf-lib + crypto + supabase)
-
-const resend = new Resend(process.env.RESEND_API_KEY);
-
-function mustEnv(name: string) {
-  const v = process.env[name];
-  if (!v) throw new Error(`Missing env: ${name}`);
-  return v;
-}
+export const runtime = "nodejs";
 
 type SendInvoiceBody = {
-  invoice: Invoice; // MVP: client sends snapshot (later: invoiceId)
+  invoiceId: string;
   to: string;
   cc?: string;
   subject?: string;
@@ -25,58 +20,17 @@ type SendInvoiceBody = {
   mode?: "send" | "resend";
 };
 
-function sanitizeFilename(s: string) {
-  return s.replace(/[^\w\-\.]+/g, "_");
-}
-
-function defaultPdfPath(inv: Invoice) {
-  // You can version this later if you support re-issuing
-  return `invoices/${sanitizeFilename(inv.invoiceNo ?? inv.id)}.pdf`;
-}
-
-async function getSupabase() {
-  const url = mustEnv("SUPABASE_URL");
-  const key = mustEnv("SUPABASE_SERVICE_ROLE_KEY");
-  return createClient(url, key, { auth: { persistSession: false } });
-}
-
-async function downloadFromStorage(path: string): Promise<Uint8Array> {
-  const supabase = await getSupabase();
-  const bucket = mustEnv("SUPABASE_STORAGE_BUCKET");
-
-  const { data, error } = await supabase.storage.from(bucket).download(path);
-  if (error) throw new Error(`Storage download failed: ${error.message}`);
-  if (!data) throw new Error("Storage download returned empty data");
-
-  const ab = await data.arrayBuffer();
-  return new Uint8Array(ab);
-}
-
-async function uploadToStorage(path: string, bytes: Uint8Array) {
-  const supabase = await getSupabase();
-  const bucket = mustEnv("SUPABASE_STORAGE_BUCKET");
-
-  const { error } = await supabase.storage.from(bucket).upload(path, bytes, {
-    upsert: true,
-    contentType: "application/pdf",
-    cacheControl: "3600",
-  });
-
-  if (error) throw new Error(`Storage upload failed: ${error.message}`);
-}
-
 export async function POST(req: Request) {
   try {
-    mustEnv("RESEND_API_KEY");
-    const from = mustEnv("RESEND_FROM");
-    mustEnv("SUPABASE_URL");
-    mustEnv("SUPABASE_SERVICE_ROLE_KEY");
-    mustEnv("SUPABASE_STORAGE_BUCKET");
+    assertAdmin(req);
 
     const body = (await req.json()) as SendInvoiceBody;
-    const inv = body.invoice;
+    const invoiceId = (body.invoiceId ?? "").trim();
+    if (!invoiceId) return NextResponse.json({ error: "Missing invoiceId" }, { status: 400 });
 
-    if (!inv) return NextResponse.json({ error: "Missing invoice" }, { status: 400 });
+    const inv = await dbInvoiceRepo.get(invoiceId);
+    if (!inv) return NextResponse.json({ error: "Invoice not found" }, { status: 404 });
+
     if (inv.status !== "issued") {
       return NextResponse.json({ error: "Invoice must be issued before emailing" }, { status: 400 });
     }
@@ -92,94 +46,62 @@ export async function POST(req: Request) {
     const message =
       body.message ??
       `Dear Customer,\n\nPlease find attached your tax invoice ${inv.invoiceNo}.\n\nThank you.`;
-
     const mode = body.mode ?? (inv.emailLog?.length ? "resend" : "send");
 
-    // ---------- Use stored PDF if possible ----------
-    const storagePath = inv.pdfStorage?.path || defaultPdfPath(inv);
-
-    let pdfBytes: Uint8Array | null = null;
-    let sha256: string | null = null;
-    let usedStored = false;
-
-    // 1) Try download existing stored file if invoice says it has one
-    if (inv.pdfStorage?.path) {
-      try {
-        const downloaded = await downloadFromStorage(inv.pdfStorage.path);
-        const h = await sha256OfBytes(downloaded);
-
-        // Optional integrity check: if mismatch, regenerate+overwrite
-        if (inv.pdfStorage.sha256 && inv.pdfStorage.sha256 !== h) {
-          throw new Error("Stored PDF hash mismatch (will regenerate).");
-        }
-
-        pdfBytes = downloaded;
-        sha256 = h;
-        usedStored = true;
-      } catch {
-        // fall through to generate
-      }
-    }
-
-    // 2) If no usable stored PDF, generate and upload
-    if (!pdfBytes) {
-      const generated = await renderInvoicePdf(inv);
-      const h = await sha256OfBytes(generated);
-
-      await uploadToStorage(storagePath, generated);
-
-      pdfBytes = generated;
-      sha256 = h;
-      usedStored = false;
-    }
-
-    // ---------- Send email via provider ----------
-    const filename = `${sanitizeFilename(inv.invoiceNo)}.pdf`;
-
-    const html = `
-      <div style="font-family:Arial,sans-serif; line-height:1.5">
-        <p>${String(message).replace(/\n/g, "<br/>")}</p>
-        <hr/>
-        <p style="color:#666; font-size:12px">
-          Invoice: <b>${inv.invoiceNo}</b><br/>
-          SHA256: <code>${sha256}</code><br/>
-          PDF Source: ${usedStored ? "stored" : "generated"}
-        </p>
-      </div>
-    `;
-
-    const result = await resend.emails.send({
-      from,
+    const delivery = await deliverInvoiceEmail({
+      invoice: inv,
       to,
-      cc: cc ? [cc] : undefined,
+      cc: cc || undefined,
       subject,
-      html,
-      attachments: [
-        {
-          filename,
-          content: Buffer.from(pdfBytes).toString("base64"),
-        },
-      ],
+      html: `
+        <div style="font-family:Arial,sans-serif; line-height:1.5">
+          <p>${String(message).replace(/\n/g, "<br/>")}</p>
+          <hr/>
+          <p style="color:#666; font-size:12px">
+            Invoice: <b>${inv.invoiceNo}</b><br/>
+            Bill To: ${inv.billTo?.name ?? "-"}<br/>
+            PDF attached for reference.
+          </p>
+        </div>
+      `,
     });
 
-    if (result.error) {
-      return NextResponse.json({ error: result.error.message }, { status: 502 });
-    }
+    const emailType = mode === "resend" ? "resent" : "sent";
+    const sentAt = new Date().toISOString();
 
-    // Return metadata so CLIENT can save it into localInvoiceRepo (since server can't touch localStorage)
+    await dbInvoiceRepo.createEmailEvent({
+      invoiceId: inv.id,
+      type: emailType,
+      to,
+      cc: cc || undefined,
+      subject,
+      provider: delivery.provider,
+      status: "sent",
+      providerMessageId: delivery.providerMessageId ?? undefined,
+      pdfSha256: delivery.pdf.sha256 ?? undefined,
+      sentAt,
+    });
+
+    await dbInvoiceRepo.appendEmailLog(inv.id, {
+      type: emailType,
+      to,
+      cc: cc || undefined,
+      subject,
+      provider: delivery.provider,
+      status: "sent",
+      providerMessageId: delivery.providerMessageId ?? undefined,
+      pdfSha256: delivery.pdf.sha256 ?? undefined,
+    });
+
     return NextResponse.json({
       ok: true,
-      provider: "resend",
-      providerMessageId: result.data?.id ?? null,
-      pdf: {
-        path: storagePath,
-        generatedAt: new Date().toISOString(),
-        sha256,
-        source: usedStored ? "stored" : "generated",
-      },
+      provider: delivery.provider,
+      providerMessageId: delivery.providerMessageId,
+      pdf: delivery.pdf,
       mode,
     });
   } catch (e) {
+    if (isAdminUnauthorized(e)) return adminUnauthorizedResponse();
     const message = e instanceof Error ? e.message : "Send failed";
     return NextResponse.json({ error: message }, { status: 400 });
   }

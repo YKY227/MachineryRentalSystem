@@ -6,124 +6,8 @@ import { useRouter } from "next/navigation";
 
 import type { Equipment } from "@/lib/rental/types";
 import { localEquipmentRepo } from "@/lib/rental/equipment-repo";
-
-import { localInvoiceRepo } from "@/lib/rental/invoices/local-invoice-repo";
 import type { Invoice } from "@/lib/rental/invoices/types";
-
-type FulfillmentMode = "deliver" | "self_collect";
-
-type LocalRentalOrder = {
-  id: string; // publicId
-  equipmentId: string;
-  equipmentTitle: string;
-  qty: number;
-  start: string; // YYYY-MM-DD
-  end: string; // YYYY-MM-DD
-  fulfillment: FulfillmentMode;
-  pricingSnapshot: {
-    days: number;
-    rentalSubtotal: number;
-    deliveryFee: number;
-    collectionFee: number;
-    deposit: number;
-    total: number;
-  };
-  createdAt: string; // ISO
-};
-
-const ORDERS_LS_KEY = "cms_rental_orders_v1";
-// If you used any older key before, list them here for auto-migration:
-const LEGACY_ORDER_KEYS = ["cms_rental_orders", "cms_rental_orders_v0", "cms_rental_order_v1"];
-
-function safeJsonParse(raw: string | null): { ok: boolean; value: unknown; error?: string } {
-  if (!raw) return { ok: true, value: null };
-  try {
-    return { ok: true, value: JSON.parse(raw) };
-  } catch (e) {
-    return { ok: false, value: null, error: e instanceof Error ? e.message : String(e) };
-  }
-}
-
-function readOrdersWithMigration(): {
-  orders: LocalRentalOrder[];
-  diagnostics: {
-    key: string;
-    found: boolean;
-    rawBytes: number;
-    parseOk: boolean;
-    parseError?: string;
-    parsedType: string;
-    migratedFrom?: string;
-  };
-} {
-  if (typeof window === "undefined") {
-    return {
-      orders: [],
-      diagnostics: {
-        key: ORDERS_LS_KEY,
-        found: false,
-        rawBytes: 0,
-        parseOk: true,
-        parsedType: "n/a",
-      },
-    };
-  }
-
-  const raw = localStorage.getItem(ORDERS_LS_KEY);
-  const found = !!raw;
-  const rawBytes = raw ? raw.length : 0;
-  const parsed = safeJsonParse(raw);
-  const parsedType = Array.isArray(parsed.value) ? "array" : typeof parsed.value;
-
-  // ✅ Happy path: v1 exists and is an array
-  if (parsed.ok && Array.isArray(parsed.value)) {
-    return {
-      orders: parsed.value as LocalRentalOrder[],
-      diagnostics: { key: ORDERS_LS_KEY, found, rawBytes, parseOk: true, parsedType },
-    };
-  }
-
-  // ✅ If v1 exists but not array or parse fails, try legacy keys (migration)
-  for (const legacyKey of LEGACY_ORDER_KEYS) {
-    const legacyRaw = localStorage.getItem(legacyKey);
-    if (!legacyRaw) continue;
-
-    const legacyParsed = safeJsonParse(legacyRaw);
-    if (legacyParsed.ok && Array.isArray(legacyParsed.value)) {
-      // migrate
-      localStorage.setItem(ORDERS_LS_KEY, JSON.stringify(legacyParsed.value));
-      return {
-        orders: legacyParsed.value as LocalRentalOrder[],
-        diagnostics: {
-          key: ORDERS_LS_KEY,
-          found: true,
-          rawBytes: localStorage.getItem(ORDERS_LS_KEY)?.length ?? 0,
-          parseOk: true,
-          parsedType: "array",
-          migratedFrom: legacyKey,
-        },
-      };
-    }
-  }
-
-  // Nothing usable
-  return {
-    orders: [],
-    diagnostics: {
-      key: ORDERS_LS_KEY,
-      found,
-      rawBytes,
-      parseOk: parsed.ok,
-      parseError: parsed.ok ? undefined : parsed.error,
-      parsedType,
-    },
-  };
-}
-
-function writeOrders(items: LocalRentalOrder[]) {
-  if (typeof window === "undefined") return;
-  localStorage.setItem(ORDERS_LS_KEY, JSON.stringify(items));
-}
+import type { CreateRentalOrderInput, RentalOrder } from "@/lib/rental/orders/types";
 
 function formatMoney(n: number) {
   return new Intl.NumberFormat("en-SG", {
@@ -140,7 +24,7 @@ function formatDateTime(iso: string) {
 }
 
 function addDaysISO(dateISO: string, days: number) {
-  const d = new Date(dateISO + "T12:00:00"); // midday to avoid TZ edge cases
+  const d = new Date(dateISO + "T12:00:00");
   if (Number.isNaN(d.getTime())) return dateISO;
   d.setDate(d.getDate() + days);
   return d.toISOString().slice(0, 10);
@@ -152,7 +36,7 @@ function clampInt(n: unknown, fallback: number) {
   return Math.max(0, Math.floor(v));
 }
 
-function seedDemoOrders(items: Equipment[]): LocalRentalOrder[] {
+function seedDemoOrders(items: Equipment[]): CreateRentalOrderInput[] {
   const pick = (id: string) => items.find((x) => x.id === id) ?? items[0];
 
   const a = pick("eq-scissor-lift-8m") ?? items[0];
@@ -166,13 +50,12 @@ function seedDemoOrders(items: Equipment[]): LocalRentalOrder[] {
     return d;
   };
 
-  const mk = (i: number, eq: Equipment, startOff: number, endOff: number): LocalRentalOrder => {
+  const mk = (i: number, eq: Equipment, startOff: number, endOff: number): CreateRentalOrderInput => {
     const start = iso(plusDays(startOff));
     const end = iso(plusDays(endOff));
     const days = Math.max(1, endOff - startOff);
     const qty = 1;
 
-    // simple pricing demo using dayRate
     const dayRate = eq?.pricing?.dayRate ?? 80;
     const rentalSubtotal = dayRate * days * qty;
     const deliveryFee = 60;
@@ -196,7 +79,6 @@ function seedDemoOrders(items: Equipment[]): LocalRentalOrder[] {
         deposit,
         total,
       },
-      createdAt: new Date().toISOString(),
     };
   };
 
@@ -206,22 +88,14 @@ function seedDemoOrders(items: Equipment[]): LocalRentalOrder[] {
 
 export default function AdminRentalOrdersPage() {
   const router = useRouter();
+  const isDev = process.env.NODE_ENV === "development";
 
   const [items, setItems] = useState<Equipment[]>([]);
-  const [loadingInv, setLoadingInv] = useState(true);
-
-  const [orders, setOrders] = useState<LocalRentalOrder[]>([]);
-  const [diagnostics, setDiagnostics] = useState<{
-    key: string;
-    found: boolean;
-    rawBytes: number;
-    parseOk: boolean;
-    parseError?: string;
-    parsedType: string;
-    migratedFrom?: string;
-  } | null>(null);
-
+  const [orders, setOrders] = useState<RentalOrder[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [loadingOrders, setLoadingOrders] = useState(true);
+  const [loadingInv, setLoadingInv] = useState(true);
+  const [working, setWorking] = useState(false);
 
   const equipmentById = useMemo(() => {
     const map = new Map<string, Equipment>();
@@ -240,66 +114,148 @@ export default function AdminRentalOrdersPage() {
     setItems(data);
   }
 
-  function refreshOrders() {
-    const { orders: next, diagnostics: diag } = readOrdersWithMigration();
-    setOrders(next);
-    setDiagnostics(diag);
+  async function refreshOrders() {
+    try {
+      setLoadingOrders(true);
+      const res = await fetch("/api/admin/rental/orders", {
+        method: "GET",
+        cache: "no-store",
+        credentials: "include",
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error ?? "Failed to load orders");
+      const nextOrders = (data?.orders ?? []) as RentalOrder[];
+      setOrders(nextOrders);
+      return nextOrders;
+    } catch (e) {
+      console.error("refreshOrders failed", e);
+      setOrders([]);
+      return [];
+    } finally {
+      setLoadingOrders(false);
+    }
   }
 
-  function refreshInvoices() {
-    setInvoices(localInvoiceRepo.list());
-    setLoadingInv(false);
+  async function refreshInvoices(orderItems: RentalOrder[]) {
+    try {
+      setLoadingInv(true);
+      const orderIds = orderItems.map((o) => o.id).filter(Boolean);
+
+      if (!orderIds.length) {
+        setInvoices([]);
+        return;
+      }
+
+      const res = await fetch(
+        `/api/admin/rental/invoices?orderIds=${encodeURIComponent(orderIds.join(","))}`,
+        { cache: "no-store", credentials: "include" }
+      );
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error ?? "Failed to load invoice statuses");
+
+      setInvoices(((data?.invoices ?? []) as Invoice[]).filter((x) => x.status !== "void"));
+    } catch (e) {
+      console.error("refreshInvoices failed", e);
+      setInvoices([]);
+    } finally {
+      setLoadingInv(false);
+    }
   }
 
   useEffect(() => {
-    refreshInventory().then(() => {
-      // once equipment is available, refresh orders
-      refreshOrders();
+    refreshInventory().then(async () => {
+      const nextOrders = await refreshOrders();
+      await refreshInvoices(nextOrders);
     });
-    refreshInvoices();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  function onClearOrders() {
-    writeOrders([]);
-    refreshOrders();
-  }
-
-  function onSeedOrders() {
-    const seed = seedDemoOrders(items);
-    if (!seed.length) return;
-    writeOrders(seed);
-    refreshOrders();
-  }
 
   function findInvoiceForOrder(orderId: string) {
     return invoices.find((x) => x.orderId === orderId && x.status !== "void");
   }
 
-  function onCreateOrViewInvoice(o: LocalRentalOrder) {
-    const existing = findInvoiceForOrder(o.id);
-    const inv =
-      existing ??
-      localInvoiceRepo.createDraftFromOrder({
-        orderId: o.id,
-        equipmentTitle: o.equipmentTitle,
-        qty: o.qty,
-        start: o.start,
-        end: o.end,
-        pricingSnapshot: o.pricingSnapshot,
+  async function onCreateOrViewInvoice(o: RentalOrder) {
+    try {
+      const res = await fetch("/api/admin/rental/invoices", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ orderId: o.id }),
       });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error ?? "Failed to create or load invoice");
 
-    refreshInvoices();
-    router.push(`/admin/rental/invoices/${encodeURIComponent(inv.id)}`);
+      const inv = data?.invoice as Invoice | undefined;
+      if (!inv?.id) throw new Error("Invoice create response missing id");
+
+      await refreshInvoices(orders);
+      router.push(`/admin/rental/invoices/${encodeURIComponent(inv.id)}`);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "Failed to create invoice";
+      alert(message);
+    }
+  }
+
+  async function onRefreshAll() {
+    const nextOrders = await refreshOrders();
+    await refreshInvoices(nextOrders);
+  }
+
+  async function onSeedOrders() {
+    if (!isDev) return;
+    const seed = seedDemoOrders(items);
+    if (!seed.length) return;
+
+    try {
+      setWorking(true);
+      const res = await fetch("/api/admin/rental/orders/import-local", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ orders: seed }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error ?? "Failed to import demo orders");
+
+      await onRefreshAll();
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "Failed to seed demo orders";
+      alert(message);
+    } finally {
+      setWorking(false);
+    }
+  }
+
+  async function onDevReset() {
+    if (!isDev) return;
+    const ok = window.confirm("Delete all DB rental orders in development mode?");
+    if (!ok) return;
+
+    try {
+      setWorking(true);
+      const res = await fetch("/api/admin/rental/orders", {
+        method: "DELETE",
+        credentials: "include",
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error ?? "Failed to reset orders");
+
+      await onRefreshAll();
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "Failed to reset orders";
+      alert(message);
+    } finally {
+      setWorking(false);
+    }
   }
 
   return (
     <div className="mx-auto max-w-6xl p-4">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold text-slate-900">Rental Orders (Mock)</h1>
+          <h1 className="text-2xl font-semibold text-slate-900">Rental Orders</h1>
           <p className="mt-1 text-sm text-slate-600">
-            Frontend-only (localStorage). Orders key: <span className="font-mono">{ORDERS_LS_KEY}</span>
+            DB-first mode (Supabase). Orders persist across refresh and sessions.
           </p>
         </div>
 
@@ -312,57 +268,36 @@ export default function AdminRentalOrdersPage() {
           </button>
 
           <button
-            onClick={refreshOrders}
+            onClick={onRefreshAll}
             className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+            disabled={working}
           >
             Refresh
           </button>
 
-          <button
-            onClick={onSeedOrders}
-            className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:bg-slate-300"
-            disabled={!items.length}
-            title={!items.length ? "Load inventory first" : "Create demo orders in localStorage"}
-          >
-            Seed demo orders
-          </button>
+          {isDev && (
+            <>
+              <button
+                onClick={onSeedOrders}
+                className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:bg-slate-300"
+                disabled={!items.length || working}
+                title={!items.length ? "Load inventory first" : "Create demo DB orders"}
+              >
+                Seed demo orders
+              </button>
 
-          <button
-            onClick={onClearOrders}
-            className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-          >
-            Clear orders
-          </button>
+              <button
+                onClick={onDevReset}
+                className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+                disabled={working}
+                title="Development only"
+              >
+                Dev reset
+              </button>
+            </>
+          )}
         </div>
       </div>
-
-      {/* Diagnostics */}
-      {diagnostics && (
-        <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-4 text-xs text-slate-700">
-          <div className="flex flex-wrap gap-x-6 gap-y-2">
-            <div>
-              <span className="font-semibold">Storage:</span>{" "}
-              {diagnostics.found ? "FOUND" : "MISSING"} • {diagnostics.rawBytes} chars
-            </div>
-            <div>
-              <span className="font-semibold">Parse:</span>{" "}
-              {diagnostics.parseOk ? "OK" : `ERROR: ${diagnostics.parseError ?? "unknown"}`}
-            </div>
-            <div>
-              <span className="font-semibold">Type:</span> {diagnostics.parsedType}
-            </div>
-            {diagnostics.migratedFrom && (
-              <div className="text-emerald-700">
-                <span className="font-semibold">Migrated from:</span> {diagnostics.migratedFrom}
-              </div>
-            )}
-          </div>
-          <div className="mt-2 text-[11px] text-slate-500">
-            If this shows MISSING, your orders were never saved under this key on the current domain/origin.
-            If Type is not “array”, your stored data shape changed.
-          </div>
-        </div>
-      )}
 
       {/* Summary cards */}
       <div className="mt-6 grid gap-4 sm:grid-cols-2">
@@ -378,16 +313,15 @@ export default function AdminRentalOrdersPage() {
       </div>
 
       {/* Orders table */}
-      {orders.length === 0 ? (
+      {loadingOrders ? (
         <div className="mt-6 rounded-xl border border-slate-200 bg-white p-6 text-sm text-slate-600">
-          No rental orders found in localStorage. Most common reasons:
-          <ul className="mt-2 list-disc pl-5 text-sm text-slate-600">
-            <li>Checkout is writing to a different localStorage key.</li>
-            <li>You changed domain/port (localStorage is per origin).</li>
-            <li>The stored JSON is not an array anymore (shape changed).</li>
-          </ul>
-          <div className="mt-3 text-sm">
-            For demo, click <span className="font-semibold">Seed demo orders</span>.
+          Loading DB orders...
+        </div>
+      ) : orders.length === 0 ? (
+        <div className="mt-6 rounded-xl border border-slate-200 bg-white p-6 text-sm text-slate-600">
+          No rental orders found in DB.
+          <div className="mt-2 text-xs text-slate-500">
+            Public checkout now writes to DB via <span className="font-mono">/api/public/rental/orders</span>.
           </div>
         </div>
       ) : (
@@ -431,7 +365,7 @@ export default function AdminRentalOrdersPage() {
 
                     <td className="px-4 py-3 text-slate-700">
                       <div>
-                        {o.start} → {o.end}
+                        {o.start} ? {o.end}
                       </div>
                       <div className="mt-1 text-xs text-slate-500">
                         Reserved until <span className="font-medium text-slate-700">{reservedUntil}</span>
@@ -496,7 +430,7 @@ export default function AdminRentalOrdersPage() {
                           <div className="text-[11px] text-slate-500">
                             Invoice status:{" "}
                             <span className="font-semibold text-slate-700">
-                              {loadingInv ? "…" : inv.status.toUpperCase()}
+                              {loadingInv ? "..." : inv.status.toUpperCase()}
                             </span>
                           </div>
                         )}
@@ -509,8 +443,8 @@ export default function AdminRentalOrdersPage() {
           </table>
 
           <div className="border-t border-slate-100 bg-slate-50 p-3 text-xs text-slate-500">
-            Orders key: <span className="font-mono">{ORDERS_LS_KEY}</span> • Invoices key:{" "}
-            <span className="font-mono">cms_rental_invoices_v1</span>.
+            Orders source: <span className="font-mono">Supabase Postgres</span> • Invoices source:{" "}
+            <span className="font-mono">Supabase Postgres</span>.
           </div>
         </div>
       )}

@@ -77,6 +77,10 @@ export default function AdminLayout({ children }: AdminLayoutProps) {
   }, [currentNavItem]);
 
   const handleLogout = () => {
+    void fetch("/api/admin/auth/token", {
+      method: "DELETE",
+      credentials: "include",
+    });
     logoutAdmin();
     setSession(null);
     router.replace("/admin/login");

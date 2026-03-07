@@ -1,9 +1,46 @@
 // src/lib/rental/invoices/types.ts
 export type InvoiceStatus = "draft" | "issued" | "void";
+export type InvoicePaymentStatus = "unpaid" | "partially_paid" | "paid" | "overdue";
+
+export type InvoicePayment = {
+  id: string;
+  invoiceId: string;
+  amountCents: number;
+  paidAt: string; // ISO
+  method?: string;
+  reference?: string;
+  notes?: string;
+  createdAt: string; // ISO
+};
+
+export type InvoicePaymentTotals = {
+  totalCents: number;
+  paidCents: number;
+  balanceCents: number;
+  status: InvoicePaymentStatus;
+};
+
+export type InvoiceEmailEventType = "sent" | "resent" | "reminder" | "receipt";
+
+export type InvoiceEmailSummary = {
+  emailCount: number;
+  lastEmailAt?: string;
+  lastEmailType?: InvoiceEmailEventType;
+  lastEmailTo?: string;
+};
+
+export type InvoiceListItem = {
+  invoice: Invoice;
+  paymentTotals: InvoicePaymentTotals;
+  emailSummary?: InvoiceEmailSummary;
+};
+
+export type InvoiceListSortBy = "created_at" | "due_date" | "total" | "invoice_number";
+export type InvoiceListSortDir = "asc" | "desc";
 
 export type InvoiceEmailLogItem = {
   id: string;
-  type: "sent" | "resent";
+  type: InvoiceEmailEventType;
   to: string;
   cc?: string;
   subject: string;
@@ -11,7 +48,7 @@ export type InvoiceEmailLogItem = {
   provider: "mock" | "resend" | "ses" | "postmark";
   status: "sent" | "queued" | "failed";
   providerMessageId?: string;
-pdfSha256?: string;
+  pdfSha256?: string;
 };
 
 export type InvoicePdfStorage = {

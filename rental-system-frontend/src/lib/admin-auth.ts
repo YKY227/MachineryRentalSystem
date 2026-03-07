@@ -30,21 +30,17 @@ export function setAdminSession(session: AdminSession | null) {
 }
 
 /**
- * Demo login – front-end only for now.
- * Uses NEXT_PUBLIC_ADMIN_DEMO_PASSWORD or falls back to "demo1234".
+ * Persists a client-side admin session after server auth succeeds.
  */
 export async function loginAdmin(
   email: string,
-  password: string
+  _password: string
 ): Promise<AdminSession> {
-  const demoPassword =
-    process.env.NEXT_PUBLIC_ADMIN_DEMO_PASSWORD || "demo1234";
-
-  if (!email || password !== demoPassword) {
-    throw new Error("Invalid email or password");
+  if (!email.trim()) {
+    throw new Error("Email is required");
   }
 
-  const session: AdminSession = { email };
+  const session: AdminSession = { email: email.trim() };
   setAdminSession(session);
   return session;
 }

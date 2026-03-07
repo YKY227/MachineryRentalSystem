@@ -18,8 +18,21 @@ export default function AdminLoginPage() {
     setSubmitting(true);
 
     try {
+      const res = await fetch("/api/admin/auth/token", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ email, password }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.status === 401) {
+        setError("Invalid credentials. Use ops@example.com / demo1234.");
+        return;
+      }
+      if (!res.ok) throw new Error(data?.error ?? "Login failed");
+
       await loginAdmin(email, password);
-      router.replace("/admin/dashboard");
+      router.replace("/admin");
     } catch (err: any) {
       setError(err?.message ?? "Login failed");
     } finally {
@@ -72,8 +85,7 @@ export default function AdminLoginPage() {
             placeholder="demo1234"
           />
           <p className="mt-1 text-[10px] text-slate-500">
-            Demo password: <code>demo1234</code> (or set{" "}
-            <code>NEXT_PUBLIC_ADMIN_DEMO_PASSWORD</code>).
+            Demo credentials: <code>ops@example.com</code> / <code>demo1234</code>.
           </p>
         </div>
 

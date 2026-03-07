@@ -56,13 +56,9 @@ export default function AdminSettingsPage() {
   const [bccTesterEnabled, setBccTesterEnabled] = useState(false);
   const [testerEmailsCsv, setTesterEmailsCsv] = useState("");
 
-  const adminKey = process.env.NEXT_PUBLIC_ADMIN_API_KEY;
-
   const headers = useMemo(() => {
-    const h: Record<string, string> = { "Content-Type": "application/json" };
-    if (adminKey) h["x-admin-key"] = adminKey;
-    return h;
-  }, [adminKey]);
+    return { "Content-Type": "application/json" };
+  }, []);
 
   async function load() {
     setLoading(true);
@@ -179,14 +175,6 @@ export default function AdminSettingsPage() {
           Configure organisation details and notification routing.
         </p>
       </div>
-
-      {!adminKey && (
-        <div className="rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-sm text-amber-800">
-          Missing{" "}
-          <span className="font-mono">NEXT_PUBLIC_ADMIN_API_KEY</span>. Settings
-          API calls will fail unless you add it.
-        </div>
-      )}
 
       {error && (
         <div className="rounded-md bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-800">

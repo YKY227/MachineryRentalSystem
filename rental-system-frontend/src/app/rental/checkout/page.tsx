@@ -18,6 +18,7 @@ import type { Equipment, EquipmentHold } from "@/lib/rental/types";
 import { localEquipmentRepo } from "@/lib/rental/equipment-repo";
 import { localHoldsRepo } from "@/lib/rental/holds-repo";
 import { computeAvailableUnitsForRange } from "@/lib/rental/availability";
+import type { CreateRentalOrderInput } from "@/lib/rental/orders/types";
 
 type FulfillmentMode = "deliver" | "self_collect";
 
@@ -112,6 +113,19 @@ function readOrders(): LocalRentalOrder[] {
 function writeOrders(items: LocalRentalOrder[]) {
   if (typeof window === "undefined") return;
   localStorage.setItem(ORDERS_LS_KEY, JSON.stringify(items));
+}
+
+async function persistOrderToDb(order: CreateRentalOrderInput) {
+  const res = await fetch("/api/public/rental/orders", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ order }),
+  });
+
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data?.error ?? "Failed to persist order to DB");
+  }
 }
 
 function addDaysISO(dateISO: string, days: number) {
@@ -268,6 +282,22 @@ function CheckoutInner() {
 
     const prev = readOrders();
     writeOrders([order, ...prev]);
+    // TODO: remove localStorage write once all dependent pages are fully DB-backed.
+    // Compatibility mode (Option B): keep local write + persist to DB for admin pages.
+    try {
+      await persistOrderToDb({
+        id: order.id,
+        equipmentId: order.equipmentId,
+        equipmentTitle: order.equipmentTitle,
+        qty: order.qty,
+        start: order.start,
+        end: order.end,
+        fulfillment: order.fulfillment,
+        pricingSnapshot: order.pricingSnapshot,
+      });
+    } catch (e) {
+      console.error("[checkout] DB order persistence failed", e);
+    }
 
     // ✅ Option B: auto-create maintenance hold after rental ends
     // If you added equipment.maintenanceBufferDays, it will be used.

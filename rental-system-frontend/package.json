@@ -7,7 +7,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "check:backend": "node -e \"fetch('http://localhost:3000/api/backend/health').then(r=>{console.log('status',r.status); return r.text()}).then(t=>console.log(t)).catch(e=>{console.error(e); process.exit(1)})\""
+    "check:backend": "node -e \"fetch('http://localhost:3000/api/backend/health').then(r=>{console.log('status',r.status); return r.text()}).then(t=>console.log(t)).catch(e=>{console.error(e); process.exit(1)})\"",
+    "log:migration": "node scripts/append-migration-log.mjs",
+    "doc:log": "node scripts/new-migration-entry.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",

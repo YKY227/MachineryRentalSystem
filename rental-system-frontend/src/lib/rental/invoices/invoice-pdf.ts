@@ -12,6 +12,17 @@ function moneyFromCents(cents: number) {
   }).format(v / 100);
 }
 
+// WinAnsi-safe text for StandardFonts.*
+// (pdf-lib standard fonts can't encode many unicode chars like →, •, –)
+function pdfSafeText(input: unknown) {
+  return String(input ?? "")
+    .replaceAll("→", "->")
+    .replaceAll("–", "-") // en dash
+    .replaceAll("—", "-") // em dash
+    .replaceAll("•", "-") // bullet
+    .replaceAll("\u00A0", " "); // nbsp
+}
+
 function fmtDate(iso?: string) {
   if (!iso) return "—";
   const d = new Date(iso);
@@ -24,14 +35,13 @@ function joinLines(lines?: string[]) {
 }
 
 export async function renderInvoicePdf(inv: Invoice): Promise<Uint8Array> {
-  // Minimal “finance-grade” sanity checks (tighten later)
   if (inv.status !== "issued") throw new Error("Invoice must be issued to generate PDF.");
   if (!inv.invoiceNo) throw new Error("Missing invoiceNo.");
   if (!inv.items?.length) throw new Error("Invoice has no items.");
 
   const pdfDoc = await PDFDocument.create();
-  const page = pdfDoc.addPage([595.28, 841.89]); // A4 portrait points
-  const { width, height } = page.getSize();
+  let page = pdfDoc.addPage([595.28, 841.89]); // A4 portrait points
+  let { width, height } = page.getSize();
 
   const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
   const fontBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
@@ -55,7 +65,7 @@ export async function renderInvoicePdf(inv: Invoice): Promise<Uint8Array> {
   });
 
   // Supplier block (left)
-  page.drawText(inv.supplier?.name ?? "—", {
+  page.drawText(pdfSafeText(inv.supplier?.name ?? "—"), {
     x: margin,
     y: height - 52,
     size: 14,
@@ -63,7 +73,7 @@ export async function renderInvoicePdf(inv: Invoice): Promise<Uint8Array> {
     color: rgb(1, 1, 1),
   });
 
-  page.drawText(joinLines(inv.supplier?.addressLines), {
+  page.drawText(pdfSafeText(joinLines(inv.supplier?.addressLines)), {
     x: margin,
     y: height - 72,
     size: 9,
@@ -75,9 +85,11 @@ export async function renderInvoicePdf(inv: Invoice): Promise<Uint8Array> {
   const gstUen = [
     inv.supplier?.gstRegNo ? `GST Reg No: ${inv.supplier.gstRegNo}` : "GST Reg No: —",
     inv.supplier?.uen ? `UEN: ${inv.supplier.uen}` : "",
-  ].filter(Boolean).join("  •  ");
+  ]
+    .filter(Boolean)
+    .join("  •  ");
 
-  page.drawText(gstUen, {
+  page.drawText(pdfSafeText(gstUen), {
     x: margin,
     y: height - 98,
     size: 9,
@@ -86,7 +98,7 @@ export async function renderInvoicePdf(inv: Invoice): Promise<Uint8Array> {
   });
 
   // Title block (right)
-  page.drawText("TAX INVOICE", {
+  page.drawText(pdfSafeText("TAX INVOICE"), {
     x: width - margin - 120,
     y: height - 48,
     size: 10,
@@ -94,7 +106,7 @@ export async function renderInvoicePdf(inv: Invoice): Promise<Uint8Array> {
     color: rgb(1, 1, 1),
   });
 
-  page.drawText(inv.invoiceNo, {
+  page.drawText(pdfSafeText(inv.invoiceNo), {
     x: width - margin - 180,
     y: height - 74,
     size: 18,
@@ -109,8 +121,15 @@ export async function renderInvoicePdf(inv: Invoice): Promise<Uint8Array> {
   const boxH = 120;
 
   // Bill To
-  page.drawRectangle({ x: margin, y: y - boxH, width: boxW, height: boxH, borderColor: lightGray, borderWidth: 1 });
-  page.drawText("BILL TO", { x: margin + 12, y: y - 20, size: 9, font: fontBold, color: gray });
+  page.drawRectangle({
+    x: margin,
+    y: y - boxH,
+    width: boxW,
+    height: boxH,
+    borderColor: lightGray,
+    borderWidth: 1,
+  });
+  page.drawText(pdfSafeText("BILL TO"), { x: margin + 12, y: y - 20, size: 9, font: fontBold, color: gray });
 
   const billLines = [
     inv.billTo?.name ?? "—",
@@ -119,7 +138,7 @@ export async function renderInvoicePdf(inv: Invoice): Promise<Uint8Array> {
     inv.billTo?.email ? `Email: ${inv.billTo.email}` : "",
   ].filter(Boolean);
 
-  page.drawText(billLines.join("\n"), {
+  page.drawText(pdfSafeText(billLines.join("\n")), {
     x: margin + 12,
     y: y - 38,
     size: 10,
@@ -131,8 +150,16 @@ export async function renderInvoicePdf(inv: Invoice): Promise<Uint8Array> {
 
   // Meta
   const metaX = margin + boxW + 16;
-  page.drawRectangle({ x: metaX, y: y - boxH, width: boxW, height: boxH, color: rgb(0.98, 0.98, 0.99), borderColor: lightGray, borderWidth: 1 });
-  page.drawText("INVOICE META", { x: metaX + 12, y: y - 20, size: 9, font: fontBold, color: gray });
+  page.drawRectangle({
+    x: metaX,
+    y: y - boxH,
+    width: boxW,
+    height: boxH,
+    color: rgb(0.98, 0.98, 0.99),
+    borderColor: lightGray,
+    borderWidth: 1,
+  });
+  page.drawText(pdfSafeText("INVOICE META"), { x: metaX + 12, y: y - 20, size: 9, font: fontBold, color: gray });
 
   const metaRows: Array<[string, string]> = [
     ["Invoice No", inv.invoiceNo ?? "—"],
@@ -143,38 +170,35 @@ export async function renderInvoicePdf(inv: Invoice): Promise<Uint8Array> {
 
   let my = y - 38;
   for (const [k, v] of metaRows) {
-    page.drawText(k, { x: metaX + 12, y: my, size: 10, font, color: gray });
-    page.drawText(v, { x: metaX + 120, y: my, size: 10, font: fontBold, color: slate });
+    page.drawText(pdfSafeText(k), { x: metaX + 12, y: my, size: 10, font, color: gray });
+    page.drawText(pdfSafeText(v), { x: metaX + 120, y: my, size: 10, font: fontBold, color: slate });
     my -= 16;
   }
 
   y = y - boxH - 24;
 
-  // Items table
-  page.drawText("DESCRIPTION", { x: margin, y, size: 9, font: fontBold, color: gray });
-  page.drawText("QTY", { x: width - margin - 210, y, size: 9, font: fontBold, color: gray });
-  page.drawText("UNIT (EXCL GST)", { x: width - margin - 150, y, size: 9, font: fontBold, color: gray });
-  page.drawText("AMOUNT (EXCL GST)", { x: width - margin - 60, y, size: 9, font: fontBold, color: gray });
+  // Items table header
+  page.drawText(pdfSafeText("DESCRIPTION"), { x: margin, y, size: 9, font: fontBold, color: gray });
+  page.drawText(pdfSafeText("QTY"), { x: width - margin - 210, y, size: 9, font: fontBold, color: gray });
+  page.drawText(pdfSafeText("UNIT (EXCL GST)"), { x: width - margin - 150, y, size: 9, font: fontBold, color: gray });
+  page.drawText(pdfSafeText("AMOUNT (EXCL GST)"), { x: width - margin - 60, y, size: 9, font: fontBold, color: gray });
 
   y -= 10;
   page.drawLine({ start: { x: margin, y }, end: { x: width - margin, y }, thickness: 1, color: lightGray });
   y -= 14;
 
   for (const it of inv.items) {
-    // Basic page-break (simple)
+    // Basic page-break
     if (y < 180) {
-      // add a new page if needed (later we can implement repeating header)
-      const p2 = pdfDoc.addPage([595.28, 841.89]);
-      y = p2.getSize().height - margin;
-      // In v1: keep it simple, draw continued text
-      p2.drawText("Items (continued)", { x: margin, y, size: 11, font: fontBold, color: slate });
+      page = pdfDoc.addPage([595.28, 841.89]);
+      ({ width, height } = page.getSize());
+      y = height - margin;
+
+      page.drawText(pdfSafeText("Items (continued)"), { x: margin, y, size: 11, font: fontBold, color: slate });
       y -= 20;
-      // Switch page reference
-      // eslint-disable-next-line no-param-reassign
-      (page as any) = p2;
     }
 
-    page.drawText(it.description ?? "—", {
+    page.drawText(pdfSafeText(it.description ?? "—"), {
       x: margin,
       y,
       size: 10,
@@ -183,7 +207,7 @@ export async function renderInvoicePdf(inv: Invoice): Promise<Uint8Array> {
       maxWidth: width - margin * 2 - 240,
     });
 
-    page.drawText(String(it.qty ?? 0), {
+    page.drawText(pdfSafeText(String(it.qty ?? 0)), {
       x: width - margin - 210,
       y,
       size: 10,
@@ -191,7 +215,7 @@ export async function renderInvoicePdf(inv: Invoice): Promise<Uint8Array> {
       color: slate,
     });
 
-    page.drawText(moneyFromCents(it.unitPriceExclGstCents ?? 0), {
+    page.drawText(pdfSafeText(moneyFromCents(it.unitPriceExclGstCents ?? 0)), {
       x: width - margin - 150,
       y,
       size: 10,
@@ -199,7 +223,7 @@ export async function renderInvoicePdf(inv: Invoice): Promise<Uint8Array> {
       color: slate,
     });
 
-    page.drawText(moneyFromCents(it.amountExclGstCents ?? 0), {
+    page.drawText(pdfSafeText(moneyFromCents(it.amountExclGstCents ?? 0)), {
       x: width - margin - 60,
       y,
       size: 10,
@@ -224,15 +248,14 @@ export async function renderInvoicePdf(inv: Invoice): Promise<Uint8Array> {
   ];
 
   for (const [label, value, bold] of rows) {
-    page.drawText(label, { x: totalsX, y, size: 10, font, color: gray });
-    page.drawText(value, { x: totalsX + 150, y, size: 10, font: bold ? fontBold : font, color: slate });
+    page.drawText(pdfSafeText(label), { x: totalsX, y, size: 10, font, color: gray });
+    page.drawText(pdfSafeText(value), { x: totalsX + 150, y, size: 10, font: bold ? fontBold : font, color: slate });
     y -= 16;
   }
 
-  // Deposit note (optional)
   if (typeof inv.depositCents === "number" && inv.depositCents > 0) {
     y -= 6;
-    page.drawText(`Security Deposit (Refundable): ${moneyFromCents(inv.depositCents)}`, {
+    page.drawText(pdfSafeText(`Security Deposit (Refundable): ${moneyFromCents(inv.depositCents)}`), {
       x: totalsX,
       y,
       size: 9,
@@ -242,14 +265,30 @@ export async function renderInvoicePdf(inv: Invoice): Promise<Uint8Array> {
     y -= 16;
   }
 
-  // Footer notes
+  // Footer notes (keep WinAnsi-safe)
   const footerY = 72;
-  page.drawLine({ start: { x: margin, y: footerY + 42 }, end: { x: width - margin, y: footerY + 42 }, thickness: 1, color: lightGray });
-  page.drawText("Notes:", { x: margin, y: footerY + 26, size: 9, font: fontBold, color: gray });
-  page.drawText(
-    "• Payment due within the agreed terms.\n• Please quote the invoice number as the payment reference.\n• This is a computer-generated tax invoice.",
-    { x: margin, y: footerY + 12, size: 9, font, color: gray, lineHeight: 12 }
-  );
+  page.drawLine({
+    start: { x: margin, y: footerY + 42 },
+    end: { x: width - margin, y: footerY + 42 },
+    thickness: 1,
+    color: lightGray,
+  });
+  page.drawText(pdfSafeText("Notes:"), { x: margin, y: footerY + 26, size: 9, font: fontBold, color: gray });
+
+  const notes = [
+    "- Payment due within the agreed terms.",
+    "- Please quote the invoice number as the payment reference.",
+    "- This is a computer-generated tax invoice.",
+  ].join("\n");
+
+  page.drawText(pdfSafeText(notes), {
+    x: margin,
+    y: footerY + 12,
+    size: 9,
+    font,
+    color: gray,
+    lineHeight: 12,
+  });
 
   return await pdfDoc.save();
 }
