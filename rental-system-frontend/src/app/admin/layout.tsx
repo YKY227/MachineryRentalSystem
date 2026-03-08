@@ -14,6 +14,7 @@ type AdminLayoutProps = {
 const navItems = [
   { label: "Calendar", href: "/admin/rental/calendar" },
   { label: "Orders", href: "/admin/rental/orders" },
+  { label: "Customers", href: "/admin/rental/customers" },
   { label: "Invoices", href: "/admin/rental/invoices"},
   { label: "Rental Inventory", href: "/admin/rental" }, // existing inventory list
   { label: "Import Equipment", href: "/admin/rental/equipment/import" }, 

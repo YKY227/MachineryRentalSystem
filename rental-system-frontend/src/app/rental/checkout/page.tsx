@@ -3,11 +3,10 @@
 
 import { Suspense, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import {
   ArrowRight,
   CalendarDays,
-  CheckCircle2,
   Package,
   Shield,
   Truck,
@@ -18,7 +17,8 @@ import type { Equipment, EquipmentHold } from "@/lib/rental/types";
 import { localEquipmentRepo } from "@/lib/rental/equipment-repo";
 import { localHoldsRepo } from "@/lib/rental/holds-repo";
 import { computeAvailableUnitsForRange } from "@/lib/rental/availability";
-import type { CreateRentalOrderInput } from "@/lib/rental/orders/types";
+import { calculateRentalCharges } from "@/lib/rental/orders/pricing";
+import type { CreateRentalOrderInput, RentalCustomer } from "@/lib/rental/orders/types";
 
 type FulfillmentMode = "deliver" | "self_collect";
 
@@ -77,68 +77,6 @@ function newPublicId() {
   return `RNT-${dd}${mm}${yy}-${rand}`;
 }
 
-type LocalRentalOrder = {
-  id: string; // publicId
-  equipmentId: string;
-  equipmentTitle: string;
-  qty: number;
-  start: string;
-  end: string;
-  fulfillment: FulfillmentMode;
-  pricingSnapshot: {
-    days: number;
-    rentalSubtotal: number;
-    deliveryFee: number;
-    collectionFee: number;
-    deposit: number;
-    total: number;
-  };
-  createdAt: string;
-};
-
-const ORDERS_LS_KEY = "cms_rental_orders_v1";
-
-function readOrders(): LocalRentalOrder[] {
-  if (typeof window === "undefined") return [];
-  try {
-    const raw = localStorage.getItem(ORDERS_LS_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? (parsed as LocalRentalOrder[]) : [];
-  } catch {
-    return [];
-  }
-}
-
-function writeOrders(items: LocalRentalOrder[]) {
-  if (typeof window === "undefined") return;
-  localStorage.setItem(ORDERS_LS_KEY, JSON.stringify(items));
-}
-
-async function persistOrderToDb(order: CreateRentalOrderInput) {
-  const res = await fetch("/api/public/rental/orders", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ order }),
-  });
-
-  if (!res.ok) {
-    const data = await res.json().catch(() => ({}));
-    throw new Error(data?.error ?? "Failed to persist order to DB");
-  }
-}
-
-function addDaysISO(dateISO: string, days: number) {
-  const d = new Date(dateISO + "T00:00:00");
-  if (Number.isNaN(d.getTime())) return dateISO;
-  d.setDate(d.getDate() + days);
-  return d.toISOString().slice(0, 10);
-}
-
-function nextDayISO(dateISO: string) {
-  return addDaysISO(dateISO, 1);
-}
-
 /**
  * ✅ This outer component exists ONLY to satisfy Next's requirement:
  * useSearchParams() must be under a Suspense boundary.
@@ -160,7 +98,6 @@ export default function RentalCheckoutPage() {
 }
 
 function CheckoutInner() {
-  const router = useRouter();
   const searchParams = useSearchParams();
 
   // ✅ null-safe
@@ -178,7 +115,13 @@ function CheckoutInner() {
   const [equipment, setEquipment] = useState<Equipment | null>(null);
 
   const [confirming, setConfirming] = useState(false);
-  const [confirmedId, setConfirmedId] = useState<string | null>(null);
+  const [checkoutError, setCheckoutError] = useState<string | null>(null);
+  const [checkoutOrderId] = useState(() => newPublicId());
+  const [companyName, setCompanyName] = useState("");
+  const [contactName, setContactName] = useState("");
+  const [contactEmail, setContactEmail] = useState("");
+  const [contactPhone, setContactPhone] = useState("");
+  const [authCustomer, setAuthCustomer] = useState<RentalCustomer | null>(null);
 
   // MVP fixed fees
   const deliveryFee = fulfillment === "deliver" ? 60 : 0;
@@ -214,6 +157,32 @@ function CheckoutInner() {
     };
   }, [equipmentId]);
 
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const res = await fetch("/api/public/rental/auth/me", {
+          cache: "no-store",
+          credentials: "include",
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!mounted || !res.ok) return;
+        const customer = (data?.customer ?? null) as RentalCustomer | null;
+        setAuthCustomer(customer);
+        if (!customer) return;
+        setCompanyName(customer.companyName ?? "");
+        setContactName(customer.contactName ?? "");
+        setContactEmail(customer.email ?? "");
+        setContactPhone(customer.phone ?? "");
+      } catch {
+        if (mounted) setAuthCustomer(null);
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
   const days = useMemo(() => {
     if (!start || !end) return 0;
     return daysInclusive(start, end);
@@ -227,17 +196,23 @@ function CheckoutInner() {
     return calcRentalSubtotal(equipment, days, qty);
   }, [equipment, days, qty]);
 
-  const total = useMemo(() => {
-    return rentalSubtotal + deliveryFee + collectionFee + deposit;
-  }, [rentalSubtotal, deliveryFee, collectionFee, deposit]);
+  const pricing = useMemo(
+    () =>
+      calculateRentalCharges({
+        rentalSubtotal,
+        deliveryFee,
+        collectionFee,
+        deposit,
+      }),
+    [rentalSubtotal, deliveryFee, collectionFee, deposit]
+  );
 
   // ✅ availability (orders + holds)
   const availability = useMemo(() => {
     if (!equipment || !start || !end) return null;
-    const orders = readOrders();
     return computeAvailableUnitsForRange({
       equipment,
-      orders,
+      orders: [],
       holds: activeHolds,
       start,
       end,
@@ -248,21 +223,24 @@ function CheckoutInner() {
 
   const valid =
     !!equipment &&
+    !!authCustomer &&
+    authCustomer.accountStatus === "active" &&
     qty >= 1 &&
     qty <= availableUnits &&
     days > 0 &&
-    days >= minDays;
+    days >= minDays &&
+    !!companyName.trim() &&
+    !!contactName.trim() &&
+    !!contactEmail.trim();
 
   async function confirmBooking() {
     if (!equipment || !valid) return;
 
     setConfirming(true);
-    await new Promise((r) => setTimeout(r, 250));
+    setCheckoutError(null);
 
-    const id = newPublicId();
-
-    const order: LocalRentalOrder = {
-      id,
+    const order: CreateRentalOrderInput = {
+      id: checkoutOrderId,
       equipmentId: equipment.id,
       equipmentTitle: equipment.title,
       qty,
@@ -275,56 +253,39 @@ function CheckoutInner() {
         deliveryFee,
         collectionFee,
         deposit,
-        total,
+        gstAmount: pricing.gstAmount,
+        payableTotal: pricing.payableTotal,
+        total: pricing.displayTotal,
       },
-      createdAt: new Date().toISOString(),
+      customerSnapshot: {
+        companyName: companyName.trim(),
+        contactName: contactName.trim(),
+        email: contactEmail.trim(),
+        phone: contactPhone.trim() || undefined,
+        customerId: authCustomer?.id,
+        paymentTerms: authCustomer?.paymentTerms,
+        vettingStatus: authCustomer?.vettingStatus,
+        accountStatus: authCustomer?.accountStatus,
+      },
+      customerId: authCustomer?.id,
     };
 
-    const prev = readOrders();
-    writeOrders([order, ...prev]);
-    // TODO: remove localStorage write once all dependent pages are fully DB-backed.
-    // Compatibility mode (Option B): keep local write + persist to DB for admin pages.
     try {
-      await persistOrderToDb({
-        id: order.id,
-        equipmentId: order.equipmentId,
-        equipmentTitle: order.equipmentTitle,
-        qty: order.qty,
-        start: order.start,
-        end: order.end,
-        fulfillment: order.fulfillment,
-        pricingSnapshot: order.pricingSnapshot,
+      const res = await fetch("/api/public/rental/checkout/start-payment", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ order }),
       });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error ?? "Failed to start payment");
+
+      const redirectUrl = String(data?.redirectUrl ?? "");
+      if (!redirectUrl) throw new Error("Missing hosted payment URL");
+      window.location.href = redirectUrl;
     } catch (e) {
-      console.error("[checkout] DB order persistence failed", e);
+      setCheckoutError(e instanceof Error ? e.message : "Failed to start payment");
+      setConfirming(false);
     }
-
-    // ✅ Option B: auto-create maintenance hold after rental ends
-    // If you added equipment.maintenanceBufferDays, it will be used.
-    // Otherwise defaults to 7 days.
-    const bufferDays = (equipment as any).maintenanceBufferDays ?? 7;
-
-    // hold starts the day AFTER rental end
-    const holdStart = nextDayISO(end);
-    // inclusive hold end (7 days buffer => holdStart..holdStart+6)
-    const holdEnd = addDaysISO(holdStart, Math.max(0, bufferDays - 1));
-
-    await localHoldsRepo.create({
-      equipmentId: equipment.id,
-      qty,
-      type: "maintenance",
-      status: "active",
-      startDate: holdStart,
-      endDate: holdEnd,
-      notes: `Auto maintenance buffer after order ${id} (${bufferDays} day(s))`,
-    });
-
-    // refresh holds state so availability updates immediately in the app session
-    const holdsNow = await localHoldsRepo.listActive();
-    setActiveHolds(holdsNow);
-
-    setConfirmedId(id);
-    setConfirming(false);
   }
 
   if (loading) {
@@ -358,89 +319,6 @@ function CheckoutInner() {
     );
   }
 
-  // Success state
-  if (confirmedId) {
-    return (
-      <div className="mx-auto max-w-4xl p-4">
-        <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-6">
-          <div className="flex items-start gap-3">
-            <CheckCircle2 className="mt-0.5 h-6 w-6 text-emerald-700" />
-            <div className="flex-1">
-              <h1 className="text-xl font-semibold text-emerald-900">
-                Booking confirmed
-              </h1>
-              <p className="mt-1 text-sm text-emerald-800">
-                Your rental request has been recorded (MVP). Payment integration will be added later.
-              </p>
-
-              <div className="mt-3 rounded-xl bg-white/70 p-4">
-                <div className="text-xs uppercase tracking-wide text-emerald-700">
-                  Rental Reference
-                </div>
-                <div className="mt-1 text-2xl font-semibold text-emerald-900">
-                  {confirmedId}
-                </div>
-
-                <div className="mt-4 grid gap-2 text-sm text-slate-700 sm:grid-cols-2">
-                  <div>
-                    <div className="text-xs text-slate-500">Item</div>
-                    <div className="font-medium text-slate-900">{equipment.title}</div>
-                  </div>
-                  <div>
-                    <div className="text-xs text-slate-500">Quantity</div>
-                    <div className="font-medium text-slate-900">{qty}</div>
-                  </div>
-                  <div>
-                    <div className="text-xs text-slate-500">Rental period</div>
-                    <div className="font-medium text-slate-900">
-                      {start} → {end} ({days} day(s))
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-xs text-slate-500">Fulfillment</div>
-                    <div className="font-medium text-slate-900">
-                      {fulfillment === "deliver" ? "Deliver & collect" : "Self-collect"}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="mt-4 border-t border-slate-200 pt-4 text-sm">
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-600">Total</span>
-                    <span className="font-semibold text-slate-900">
-                      {formatMoney(total)}
-                    </span>
-                  </div>
-                  <p className="mt-2 text-xs text-slate-500">
-                    Note: This is a frontend-only confirmation. Later we’ll send this to backend and enable payment.
-                  </p>
-                </div>
-              </div>
-
-              <div className="mt-5 flex flex-col gap-3 sm:flex-row">
-                <Link
-                  href="/rental"
-                  className="inline-flex items-center justify-center rounded-xl bg-slate-900 px-5 py-3 text-sm font-semibold text-white hover:bg-slate-800"
-                >
-                  Browse more equipment
-                  <ArrowRight className="ml-2 h-4 w-4" />
-                </Link>
-
-                <button
-                  type="button"
-                  onClick={() => router.push("/(public-pages)")}
-                  className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-900 hover:bg-slate-50"
-                >
-                  Back to home
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   const heroImg = equipment.images?.[0] ?? "";
 
   return (
@@ -452,7 +330,7 @@ function CheckoutInner() {
           </p>
           <h1 className="mt-1 text-2xl font-semibold text-slate-900">Checkout</h1>
           <p className="mt-1 text-sm text-slate-600">
-            Review your rental details and confirm (payment placeholder for now).
+            Review your rental details before continuing to secure payment for the invoice amount.
           </p>
         </div>
 
@@ -564,9 +442,105 @@ function CheckoutInner() {
 
         <div className="lg:col-span-5">
           <div className="sticky top-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <h2 className="text-sm font-semibold text-slate-900">Customer details</h2>
+            <p className="mt-1 text-xs text-slate-500">
+              {authCustomer
+                ? "This booking will be linked to your signed-in customer account."
+                : "Customer login is required before booking. Vetting and payment terms are read from your account."}
+            </p>
+
+            <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
+              {authCustomer ? (
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    Signed in as <span className="font-semibold text-slate-800">{authCustomer.email}</span>
+                    <div className="mt-1">
+                      Terms: <span className="font-medium text-slate-700">{authCustomer.paymentTerms.toUpperCase()}</span>
+                      {" · "}
+                      Vetting: <span className="font-medium text-slate-700">{authCustomer.vettingStatus.replace("_", " ").toUpperCase()}</span>
+                    </div>
+                  </div>
+                  <Link
+                    href="/rental/account/login?next=%2Frental%2Fcheckout"
+                    className="font-medium text-sky-700 hover:text-sky-800"
+                  >
+                    Switch account
+                  </Link>
+                </div>
+              ) : (
+                <div className="flex flex-wrap items-center gap-3">
+                  <span>Sign in or register to continue with booking.</span>
+                  <Link
+                    href="/rental/account/login?next=%2Frental%2Fcheckout"
+                    className="font-medium text-sky-700 hover:text-sky-800"
+                  >
+                    Sign in
+                  </Link>
+                  <Link
+                    href="/rental/account/register?next=%2Frental%2Fcheckout"
+                    className="font-medium text-sky-700 hover:text-sky-800"
+                  >
+                    Register
+                  </Link>
+                </div>
+              )}
+            </div>
+
+            <div className="mt-4 grid gap-3">
+              <label className="grid gap-1 text-sm">
+                <span className="text-slate-700">Company name</span>
+                <input
+                  type="text"
+                  value={companyName}
+                  onChange={(e) => setCompanyName(e.target.value)}
+                  disabled={!!authCustomer}
+                  className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 outline-none placeholder:text-slate-400 focus:border-sky-400"
+                  placeholder="e.g. ACME Cleanroom Services"
+                />
+              </label>
+
+              <label className="grid gap-1 text-sm">
+                <span className="text-slate-700">Contact name</span>
+                <input
+                  type="text"
+                  value={contactName}
+                  onChange={(e) => setContactName(e.target.value)}
+                  disabled={!!authCustomer}
+                  className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 outline-none placeholder:text-slate-400 focus:border-sky-400"
+                  placeholder="e.g. Lim Wei Ming"
+                />
+              </label>
+
+              <label className="grid gap-1 text-sm">
+                <span className="text-slate-700">Contact email</span>
+                <input
+                  type="email"
+                  value={contactEmail}
+                  onChange={(e) => setContactEmail(e.target.value)}
+                  disabled={!!authCustomer}
+                  className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 outline-none placeholder:text-slate-400 focus:border-sky-400"
+                  placeholder="e.g. billing@company.com"
+                  autoComplete="email"
+                />
+              </label>
+
+              <label className="grid gap-1 text-sm">
+                <span className="text-slate-700">Contact phone</span>
+                <input
+                  type="tel"
+                  value={contactPhone}
+                  onChange={(e) => setContactPhone(e.target.value)}
+                  disabled={!!authCustomer}
+                  className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 outline-none placeholder:text-slate-400 focus:border-sky-400"
+                  placeholder="Optional"
+                />
+              </label>
+            </div>
+
+            <div className="mt-6 border-t border-slate-200 pt-5">
             <h2 className="text-sm font-semibold text-slate-900">Price breakdown</h2>
             <p className="mt-1 text-xs text-slate-500">
-              MVP estimate — backend pricing engine will replace this later.
+              GST is included in the payable amount below. Deposit is tracked separately and not collected online in this phase.
             </p>
 
             <div className="mt-4 space-y-2 text-sm">
@@ -588,23 +562,41 @@ function CheckoutInner() {
               </div>
 
               <div className="flex items-center justify-between">
+                <span className="text-slate-600">GST</span>
+                <span className="text-slate-900">{formatMoney(pricing.gstAmount)}</span>
+              </div>
+
+              <div className="flex items-center justify-between">
                 <span className="text-slate-600">Deposit</span>
-                <span className="text-slate-900">{formatMoney(deposit)}</span>
+                <span className="text-slate-900">{formatMoney(deposit)} (not charged online)</span>
               </div>
 
               <div className="mt-3 border-t border-slate-200 pt-3">
                 <div className="flex items-center justify-between">
-                  <span className="font-semibold text-slate-700">Total</span>
+                  <span className="font-semibold text-slate-700">Payable now</span>
                   <span className="text-lg font-semibold text-slate-900">
-                    {formatMoney(total)}
+                    {formatMoney(pricing.payableTotal)}
                   </span>
+                </div>
+                <div className="mt-1 text-xs text-slate-500">
+                  Deposit remains recorded separately for future collection and refund handling.
                 </div>
               </div>
             </div>
 
             {!valid && (
               <div className="mt-4 rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs text-rose-700">
-                Invalid checkout parameters or insufficient availability. Please go back and reselect your dates/quantity.
+                {!authCustomer
+                  ? "Sign in or register to continue with booking."
+                  : authCustomer.accountStatus !== "active"
+                    ? "This customer account is suspended."
+                    : "Invalid checkout parameters or insufficient availability. Please go back and reselect your dates/quantity."}
+              </div>
+            )}
+
+            {checkoutError && (
+              <div className="mt-4 rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs text-rose-700">
+                {checkoutError}
               </div>
             )}
 
@@ -619,12 +611,13 @@ function CheckoutInner() {
                   : "cursor-not-allowed bg-slate-200 text-slate-500",
               ].join(" ")}
             >
-              {confirming ? "Confirming…" : "Confirm booking (MVP)"}
+              {confirming ? "Processing..." : "Continue checkout"}
               <ArrowRight className="ml-2 h-4 w-4" />
             </button>
 
             <div className="mt-3 text-xs text-slate-500">
-              Payment not implemented yet — confirmation stored locally for prototype.
+              Orders are created server-side first. Upfront customers are redirected to hosted PayNow payment. Pre-vetted credit customers are invoiced directly.
+            </div>
             </div>
           </div>
         </div>

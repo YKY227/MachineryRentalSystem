@@ -10,6 +10,7 @@ const ORDERS_TABLE = process.env.SUPABASE_RENTAL_ORDERS_TABLE ?? "rental_orders"
 
 type RentalOrderRow = {
   id: string;
+  customer_id: string | null;
   equipment_id: string;
   equipment_title: string;
   qty: number;
@@ -17,12 +18,14 @@ type RentalOrderRow = {
   end_date: string;
   fulfillment: "deliver" | "self_collect";
   pricing_snapshot: RentalOrder["pricingSnapshot"] | null;
+  customer_snapshot: RentalOrder["customerSnapshot"] | null;
   created_at: string;
   updated_at: string;
 };
 
 const ORDER_COLUMNS = [
   "id",
+  "customer_id",
   "equipment_id",
   "equipment_title",
   "qty",
@@ -30,6 +33,7 @@ const ORDER_COLUMNS = [
   "end_date",
   "fulfillment",
   "pricing_snapshot",
+  "customer_snapshot",
   "created_at",
   "updated_at",
 ].join(",");
@@ -41,6 +45,7 @@ function nowIso() {
 function toOrder(row: RentalOrderRow): RentalOrder {
   return {
     id: row.id,
+    customerId: row.customer_id ?? undefined,
     equipmentId: row.equipment_id,
     equipmentTitle: row.equipment_title,
     qty: row.qty,
@@ -53,8 +58,11 @@ function toOrder(row: RentalOrderRow): RentalOrder {
       deliveryFee: 0,
       collectionFee: 0,
       deposit: 0,
+      gstAmount: 0,
+      payableTotal: 0,
       total: 0,
     },
+    customerSnapshot: row.customer_snapshot ?? undefined,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -64,6 +72,7 @@ function toInsert(input: CreateRentalOrderInput) {
   const now = nowIso();
   return {
     id: input.id,
+    customer_id: input.customerId ?? input.customerSnapshot.customerId ?? null,
     equipment_id: input.equipmentId,
     equipment_title: input.equipmentTitle,
     qty: Math.max(1, Math.floor(Number(input.qty) || 1)),
@@ -71,6 +80,7 @@ function toInsert(input: CreateRentalOrderInput) {
     end_date: input.end,
     fulfillment: input.fulfillment,
     pricing_snapshot: input.pricingSnapshot,
+    customer_snapshot: input.customerSnapshot,
     created_at: now,
     updated_at: now,
   };

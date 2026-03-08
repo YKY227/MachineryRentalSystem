@@ -10,6 +10,7 @@ import type {
   InvoiceStatus,
   InvoiceSupplierSnapshot,
 } from "@/lib/rental/invoices/types";
+import { calculateRentalCharges, RENTAL_GST_RATE } from "@/lib/rental/orders/pricing";
 import { supabaseAdmin } from "@/lib/supabase/server";
 
 const INVOICE_TABLE = process.env.SUPABASE_INVOICES_TABLE ?? "rental_invoices";
@@ -27,6 +28,8 @@ export type DraftFromOrderInput = {
     deliveryFee: number;
     collectionFee: number;
     deposit: number;
+    gstAmount?: number;
+    payableTotal?: number;
     total: number;
   };
 };
@@ -529,16 +532,12 @@ export const dbInvoiceRepo = {
     const existing = await dbInvoiceRepo.findActiveByOrderId(order.orderId);
     if (existing) return existing;
 
-    const charges =
-      (order.pricingSnapshot?.rentalSubtotal ?? 0) +
-      (order.pricingSnapshot?.deliveryFee ?? 0) +
-      (order.pricingSnapshot?.collectionFee ?? 0);
-
-    const chargesCents = clampCents(charges * 100);
-    const depositCents = clampCents((order.pricingSnapshot?.deposit ?? 0) * 100);
-    const gstRate = 0.09;
-    const gstAmountCents = roundToInt(chargesCents * gstRate);
-    const totalInclGstCents = chargesCents + gstAmountCents;
+    const pricing = calculateRentalCharges(order.pricingSnapshot);
+    const chargesCents = clampCents(pricing.chargesExclGst * 100);
+    const depositCents = clampCents(pricing.deposit * 100);
+    const gstRate = RENTAL_GST_RATE;
+    const gstAmountCents = clampCents(pricing.gstAmount * 100);
+    const totalInclGstCents = clampCents(pricing.payableTotal * 100);
     const createdAt = nowIso();
 
     const qty = Math.max(1, Number(order.qty) || 1);

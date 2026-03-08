@@ -79,6 +79,11 @@ function seedDemoOrders(items: Equipment[]): CreateRentalOrderInput[] {
         deposit,
         total,
       },
+      customerSnapshot: {
+        companyName: `Demo Customer ${i}`,
+        contactName: `Demo Contact ${i}`,
+        email: `demo${i}@example.com`,
+      },
     };
   };
 

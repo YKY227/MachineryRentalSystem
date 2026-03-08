@@ -5,6 +5,10 @@ import type {
   InvoicePaymentTotals,
   InvoiceStatus,
 } from "@/lib/rental/invoices/types";
+import {
+  dbPaymentAllocationRepo,
+  type RentalPaymentAllocation,
+} from "@/lib/rental/payments/db-payment-allocation-repo";
 import { supabaseAdmin } from "@/lib/supabase/server";
 
 const INVOICE_TABLE = process.env.SUPABASE_INVOICES_TABLE ?? "rental_invoices";
@@ -19,6 +23,7 @@ type PaymentRow = {
   method: string | null;
   reference: string | null;
   notes: string | null;
+  source_payment_session_id?: string | null;
   created_at: string;
 };
 
@@ -122,6 +127,19 @@ export const dbPaymentRepo = {
 
     if (error) throw new Error(`Invoice payments read failed: ${error.message}`);
     return ((data ?? []) as PaymentRow[]).map(toPayment);
+  },
+
+  async findBySourcePaymentSessionId(sourcePaymentSessionId: string): Promise<InvoicePayment | null> {
+    const supabase = supabaseAdmin();
+    const { data, error } = await supabase
+      .from(INVOICE_PAYMENTS_TABLE)
+      .select("id,invoice_id,amount_cents,paid_at,method,reference,notes,source_payment_session_id,created_at")
+      .eq("source_payment_session_id", sourcePaymentSessionId)
+      .limit(1)
+      .maybeSingle<PaymentRow>();
+
+    if (error) throw new Error(`Invoice payment lookup failed: ${error.message}`);
+    return data ? toPayment(data) : null;
   },
 
   async getTotals(invoiceId: string): Promise<InvoicePaymentTotals> {
@@ -247,6 +265,96 @@ export const dbPaymentRepo = {
     return {
       payments,
       totals: toTotalsFromRpc(rpcRow),
+    };
+  },
+
+  async recordPaymentForCheckoutSession(input: {
+    invoiceId: string;
+    sourcePaymentSessionId: string;
+    amountCents: number;
+    paidAt?: string;
+    method?: string;
+    reference?: string;
+    notes?: string;
+  }): Promise<{
+    payment: InvoicePayment;
+    payments: InvoicePayment[];
+    totals: InvoicePaymentTotals;
+    allocation: RentalPaymentAllocation;
+  }> {
+    const existing = await dbPaymentRepo.findBySourcePaymentSessionId(input.sourcePaymentSessionId);
+    if (existing) {
+      const result = await dbPaymentRepo.listWithTotals(input.invoiceId);
+      const allocation = await dbPaymentAllocationRepo.ensureCheckoutSessionInvoiceAllocation({
+        sourceId: input.sourcePaymentSessionId,
+        targetId: input.invoiceId,
+        amountCents: existing.amountCents,
+      });
+      return {
+        payment: existing,
+        payments: result.payments,
+        totals: result.totals,
+        allocation,
+      };
+    }
+
+    const invoice = await readInvoiceForPayments(input.invoiceId);
+    if (invoice.status !== "issued") {
+      throw new Error("Invoice must be issued before recording checkout payment");
+    }
+
+    const result = await dbPaymentRepo.listWithTotals(input.invoiceId);
+    const amountCents = Math.round(Number(input.amountCents));
+    if (!Number.isFinite(amountCents) || amountCents <= 0) {
+      throw new Error("amountCents must be greater than 0");
+    }
+    if (amountCents > result.totals.balanceCents) {
+      throw new Error("Checkout payment exceeds invoice outstanding balance");
+    }
+
+    const supabase = supabaseAdmin();
+    const { data, error } = await supabase
+      .from(INVOICE_PAYMENTS_TABLE)
+      .insert({
+        invoice_id: input.invoiceId,
+        amount_cents: amountCents,
+        paid_at: input.paidAt ?? new Date().toISOString(),
+        method: input.method ?? null,
+        reference: input.reference ?? null,
+        notes: input.notes ?? null,
+        source_payment_session_id: input.sourcePaymentSessionId,
+      })
+      .select("id,invoice_id,amount_cents,paid_at,method,reference,notes,source_payment_session_id,created_at")
+      .single<PaymentRow>();
+
+    if (error) {
+      if ((error as { code?: string }).code === "23505") {
+        const duplicate = await dbPaymentRepo.findBySourcePaymentSessionId(input.sourcePaymentSessionId);
+        if (duplicate) {
+          const allocation = await dbPaymentAllocationRepo.ensureCheckoutSessionInvoiceAllocation({
+            sourceId: input.sourcePaymentSessionId,
+            targetId: input.invoiceId,
+            amountCents: duplicate.amountCents,
+          });
+          const next = await dbPaymentRepo.listWithTotals(input.invoiceId);
+          return { payment: duplicate, payments: next.payments, totals: next.totals, allocation };
+        }
+      }
+      throw new Error(`Checkout invoice payment insert failed: ${error.message}`);
+    }
+
+    const payment = toPayment(data);
+    const allocation = await dbPaymentAllocationRepo.ensureCheckoutSessionInvoiceAllocation({
+      sourceId: input.sourcePaymentSessionId,
+      targetId: input.invoiceId,
+      amountCents: payment.amountCents,
+    });
+    const next = await dbPaymentRepo.listWithTotals(input.invoiceId);
+    return {
+      payment,
+      payments: next.payments,
+      totals: next.totals,
+      allocation,
     };
   },
 };
