@@ -1,5 +1,6 @@
 import "server-only";
 
+import { dbRentalDepositRepo } from "@/lib/rental/deposits/db-rental-deposit-repo";
 import { dbInvoiceRepo } from "@/lib/rental/invoices/db-invoice-repo";
 import { sendIssuedInvoiceEmail } from "@/lib/rental/invoices/send-issued-invoice";
 import { dbOrderRepo } from "@/lib/rental/orders/db-order-repo";
@@ -43,6 +44,13 @@ export async function processCreditCheckoutOrder(orderId: string): Promise<Credi
     });
     invoice = await dbInvoiceRepo.issue(invoice.id);
   }
+
+  await dbRentalDepositRepo.ensureOrderDeposit({
+    orderId: order.id,
+    customerId: order.customerId,
+    requiredAmountCents: Math.round(Number(order.pricingSnapshot?.deposit ?? 0) * 100),
+    sourceInvoiceId: invoice.id,
+  });
 
   const emails = await dbInvoiceRepo.listEmails(invoice.id);
   const alreadySent = emails.some((item) => item.type === "sent" || item.type === "resent");

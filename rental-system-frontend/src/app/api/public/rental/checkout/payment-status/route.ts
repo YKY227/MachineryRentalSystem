@@ -1,6 +1,7 @@
 //rental-system-frontend/src/app/api/public/rental/checkout/payment-status/route.ts
 import { NextResponse } from "next/server";
 
+import { dbRentalDepositRepo } from "@/lib/rental/deposits/db-rental-deposit-repo";
 import { dbInvoiceRepo } from "@/lib/rental/invoices/db-invoice-repo";
 import { dbOrderRepo } from "@/lib/rental/orders/db-order-repo";
 import { dbOrderPaymentSessionRepo } from "@/lib/rental/orders/db-order-payment-session-repo";
@@ -34,7 +35,8 @@ export async function GET(req: Request) {
 
       const order = await dbOrderRepo.get(session.orderId);
       const invoice = order ? await dbInvoiceRepo.findActiveByOrderId(order.id) : null;
-      return NextResponse.json({ order, paymentSession: session, invoice });
+      const depositSummary = order ? await dbRentalDepositRepo.getSummaryByOrderId(order.id) : null;
+      return NextResponse.json({ order, paymentSession: session, invoice, depositSummary });
     }
 
     const order = await dbOrderRepo.get(orderId);
@@ -43,7 +45,8 @@ export async function GET(req: Request) {
     }
 
     const invoice = await dbInvoiceRepo.findActiveByOrderId(order.id);
-    return NextResponse.json({ order, paymentSession: null, invoice });
+    const depositSummary = await dbRentalDepositRepo.getSummaryByOrderId(order.id);
+    return NextResponse.json({ order, paymentSession: null, invoice, depositSummary });
   } catch (e) {
     const message = e instanceof Error ? e.message : "Payment status read failed";
     return NextResponse.json({ error: message }, { status: 400 });

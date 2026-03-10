@@ -16,6 +16,15 @@ type OrgSettingsDto = {
   bookingPaidRecipients: string[];
   overdueRecipients: string[];
 
+  reminderPolicy: {
+    remindersEnabled: boolean;
+    firstReminderDays: number;
+    secondReminderDays: number;
+    finalReminderDays: number;
+    reminderGuardWindowHours: number;
+    reminderBatchLimit: number;
+  };
+
   updatedAt: string;
 };
 
@@ -56,6 +65,14 @@ export default function AdminSettingsPage() {
   const [bccTesterEnabled, setBccTesterEnabled] = useState(false);
   const [testerEmailsCsv, setTesterEmailsCsv] = useState("");
 
+  // Reminder policy
+  const [remindersEnabled, setRemindersEnabled] = useState(true);
+  const [firstReminderDays, setFirstReminderDays] = useState("3");
+  const [secondReminderDays, setSecondReminderDays] = useState("7");
+  const [finalReminderDays, setFinalReminderDays] = useState("14");
+  const [reminderGuardWindowHours, setReminderGuardWindowHours] = useState("24");
+  const [reminderBatchLimit, setReminderBatchLimit] = useState("50");
+
   const headers = useMemo(() => {
     return { "Content-Type": "application/json" };
   }, []);
@@ -66,7 +83,7 @@ export default function AdminSettingsPage() {
     setOkMsg(null);
 
     try {
-      const res = await fetch("/api/backend/admin/settings", {
+      const res = await fetch("/api/admin/settings", {
         method: "GET",
         headers,
         cache: "no-store",
@@ -89,6 +106,14 @@ export default function AdminSettingsPage() {
 
       setBccTesterEnabled(!!data.bccTesterEnabled);
       setTesterEmailsCsv(toCsv(data.testerEmails));
+      setRemindersEnabled(Boolean(data.reminderPolicy?.remindersEnabled));
+      setFirstReminderDays(String(data.reminderPolicy?.firstReminderDays ?? 3));
+      setSecondReminderDays(String(data.reminderPolicy?.secondReminderDays ?? 7));
+      setFinalReminderDays(String(data.reminderPolicy?.finalReminderDays ?? 14));
+      setReminderGuardWindowHours(
+        String(data.reminderPolicy?.reminderGuardWindowHours ?? 24)
+      );
+      setReminderBatchLimit(String(data.reminderPolicy?.reminderBatchLimit ?? 50));
     } catch (e: any) {
       setError(e?.message ?? "Failed to load settings");
     } finally {
@@ -118,9 +143,18 @@ export default function AdminSettingsPage() {
 
         bccTesterEnabled,
         testerEmails: parseEmailsCsv(testerEmailsCsv),
+
+        reminderPolicy: {
+          remindersEnabled,
+          firstReminderDays,
+          secondReminderDays,
+          finalReminderDays,
+          reminderGuardWindowHours,
+          reminderBatchLimit,
+        },
       };
 
-      const res = await fetch("/api/backend/admin/settings", {
+      const res = await fetch("/api/admin/settings", {
         method: "PUT",
         headers,
         body: JSON.stringify(payload),
@@ -146,7 +180,7 @@ export default function AdminSettingsPage() {
     setOkMsg(null);
 
     try {
-      const res = await fetch("/api/backend/admin/settings/test-email", {
+      const res = await fetch("/api/admin/settings/test-email", {
         method: "POST",
         headers,
       });
@@ -354,9 +388,112 @@ export default function AdminSettingsPage() {
           </div>
         </section>
 
-        {/* 3) Developer tools */}
         <section className="space-y-3 border rounded-xl p-4 bg-white shadow-sm">
-          <h2 className="text-lg font-medium">3. Developer Tools</h2>
+          <h2 className="text-lg font-medium">3. Reminder Automation</h2>
+          <p className="text-xs text-slate-500">
+            Configure staged overdue reminder policy used by the rental invoice reminder engine.
+          </p>
+
+          <div className="flex items-center justify-between gap-4 rounded-lg border border-slate-200 bg-slate-50 p-3">
+            <div>
+              <p className="text-sm font-medium">Enable overdue reminders</p>
+              <p className="text-xs text-slate-600">
+                When disabled, overdue reminder runs stay read-only and skip sends.
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setRemindersEnabled(!remindersEnabled)}
+              className={[
+                "relative inline-flex h-6 w-11 items-center rounded-full border transition",
+                remindersEnabled
+                  ? "border-indigo-600 bg-indigo-600"
+                  : "border-slate-300 bg-white",
+              ].join(" ")}
+              aria-pressed={remindersEnabled}
+              aria-label="Toggle reminder automation"
+            >
+              <span
+                className={[
+                  "inline-block h-5 w-5 transform rounded-full bg-white shadow transition",
+                  remindersEnabled ? "translate-x-5" : "translate-x-1",
+                ].join(" ")}
+              />
+            </button>
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+            <label className="flex flex-col gap-1">
+              <span className="text-sm">First reminder days overdue</span>
+              <input
+                type="number"
+                min={0}
+                step={1}
+                value={firstReminderDays}
+                onChange={(e) => setFirstReminderDays(e.target.value)}
+                disabled={loading}
+                className={inputClass}
+              />
+            </label>
+
+            <label className="flex flex-col gap-1">
+              <span className="text-sm">Second reminder days overdue</span>
+              <input
+                type="number"
+                min={0}
+                step={1}
+                value={secondReminderDays}
+                onChange={(e) => setSecondReminderDays(e.target.value)}
+                disabled={loading}
+                className={inputClass}
+              />
+            </label>
+
+            <label className="flex flex-col gap-1">
+              <span className="text-sm">Final reminder days overdue</span>
+              <input
+                type="number"
+                min={0}
+                step={1}
+                value={finalReminderDays}
+                onChange={(e) => setFinalReminderDays(e.target.value)}
+                disabled={loading}
+                className={inputClass}
+              />
+            </label>
+
+            <label className="flex flex-col gap-1">
+              <span className="text-sm">Guard window hours</span>
+              <input
+                type="number"
+                min={1}
+                step={1}
+                value={reminderGuardWindowHours}
+                onChange={(e) => setReminderGuardWindowHours(e.target.value)}
+                disabled={loading}
+                className={inputClass}
+              />
+            </label>
+
+            <label className="flex flex-col gap-1">
+              <span className="text-sm">Batch limit</span>
+              <input
+                type="number"
+                min={1}
+                step={1}
+                value={reminderBatchLimit}
+                onChange={(e) => setReminderBatchLimit(e.target.value)}
+                disabled={loading}
+                className={inputClass}
+              />
+            </label>
+          </div>
+        </section>
+
+        {/* 4) Developer tools */}
+        <section className="space-y-3 border rounded-xl p-4 bg-white shadow-sm">
+          <h2 className="text-lg font-medium">4. Developer Tools</h2>
           <p className="text-xs text-slate-500">
             Controls demo/testing switches in the admin UI.
           </p>

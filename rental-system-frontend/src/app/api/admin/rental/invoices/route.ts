@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { dbInvoiceRepo } from "@/lib/rental/invoices/db-invoice-repo";
+import { dbRentalDepositRepo } from "@/lib/rental/deposits/db-rental-deposit-repo";
 import {
   loadAdminInvoiceListPage,
   parseAdminInvoiceListQuery,
@@ -113,6 +114,13 @@ export async function POST(req: Request) {
         deposit: order.pricingSnapshot.deposit,
         total: order.pricingSnapshot.total,
       },
+    });
+
+    await dbRentalDepositRepo.ensureOrderDeposit({
+      orderId: order.id,
+      customerId: order.customerId,
+      requiredAmountCents: Math.round(Number(order.pricingSnapshot?.deposit ?? 0) * 100),
+      sourceInvoiceId: invoice.id,
     });
 
     console.log("[invoice-api] POST createDraftFromOrder success", {

@@ -711,3 +711,372 @@ Risks / follow-up notes:
 - Current collectible-invoice logic assumes only `issued` invoices should count toward credit usage and excludes `void`; if more invoice lifecycle statuses are introduced later, the helper should be updated centrally.
 - `credit_last_reviewed_by` is stored as `text` because the current admin auth path is API-key based and does not expose a DB-backed admin user UUID.
 - Recommended next task: enforce the same helper during checkout server-side before allowing invoice-later credit orders.
+
+## 2026-03-09 | Scope: credit control v1 summary semantics refinement
+Summary:
+- Refined the existing credit-control helper so the returned status reflects the effective current state, adding an explicit `control_disabled` result ahead of automated overdue/limit checks while keeping manual hold as highest priority.
+
+Files changed:
+- `src/lib/rental/credit-control/db-rental-credit-control.ts`
+- `src/app/admin/rental/customers/[id]/page.tsx`
+- `docs/migration-log.md`
+
+DB / Infra changes:
+- No schema changes.
+- No new migrations.
+
+API / Page changes:
+- Existing customer overview payload now returns `recommendedDecision = control_disabled` and `recommendedReasonCode = credit_control_disabled` when credit control is disabled and there is no manual hold.
+- Admin customer Credit Control badges/labels now distinguish disabled control from blocked states.
+
+Risks / follow-up notes:
+- This remains a current-state summary helper only; projected order exposure and checkout enforcement should stay in a later server-side checkout task.
+
+## 2026-03-09 | Scope: admin customer credit policy editing
+Summary:
+- Extended the existing admin customer PATCH path and customer detail page so credit policy fields can be edited with a dedicated save action, while keeping derived credit exposure read-only and reloading the overview after save.
+
+Files changed:
+- `src/app/api/admin/rental/customers/[id]/route.ts`
+- `src/lib/rental/customers/db-rental-customer-repo.ts`
+- `src/app/admin/rental/customers/[id]/page.tsx`
+- `docs/migration-log.md`
+
+DB / Infra changes:
+- No schema changes.
+- No new migrations.
+
+API / Page changes:
+- Existing `PATCH /api/admin/rental/customers/[id]` now accepts `creditLimit`, `creditControlEnabled`, and `creditHoldReason`, validates non-negative credit limits, trims hold reasons, and stamps `creditLastReviewedAt` when policy values change.
+- `/admin/rental/customers/[id]` now has a separate editable Credit Policy section with its own `Save Credit Policy` button; derived credit exposure remains read-only.
+
+Risks / follow-up notes:
+- `creditLastReviewedBy` is still left unchanged because the current admin auth path does not expose a trustworthy acting admin identity.
+
+## 2026-03-09 | Scope: credit control v1 checkout enforcement
+Summary:
+- Added a dedicated server-side credit checkout evaluator that reuses the current credit summary helper plus proposed order exposure, and wired it into the existing checkout decision path so credit customers are blocked from invoice-later checkout on manual hold, overdue balance, or limit exceed while disabled control bypasses overdue/limit checks.
+
+Files changed:
+- `src/lib/rental/credit-control/checkout-credit-evaluator.ts`
+- `src/app/api/public/rental/checkout/start-payment/route.ts`
+- `src/app/rental/checkout/page.tsx`
+- `src/app/rental/checkout/status/page.tsx`
+- `docs/migration-log.md`
+
+DB / Infra changes:
+- No schema changes.
+- No new migrations.
+
+API / Page changes:
+- Existing `POST /api/public/rental/checkout/start-payment` now evaluates baseline credit eligibility plus current exposure and proposed booking exposure before any credit invoice path runs.
+- Baseline-eligible credit customers continue through invoice-later only when allowed; blocked credit customers fall back to the existing upfront payment flow with a structured `creditDecision` payload and a user-facing notice.
+- Checkout and checkout-status pages now show the server-provided blocked-credit fallback notice without duplicating credit rules in the browser.
+
+Risks / follow-up notes:
+- Current projected exposure uses the payable invoice total from the checkout pricing snapshot and still does not reserve exposure for concurrent in-flight unpaid orders before invoice issuance.
+
+## 2026-03-09 | Scope: credit checkout selective fallback refinement
+Summary:
+- Refined the existing credit checkout enforcement so manual hold now hard-stops checkout before any writes, while overdue balance and credit-limit exceed continue to fall back to the existing upfront-payment flow with explicit server response flags and user-facing messaging.
+
+Files changed:
+- `src/app/api/public/rental/checkout/start-payment/route.ts`
+- `src/app/rental/checkout/page.tsx`
+- `docs/migration-log.md`
+
+DB / Infra changes:
+- No schema changes.
+- No new migrations.
+
+API / Page changes:
+- Existing `POST /api/public/rental/checkout/start-payment` now returns explicit `creditCheckoutBlocked` and `creditCheckoutFallbackToUpfront` flags.
+- `manual_hold` now returns a hard-stop response before any order, invoice, or payment-session write.
+- `overdue_balance` and `credit_limit_exceeded` still bypass the credit invoice path and continue through the existing upfront-payment flow with a server-provided notice.
+
+Risks / follow-up notes:
+- Baseline inactive-account blocking remains handled by the pre-existing account-status guard earlier in checkout and was not broadened in this refinement.
+
+## 2026-03-09 | Scope: equipment availability locking v1
+Summary:
+- Added a DB-backed rental availability hold model plus atomic hold acquisition for checkout, enforced server-side availability before downstream writes, and wired hold lifecycle into credit checkout success and paid checkout completion while letting expired holds fall out of availability reads automatically.
+
+Files changed:
+- `docs/sql/rental_availability_holds_v1.sql`
+- `src/lib/rental/server-equipment-config.ts`
+- `src/lib/rental/holds/db-rental-availability-hold-repo.ts`
+- `src/lib/rental/holds/db-rental-availability-service.ts`
+- `src/app/api/public/rental/checkout/start-payment/route.ts`
+- `src/lib/rental/invoices/checkout-invoice-automation.ts`
+- `src/app/rental/checkout/page.tsx`
+- `docs/migration-log.md`
+
+DB / Infra changes:
+- Added append-only SQL for `rental_availability_holds` plus `acquire_rental_availability_hold(...)` to lock per equipment, count overlapping active invoice-backed orders and active unexpired holds, and insert a temporary hold atomically.
+- Run `docs/sql/rental_availability_holds_v1.sql` in Supabase SQL Editor.
+
+API / Page changes:
+- Existing `POST /api/public/rental/checkout/start-payment` now creates an availability hold before credit or payment-side writes and returns a structured `availabilityBlocked` response on insufficient stock.
+- Checkout page now surfaces server-returned availability failures directly.
+- Credit checkout marks the hold consumed after successful invoice-later completion; paid upfront checkout marks the hold consumed from the existing webhook invoice-automation path.
+
+Risks / follow-up notes:
+- Current inventory-unit configuration is still sourced from the existing seed equipment config on the server because the equipment catalog itself is not yet DB-backed; admin local inventory edits are not authoritative for server availability enforcement.
+- The atomic hold acquisition is DB-backed, but committed-quantity reads still assume invoice-backed orders are the authoritative confirmed bookings in the current architecture.
+
+## 2026-03-10 | Scope: DB-backed rental equipment catalog foundation
+Summary:
+- Added a production-ready `rental_equipment` table plus a server-side equipment repo, switched the main admin rental inventory screen to DB-backed create/edit/publish flows, moved the public rental catalog/detail/checkout pages onto published equipment APIs, and updated server-side availability config to read DB equipment totals instead of seed data.
+
+Files changed:
+- `docs/sql/rental_equipment_v1.sql`
+- `src/lib/rental/types.ts`
+- `src/lib/rental/equipment/types.ts`
+- `src/lib/rental/equipment/db-rental-equipment-repo.ts`
+- `src/app/api/admin/rental/equipment/route.ts`
+- `src/app/api/admin/rental/equipment/[id]/route.ts`
+- `src/app/api/public/rental/equipment/route.ts`
+- `src/app/api/public/rental/equipment/[id]/route.ts`
+- `src/lib/rental/server-equipment-config.ts`
+- `src/lib/rental/holds/db-rental-availability-service.ts`
+- `src/app/admin/rental/page.tsx`
+- `src/app/rental/page.tsx`
+- `src/app/rental/[id]/page.tsx`
+- `src/app/rental/checkout/page.tsx`
+- `docs/migration-log.md`
+
+DB / Infra changes:
+- Added append-only SQL for `rental_equipment` with DB-backed inventory, rates, publish state, media URLs, JSON content blocks, display ordering, and maintenance buffer days.
+- Server-side availability config now reads equipment totals and maintenance buffer days from `rental_equipment`.
+
+API / Page changes:
+- Added admin equipment APIs for list/create/update and public equipment APIs for published list/detail.
+- `/admin/rental` now reads and writes DB-backed rental equipment instead of localStorage demo inventory.
+- `/rental`, `/rental/[id]`, and `/rental/checkout` now read published equipment from the public API instead of `localEquipmentRepo`.
+
+Risks / follow-up notes:
+- Legacy/demo admin screens outside the main production inventory path, such as older orders/calendar pages, still reference `localEquipmentRepo` and should be migrated separately to remove the last non-authoritative equipment reads.
+- Checkout pricing payloads are still assembled client-side from the fetched equipment record and should be validated server-side in a later hardening pass if pricing tamper resistance becomes a priority.
+
+## 2026-03-10 | Scope: server-side checkout repricing from DB equipment
+Summary:
+- Added authoritative server-side checkout repricing from DB-backed equipment in the central start-payment path, replaced client pricing snapshot trust with a server-built pricing snapshot before credit, order, invoice, and payment flows, and reused the shared pricing helper on the rental pages for display consistency.
+
+Files changed:
+- `src/lib/rental/orders/pricing.ts`
+- `src/app/api/public/rental/checkout/start-payment/route.ts`
+- `src/app/rental/[id]/page.tsx`
+- `src/app/rental/checkout/page.tsx`
+- `docs/migration-log.md`
+
+DB / Infra changes:
+- No schema changes.
+- No new migrations.
+
+API / Page changes:
+- Existing `POST /api/public/rental/checkout/start-payment` now fetches the published DB equipment row, recomputes the authoritative pricing snapshot server-side, uses that snapshot for credit exposure, order persistence, credit invoicing, and HitPay session amount, and may return a `pricingNotice` when stale client totals were refreshed.
+- Rental detail and checkout pages now reuse the shared pricing helper for display estimates, while server repricing remains authoritative at checkout.
+
+Risks / follow-up notes:
+- Delivery and collection fees remain fixed values in the shared pricing helper, matching the current architecture; if fulfillment pricing becomes configurable later, this helper should become the single source for that rule as well.
+- The client still sends a pricing snapshot for UX continuity, but it is no longer trusted as financial truth in checkout.
+
+## 2026-03-10 | Scope: one-time rental equipment seed backfill path
+Summary:
+- Added a one-time admin-only seed import path and wrapper command to populate `rental_equipment` from the legacy in-repo seed equipment definitions, using an idempotent seed-missing-rows-only policy that skips existing DB rows by legacy `id` or `slug` to avoid overwriting admin-managed records.
+
+Files changed:
+- `src/lib/rental/equipment/db-rental-equipment-repo.ts`
+- `src/lib/rental/equipment/seed-import.ts`
+- `src/app/api/admin/rental/equipment/import-seed/route.ts`
+- `scripts/import-rental-equipment-seed.mjs`
+- `package.json`
+- `docs/migration-log.md`
+
+DB / Infra changes:
+- No schema changes.
+- No new migrations.
+
+API / Page changes:
+- Added admin-only `POST /api/admin/rental/equipment/import-seed` for one-time seed backfill.
+- Added `npm run backfill:rental-equipment` to call the admin import route and print inserted/updated/skipped counts.
+
+Risks / follow-up notes:
+- The backfill intentionally skips existing DB rows instead of updating them; this is the lowest-risk merge policy, but if you need a later demo-data refresh for untouched rows, add an explicit opt-in importer rather than broadening this one.
+- The wrapper script expects a running app plus `ADMIN_API_KEY`, and uses `APP_BASE_URL` or defaults to `http://localhost:3000`.
+
+## 2026-03-10 | Scope: migrate remaining active localEquipmentRepo reads
+Summary:
+- Migrated the remaining production-relevant `localEquipmentRepo` reads in active admin flows to the DB-backed admin equipment API, so admin orders and the shared admin equipment selection hook now read authoritative DB equipment data instead of local demo inventory.
+
+Files changed:
+- `src/lib/rental/hooks/useAdminEquipments.ts`
+- `src/app/admin/rental/orders/page.tsx`
+- `src/app/admin/rental/calendar/page.tsx`
+- `docs/migration-log.md`
+
+DB / Infra changes:
+- No schema changes.
+- No new migrations.
+
+API / Page changes:
+- Admin orders page now loads equipment metadata from `GET /api/admin/rental/equipment`.
+- `useAdminEquipments` now loads admin equipment from the DB-backed admin equipment API instead of `localEquipmentRepo`.
+- Admin rental calendar no longer imports `localEquipmentRepo`; it uses the DB-backed hook for equipment selection.
+
+Risks / follow-up notes:
+- The older calendar screen still has localStorage-backed order/hold behavior in parts of the view, but its equipment metadata source is now DB-backed; migrating those operational datasets can be handled separately without reintroducing equipment split-truth.
+- `src/lib/rental/equipment-repo.ts` remains in the codebase as legacy/demo-only code, but no active page or hook now imports `localEquipmentRepo`.
+
+## 2026-03-10 | Scope: overdue automation v1 foundation
+Summary:
+- Added a reusable overdue reminder service that reuses existing invoice payment totals, overdue status logic, PDF email delivery, and invoice email history to process overdue reminders safely with a DB-backed guard window.
+- Extended the existing admin reminder route to support both single-invoice reminder sends and batch overdue reminder runs with structured reporting and optional dry-run behavior.
+
+Files changed:
+- `src/lib/rental/invoices/overdue-reminder-service.ts`
+- `src/app/api/admin/rental/invoices/remind/route.ts`
+- `docs/migration-log.md`
+
+DB / Infra changes:
+- No schema changes.
+- No new migrations.
+
+API / Page changes:
+- Existing `POST /api/admin/rental/invoices/remind` now supports:
+  - single invoice processing via `invoiceId`
+  - batch overdue processing when `invoiceId` is omitted
+  - configurable `guardWindowHours`
+  - optional `dryRun`
+  - structured per-invoice results and summary totals
+
+Risks / follow-up notes:
+- The v1 duplicate guard uses existing `rental_invoice_emails` reminder history and a time window; it intentionally avoids broader sequencing logic such as reminder cadence stages.
+- Batch runs currently iterate issued invoices through application logic rather than a dedicated SQL candidate query; this keeps reuse high and risk low for v1, but can be optimized later if invoice volume grows materially.
+
+## 2026-03-10 | Scope: reminder automation v2 staged policy + admin settings
+Summary:
+- Added DB-backed system settings storage for admin org/notification settings plus rental invoice reminder policy, and moved the existing admin settings page onto local Next.js admin settings routes.
+- Upgraded overdue reminders from a simple guard-window model to staged first/second/final reminder logic derived from existing reminder email history, with DB-configured reminder thresholds, guard window, and batch limit.
+
+Files changed:
+- `docs/sql/system_settings_v1.sql`
+- `src/lib/settings/db-admin-settings-repo.ts`
+- `src/app/api/admin/settings/route.ts`
+- `src/app/api/admin/settings/test-email/route.ts`
+- `src/app/admin/settings/page.tsx`
+- `src/lib/rental/invoices/overdue-reminder-service.ts`
+- `src/app/api/admin/rental/invoices/remind/route.ts`
+- `docs/migration-log.md`
+
+DB / Infra changes:
+- Added append-only SQL migration `docs/sql/system_settings_v1.sql` to create `system_settings` and seed defaults for admin org settings, notification routing, and rental invoice reminder policy.
+
+API / Page changes:
+- Added `GET/PUT /api/admin/settings` backed by `system_settings`.
+- Added `POST /api/admin/settings/test-email` for the existing admin settings page test-email action.
+- Existing `POST /api/admin/rental/invoices/remind` now uses DB-backed reminder policy by default and returns staged reminder results plus effective policy.
+- Admin settings page now includes reminder automation controls for enable/disable, first/second/final overdue days, guard window hours, and batch limit.
+
+Risks / follow-up notes:
+- Reminder stage derivation relies on existing reminder email history and subject parsing; older generic reminder sends are mapped sequentially as first/second/final to preserve idempotency without adding mutable invoice stage state.
+- The new local admin settings routes replace the previous backend-proxy usage for this page; if other external services still depend on the old backend settings endpoint, that integration should be reviewed separately.
+
+## 2026-03-10 | Scope: deposit accounting v1
+Summary:
+- Added an explicit deposit ledger model using `rental_order_deposits` plus `rental_deposit_transactions`, so deposit requirement, held amount, outstanding amount, and payment/invoice linkage are now auditable without treating refundable deposits as rental revenue.
+- Updated checkout so upfront payment sessions charge rental invoice amount plus refundable deposit together, while server-side automation splits that payment into invoice settlement vs deposit-held accounting; credit checkout now persists deposit requirement explicitly as pending.
+
+Files changed:
+- `docs/sql/rental_order_deposits_v1.sql`
+- `src/lib/rental/deposits/types.ts`
+- `src/lib/rental/deposits/db-rental-deposit-repo.ts`
+- `src/lib/rental/payments/db-payment-allocation-repo.ts`
+- `src/app/api/public/rental/checkout/start-payment/route.ts`
+- `src/lib/rental/invoices/checkout-invoice-automation.ts`
+- `src/lib/rental/invoices/checkout-credit-automation.ts`
+- `src/app/api/admin/rental/invoices/route.ts`
+- `src/app/api/admin/rental/orders/route.ts`
+- `src/app/admin/rental/orders/page.tsx`
+- `src/lib/rental/customers/db-rental-customer-overview.ts`
+- `src/app/admin/rental/customers/[id]/page.tsx`
+- `src/app/rental/checkout/page.tsx`
+- `src/app/rental/checkout/status/page.tsx`
+- `docs/migration-log.md`
+
+DB / Infra changes:
+- Added append-only SQL migration `docs/sql/rental_order_deposits_v1.sql` to create:
+  - `rental_order_deposits`
+  - `rental_deposit_transactions`
+- Reused existing `rental_payment_allocations` by adding deposit allocations in application logic (`allocation_type = 'deposit'`) without changing historical invoice allocation behavior.
+
+API / Page changes:
+- Existing `POST /api/public/rental/checkout/start-payment` now charges upfront sessions for rental invoice amount plus refundable deposit when deposit is required, while credit exposure remains based on rental charges only.
+- Checkout payment automation now records invoice payment against the rental invoice amount only, and separately records held deposit accounting linked to the same payment session.
+- Existing `GET /api/admin/rental/orders` now includes `depositSummariesByOrderId`.
+- Admin rental orders page and admin customer overview now show deposit required / held / outstanding state.
+- Customer checkout and checkout status pages now distinguish rental charges from refundable deposit in the displayed totals.
+
+Risks / follow-up notes:
+- Deposit v1 records requirement and collection only. Refund, release, partial retention, and admin deposit workflows are intentionally left for a future pass, but the ledger schema is ready for them.
+- Credit checkout currently records deposit requirement as pending rather than collecting it immediately; if deposit collection should be mandatory for credit customers, that should be added in a separate server-side policy task.
+
+## 2026-03-10 | Scope: deposit release / refund workflow v2
+Summary:
+- Extended the deposit ledger so admin can record full release, full retention, or split release-plus-retention against held deposits with explicit transaction history, validation, and unresolved-balance tracking.
+- Added a minimal admin resolution workflow on the existing rental orders page plus a focused admin deposit route, while keeping release as an accounting-recorded refund/release event rather than pretending gateway refunds are automated.
+
+Files changed:
+- `docs/sql/rental_order_deposits_resolution_v2.sql`
+- `src/lib/rental/deposits/types.ts`
+- `src/lib/rental/deposits/db-rental-deposit-repo.ts`
+- `src/app/api/admin/rental/orders/[id]/deposit/route.ts`
+- `src/app/admin/rental/orders/page.tsx`
+- `src/lib/rental/customers/db-rental-customer-overview.ts`
+- `src/app/rental/checkout/status/page.tsx`
+- `src/app/api/public/rental/checkout/payment-status/route.ts`
+- `docs/migration-log.md`
+
+DB / Infra changes:
+- Added append-only SQL migration `docs/sql/rental_order_deposits_resolution_v2.sql` to extend:
+  - `rental_order_deposits` with latest resolution metadata and resolved timestamp
+  - `rental_deposit_transactions` with `recorded_by` and `external_reference`
+
+API / Page changes:
+- Added admin-protected `GET/POST /api/admin/rental/orders/[id]/deposit`:
+  - `GET` returns current deposit summary plus transaction history
+  - `POST` records release / retain / split resolution against held deposit with structured response data
+- Admin rental orders page now supports inline deposit resolution and shows recent deposit activity.
+- Public checkout status now surfaces current deposit state when a deposit exists.
+
+Risks / follow-up notes:
+- Release/refund in v2 is an explicit accounting event only. No HitPay refund API integration is performed yet, so any actual payout must still be executed outside this flow and optionally recorded via reference.
+- The current admin auth model still does not provide a trustworthy per-admin identity for ledger writes, so `recorded_by` remains available for future use but is not populated automatically in this version.
+
+## 2026-03-11 | Scope: customer portal improvements v1
+Summary:
+- Added a logged-in customer portal at `/rental/account` backed by a new authenticated overview route that reuses existing DB-first customer, invoice, payment, deposit, and credit-control aggregation without exposing admin-only fields.
+- Extended the shared customer overview read model with invoice outstanding balances and deposit resolution amounts so the portal can show invoices, payments, overdue status, notices, and deposit state from existing accounting truth.
+
+Files changed:
+- `src/lib/rental/customers/db-rental-customer-overview.ts`
+- `src/lib/rental/customers/portal-types.ts`
+- `src/lib/rental/customers/db-rental-customer-portal-overview.ts`
+- `src/app/api/public/rental/account/overview/route.ts`
+- `src/app/rental/account/page.tsx`
+- `src/app/rental/page.tsx`
+- `src/app/rental/checkout/status/page.tsx`
+- `docs/migration-log.md`
+
+DB / Infra changes:
+- No migration added.
+- Reused existing authenticated customer resolution and DB-backed overview/accounting reads.
+
+API / Page changes:
+- Added `GET /api/public/rental/account/overview` for authenticated customer-safe portal data only.
+- Added `/rental/account` with Account Summary, Recent Orders, Invoices, Payments, Deposit Status, and Account Notices sections.
+- Added minimal `My account` entry points from the rental catalog and checkout status pages.
+
+Risks / follow-up notes:
+- Invoice PDF/download access is still admin-oriented; the customer portal currently exposes invoice/payment visibility but not customer self-service downloads.
+- The portal currently surfaces recent notice history from existing invoice email events. If broader customer-safe notice types are added later, they should be folded into the same read model rather than creating parallel state.

@@ -1,12 +1,6 @@
 // src/lib/rental/types.ts
 
-export type EquipmentCategory =
-  | "earthmoving"
-  | "lifting"
-  | "power"
-  | "concreting"
-  | "compaction"
-  | "cleaning";
+export type EquipmentCategory = string;
 
 export type EquipmentPricing = {
   minDays: number; // e.g. 1 or 3
@@ -18,12 +12,15 @@ export type EquipmentPricing = {
 
 export type Equipment = {
   id: string;
+  slug?: string;
   title: string;
   category: EquipmentCategory;
   brand?: string;
   model?: string;
+  description?: string;
 
   images: string[]; // URLs
+  imageUrl?: string;
   shortDesc: string;
 
   // ✅ content blocks for detail page (optional)
@@ -34,6 +31,9 @@ export type Equipment = {
 
   totalUnits: number;
   isPublished: boolean;
+  catalogueUrl?: string;
+  trainingVideoUrl?: string;
+  displayOrder?: number;
 
   // ✅ NEW: default post-rental maintenance buffer (days)
   // Availability logic can treat orders as ending at (endDate + bufferDays)

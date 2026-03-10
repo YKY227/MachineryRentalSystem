@@ -4,6 +4,7 @@ import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 
+import type { RentalOrderDepositSummary } from "@/lib/rental/deposits/types";
 import type { Invoice } from "@/lib/rental/invoices/types";
 import type { RentalOrder, RentalOrderPaymentSession } from "@/lib/rental/orders/types";
 
@@ -40,6 +41,28 @@ function formatCheckoutStatus(input: {
   return formatStatus(input.paymentSession?.status);
 }
 
+function formatDepositStatus(status?: RentalOrderDepositSummary["status"]) {
+  switch (status) {
+    case "held":
+      return "Deposit held";
+    case "partially_held":
+      return "Deposit partially held";
+    case "released":
+      return "Deposit released";
+    case "partially_released":
+      return "Deposit partially released";
+    case "retained":
+      return "Deposit retained";
+    case "partially_retained":
+      return "Deposit partially retained";
+    case "pending":
+      return "Deposit pending";
+    case "not_required":
+    default:
+      return "No deposit required";
+  }
+}
+
 export default function RentalCheckoutStatusPage() {
   return (
     <Suspense
@@ -63,9 +86,19 @@ function CheckoutStatusInner() {
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [order, setOrder] = useState<RentalOrder | null>(null);
   const [paymentSession, setPaymentSession] = useState<RentalOrderPaymentSession | null>(null);
   const [invoice, setInvoice] = useState<Invoice | null>(null);
+  const [depositSummary, setDepositSummary] = useState<RentalOrderDepositSummary | null>(null);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const nextNotice = window.sessionStorage.getItem("rental_checkout_notice");
+    if (!nextNotice) return;
+    setNotice(nextNotice);
+    window.sessionStorage.removeItem("rental_checkout_notice");
+  }, []);
 
   useEffect(() => {
     let mounted = true;
@@ -96,6 +129,7 @@ function CheckoutStatusInner() {
         setOrder((data?.order ?? null) as RentalOrder | null);
         setPaymentSession((data?.paymentSession ?? null) as RentalOrderPaymentSession | null);
         setInvoice((data?.invoice ?? null) as Invoice | null);
+        setDepositSummary((data?.depositSummary ?? null) as RentalOrderDepositSummary | null);
       } catch (e) {
         if (!mounted) return;
         setError(e instanceof Error ? e.message : "Failed to load payment status");
@@ -127,6 +161,12 @@ function CheckoutStatusInner() {
           </div>
         ) : (
           <div className="mt-6 space-y-4">
+            {notice && (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+                {notice}
+              </div>
+            )}
+
             <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
               <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Status</div>
               <div className="mt-1 text-lg font-semibold text-slate-900">
@@ -165,6 +205,12 @@ function CheckoutStatusInner() {
                             Math.round(Number(order.pricingSnapshot?.payableTotal ?? 0) * 100)
                           )}
                     </div>
+                    {paymentSession && Number(order.pricingSnapshot?.deposit ?? 0) > 0 && (
+                      <div className="mt-1 text-xs text-slate-500">
+                        Includes refundable deposit of{" "}
+                        {moneyFromCents(Math.round(Number(order.pricingSnapshot?.deposit ?? 0) * 100))}
+                      </div>
+                    )}
                   </div>
                   <div>
                     <div className="text-xs text-slate-500">Rental Period</div>
@@ -178,6 +224,20 @@ function CheckoutStatusInner() {
                       {paymentSession ? paymentSession.paidAt ?? "-" : order.customerSnapshot?.email ?? "-"}
                     </div>
                   </div>
+                  {depositSummary && depositSummary.requiredAmountCents > 0 && (
+                    <div className="sm:col-span-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
+                      <div className="text-xs text-slate-500">Deposit</div>
+                      <div className="mt-1 font-medium text-slate-900">
+                        {formatDepositStatus(depositSummary.status)}
+                      </div>
+                      <div className="mt-1 text-xs text-slate-600">
+                        Required: {moneyFromCents(depositSummary.requiredAmountCents)} · Held:{" "}
+                        {moneyFromCents(depositSummary.heldAmountCents)} · Released:{" "}
+                        {moneyFromCents(depositSummary.releasedAmountCents)} · Retained:{" "}
+                        {moneyFromCents(depositSummary.retainedAmountCents)}
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             )}
@@ -185,6 +245,12 @@ function CheckoutStatusInner() {
         )}
 
         <div className="mt-6 flex flex-wrap gap-3">
+          <Link
+            href="/rental/account"
+            className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+          >
+            My account
+          </Link>
           <Link
             href="/rental"
             className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800"

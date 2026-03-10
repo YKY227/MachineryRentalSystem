@@ -5,6 +5,8 @@ import {
   type RentalCustomerCreditControlSummary,
 } from "@/lib/rental/credit-control/db-rental-credit-control";
 import { dbRentalCustomerRepo } from "@/lib/rental/customers/db-rental-customer-repo";
+import { dbRentalDepositRepo } from "@/lib/rental/deposits/db-rental-deposit-repo";
+import type { RentalOrderDepositStatus } from "@/lib/rental/deposits/types";
 import { dbPaymentRepo } from "@/lib/rental/invoices/db-payment-repo";
 import type { InvoicePaymentStatus } from "@/lib/rental/invoices/types";
 import type { RentalCustomer } from "@/lib/rental/orders/types";
@@ -69,6 +71,12 @@ export type RentalCustomerRecentOrder = {
   rentalStart: string;
   rentalEnd: string;
   orderStatus: string;
+  depositRequiredCents: number;
+  depositHeldCents: number;
+  depositReleasedCents: number;
+  depositRetainedCents: number;
+  depositUnresolvedCents: number;
+  depositStatus: RentalOrderDepositStatus;
   createdAt: string;
 };
 
@@ -79,6 +87,8 @@ export type RentalCustomerRecentInvoice = {
   status: "draft" | "issued" | "void";
   totalInclGstCents: number;
   paymentStatus: InvoicePaymentStatus;
+  paidCents: number;
+  outstandingBalanceCents: number;
   dueDate?: string;
 };
 
@@ -110,6 +120,14 @@ export type RentalCustomerFinancialSummary = {
   overdueInvoicesCount: number;
 };
 
+export type RentalCustomerDepositSummary = {
+  totalRequiredCents: number;
+  totalHeldCents: number;
+  totalOutstandingCents: number;
+  heldCount: number;
+  pendingCount: number;
+};
+
 export type { RentalCustomerCreditControlSummary } from "@/lib/rental/credit-control/db-rental-credit-control";
 
 export type RentalCustomerOverview = {
@@ -119,6 +137,7 @@ export type RentalCustomerOverview = {
   recentPayments: RentalCustomerRecentPayment[];
   emailEvents: RentalCustomerEmailEvent[];
   financialSummary: RentalCustomerFinancialSummary;
+  depositSummary: RentalCustomerDepositSummary;
   creditControl: RentalCustomerCreditControlSummary;
 };
 
@@ -182,6 +201,13 @@ export async function loadRentalCustomerOverview(customerId: string): Promise<Re
         outstandingBalanceCents: 0,
         overdueInvoicesCount: 0,
       },
+      depositSummary: {
+        totalRequiredCents: 0,
+        totalHeldCents: 0,
+        totalOutstandingCents: 0,
+        heldCount: 0,
+        pendingCount: 0,
+      },
       creditControl: await computeRentalCustomerCreditControlSummary({
         customer,
         invoices: [],
@@ -229,6 +255,7 @@ export async function loadRentalCustomerOverview(customerId: string): Promise<Re
       totalInclGstCents: Number(invoice.total_incl_gst_cents ?? 0),
     }))
   );
+  const depositSummariesByOrderId = await dbRentalDepositRepo.listByOrderIds(allOrderIds);
 
   const recentInvoices = allInvoices.slice(0, recentInvoiceLimit).map((invoice) => ({
     id: invoice.id,
@@ -237,6 +264,9 @@ export async function loadRentalCustomerOverview(customerId: string): Promise<Re
     status: invoice.status,
     totalInclGstCents: Number(invoice.total_incl_gst_cents ?? 0),
     paymentStatus: totalsByInvoiceId[invoice.id]?.status ?? "unpaid",
+    paidCents: totalsByInvoiceId[invoice.id]?.paidCents ?? 0,
+    outstandingBalanceCents:
+      totalsByInvoiceId[invoice.id]?.balanceCents ?? Math.max(0, Number(invoice.total_incl_gst_cents ?? 0)),
     dueDate: invoice.due_date ?? undefined,
   }));
 
@@ -307,6 +337,25 @@ export async function loadRentalCustomerOverview(customerId: string): Promise<Re
     }
   );
 
+  const depositSummary = Object.values(depositSummariesByOrderId).reduce<RentalCustomerDepositSummary>(
+    (summary, deposit) => ({
+      totalRequiredCents: summary.totalRequiredCents + deposit.requiredAmountCents,
+      totalHeldCents: summary.totalHeldCents + deposit.heldAmountCents,
+      totalOutstandingCents: summary.totalOutstandingCents + deposit.unresolvedAmountCents,
+      heldCount: summary.heldCount + (deposit.status === "held" ? 1 : 0),
+      pendingCount:
+        summary.pendingCount +
+        (deposit.status === "pending" || deposit.status === "partially_held" ? 1 : 0),
+    }),
+    {
+      totalRequiredCents: 0,
+      totalHeldCents: 0,
+      totalOutstandingCents: 0,
+      heldCount: 0,
+      pendingCount: 0,
+    }
+  );
+
   const creditControl = await computeRentalCustomerCreditControlSummary({
     customer,
     invoices: allInvoices.map((invoice) => ({
@@ -319,21 +368,40 @@ export async function loadRentalCustomerOverview(customerId: string): Promise<Re
 
   return {
     customer,
-    recentOrders: recentOrders.map((order) => ({
-      id: order.id,
-      equipmentSummary: `${order.equipment_title} x${order.qty}`,
-      rentalStart: order.start_date,
-      rentalEnd: order.end_date,
-      orderStatus: deriveOrderStatus({
-        latestSessionStatus: latestSessionByOrderId.get(order.id)?.status,
-        hasInvoice: invoiceByOrderId.has(order.id),
-      }),
-      createdAt: order.created_at,
-    })),
+    recentOrders: recentOrders.map((order) => {
+      const deposit = depositSummariesByOrderId[order.id] ?? {
+        orderId: order.id,
+        requiredAmountCents: 0,
+        heldAmountCents: 0,
+        releasedAmountCents: 0,
+        retainedAmountCents: 0,
+        unresolvedAmountCents: 0,
+        status: "not_required" as const,
+      };
+
+      return {
+        id: order.id,
+        equipmentSummary: `${order.equipment_title} x${order.qty}`,
+        rentalStart: order.start_date,
+        rentalEnd: order.end_date,
+        orderStatus: deriveOrderStatus({
+          latestSessionStatus: latestSessionByOrderId.get(order.id)?.status,
+          hasInvoice: invoiceByOrderId.has(order.id),
+        }),
+        depositRequiredCents: deposit.requiredAmountCents,
+        depositHeldCents: deposit.heldAmountCents,
+        depositReleasedCents: deposit.releasedAmountCents,
+        depositRetainedCents: deposit.retainedAmountCents,
+        depositUnresolvedCents: deposit.unresolvedAmountCents,
+        depositStatus: deposit.status,
+        createdAt: order.created_at,
+      };
+    }),
     recentInvoices,
     recentPayments,
     emailEvents,
     financialSummary,
+    depositSummary,
     creditControl,
   };
 }

@@ -3,6 +3,8 @@ import "server-only";
 import { dbInvoiceRepo } from "@/lib/rental/invoices/db-invoice-repo";
 import { dbPaymentRepo } from "@/lib/rental/invoices/db-payment-repo";
 import { deliverInvoiceEmail } from "@/lib/rental/invoices/email-delivery";
+import { dbRentalDepositRepo } from "@/lib/rental/deposits/db-rental-deposit-repo";
+import { markAvailabilityHoldConsumed } from "@/lib/rental/holds/db-rental-availability-service";
 import { dbOrderRepo } from "@/lib/rental/orders/db-order-repo";
 import { dbOrderPaymentSessionRepo } from "@/lib/rental/orders/db-order-payment-session-repo";
 
@@ -137,12 +139,18 @@ export async function processPaidCheckoutSession(
     }
   }
 
+  const invoiceAmountCents = Math.max(
+    0,
+    Math.min(session.amountCents, Math.round(Number(invoice.totalInclGstCents ?? 0)))
+  );
+  const depositAmountCents = Math.max(0, session.amountCents - invoiceAmountCents);
+
   let paymentResult;
   try {
     paymentResult = await dbPaymentRepo.recordPaymentForCheckoutSession({
       invoiceId: invoice.id,
       sourcePaymentSessionId: session.id,
-      amountCents: session.amountCents,
+      amountCents: invoiceAmountCents,
       paidAt: session.paidAt,
       method: "HitPay",
       reference: session.providerReferenceNumber || session.providerPaymentRequestId || session.id,
@@ -155,6 +163,25 @@ export async function processPaidCheckoutSession(
       error
     );
     throw stageError("invoice_payment_mapping", error);
+  }
+
+  try {
+    await dbRentalDepositRepo.recordCollectedCheckoutSessionDeposit({
+      orderId: order.id,
+      customerId: order.customerId,
+      requiredAmountCents: Math.round(Number(order.pricingSnapshot?.deposit ?? 0) * 100),
+      paymentSessionId: session.id,
+      amountCents: depositAmountCents,
+      invoiceId: invoice.id,
+      invoicePaymentId: paymentResult.payment.id,
+    });
+  } catch (error) {
+    logAutomationFailure(
+      "deposit_accounting_update",
+      { paymentSessionId, orderId: order.id, invoiceId: invoice.id },
+      error
+    );
+    throw stageError("deposit_accounting_update", error);
   }
 
   const invoiceAppliedAt = session.invoiceAppliedAt ?? new Date().toISOString();
@@ -282,8 +309,13 @@ export async function processPaidCheckoutSession(
           <p>Dear ${customerName || invoice.billTo?.name || "Customer"},</p>
           <p>Thank you for your payment. Please find attached your tax invoice <strong>${invoice.invoiceNo ?? invoice.id}</strong>.</p>
           <p><strong>Total Amount:</strong> ${moneyFromCents(invoice.totalInclGstCents)}</p>
-          <p><strong>Amount Paid:</strong> ${moneyFromCents(paymentResult.totals.paidCents)}</p>
+          <p><strong>Invoice Amount Paid:</strong> ${moneyFromCents(paymentResult.totals.paidCents)}</p>
           <p><strong>Outstanding Balance:</strong> ${moneyFromCents(paymentResult.totals.balanceCents)}</p>
+          ${
+            depositAmountCents > 0
+              ? `<p><strong>Refundable Deposit Held:</strong> ${moneyFromCents(depositAmountCents)}</p>`
+              : ""
+          }
           <p>We have attached the invoice PDF for your records.</p>
         </div>
       `,
@@ -339,6 +371,27 @@ export async function processPaidCheckoutSession(
       error
     );
     throw stageError("idempotency_marker_update_after_email", error);
+  }
+
+  try {
+    await markAvailabilityHoldConsumed({
+      checkoutReference: order.id,
+      orderId: order.id,
+      paymentSessionId: session.id,
+      notes: "Checkout payment completed",
+    });
+  } catch (error) {
+    logAutomationFailure(
+      "availability_hold_consume",
+      {
+        paymentSessionId,
+        orderId: order.id,
+        invoiceId: invoice.id,
+        invoicePaymentId: paymentResult.payment.id,
+      },
+      error
+    );
+    throw stageError("availability_hold_consume", error);
   }
 
   console.info("[checkout-invoice-automation] completed", {

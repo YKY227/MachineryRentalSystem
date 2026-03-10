@@ -1,3 +1,4 @@
+// rental-system-frontend/src/lib/rental/credit-control/db-rental-credit-control.ts
 import "server-only";
 
 import { dbPaymentRepo } from "@/lib/rental/invoices/db-payment-repo";
@@ -12,12 +13,14 @@ export type RentalCreditControlInvoice = {
 
 export type RentalCreditDecision =
   | "blocked_manual_hold"
+  | "control_disabled"
   | "blocked_overdue"
   | "blocked_limit"
   | "eligible";
 
 export type RentalCreditReasonCode =
   | "manual_hold"
+  | "credit_control_disabled"
   | "overdue_balance"
   | "credit_limit_unavailable"
   | "eligible";
@@ -43,7 +46,7 @@ function centsToAmount(cents: number) {
   return Number((Math.max(0, cents) / 100).toFixed(2));
 }
 
-function amountToCents(amount?: number) {
+function amountToCents(amount?: number | null) {
   if (typeof amount !== "number" || !Number.isFinite(amount)) return 0;
   return Math.max(0, Math.round(amount * 100));
 }
@@ -51,6 +54,10 @@ function amountToCents(amount?: number) {
 function normalizeCreditLimit(value?: number) {
   if (typeof value !== "number" || !Number.isFinite(value)) return null;
   return Number(value.toFixed(2));
+}
+
+function hasPositiveCreditLimit(creditLimit: number | null) {
+  return creditLimit !== null && creditLimit > 0;
 }
 
 export async function computeRentalCustomerCreditControlSummary(input: {
@@ -92,8 +99,9 @@ export async function computeRentalCustomerCreditControlSummary(input: {
   }
 
   const creditLimit = normalizeCreditLimit(input.customer.creditLimit);
-  const creditLimitCents = amountToCents(creditLimit ?? undefined);
-  const availableCreditCents = creditLimit ? Math.max(creditLimitCents - creditUsedCents, 0) : 0;
+  const hasConfiguredCreditLimit = hasPositiveCreditLimit(creditLimit);
+  const creditLimitCents = hasConfiguredCreditLimit ? amountToCents(creditLimit) : 0;
+  const availableCreditCents = hasConfiguredCreditLimit ? Math.max(creditLimitCents - creditUsedCents, 0) : 0;
   const creditHoldReason = input.customer.creditHoldReason?.trim() || null;
   const hasManualCreditHold = Boolean(creditHoldReason);
 
@@ -103,10 +111,13 @@ export async function computeRentalCustomerCreditControlSummary(input: {
   if (hasManualCreditHold) {
     recommendedDecision = "blocked_manual_hold";
     recommendedReasonCode = "manual_hold";
+  } else if (!input.customer.creditControlEnabled) {
+    recommendedDecision = "control_disabled";
+    recommendedReasonCode = "credit_control_disabled";
   } else if (overdueAmountCents > 0) {
     recommendedDecision = "blocked_overdue";
     recommendedReasonCode = "overdue_balance";
-  } else if (!creditLimit || creditLimit <= 0 || availableCreditCents <= 0) {
+  } else if (!hasConfiguredCreditLimit || availableCreditCents <= 0) {
     recommendedDecision = "blocked_limit";
     recommendedReasonCode = "credit_limit_unavailable";
   }

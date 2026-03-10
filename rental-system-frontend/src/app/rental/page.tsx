@@ -1,12 +1,9 @@
-// src/app/rental/page.tsx
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 
 import type { Equipment } from "@/lib/rental/types";
-import { localEquipmentRepo } from "@/lib/rental/equipment-repo";
-
 import { EquipmentCard } from "@/components/rental/EquipmentCard";
 import {
   EquipmentFilters,
@@ -25,14 +22,24 @@ export default function RentalCatalogPage() {
 
   useEffect(() => {
     let mounted = true;
+
     (async () => {
       setLoading(true);
-      const data = await localEquipmentRepo.listPublic();
-      if (mounted) {
-        setItems(data);
-        setLoading(false);
+      try {
+        const res = await fetch("/api/public/rental/equipment", {
+          cache: "no-store",
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!mounted) return;
+        if (!res.ok) throw new Error(data?.error ?? "Failed to load equipment");
+        setItems(Array.isArray(data?.equipment) ? (data.equipment as Equipment[]) : []);
+      } catch {
+        if (mounted) setItems([]);
+      } finally {
+        if (mounted) setLoading(false);
       }
     })();
+
     return () => {
       mounted = false;
     };
@@ -48,9 +55,7 @@ export default function RentalCatalogPage() {
         (e.brand ?? "").toLowerCase().includes(q) ||
         (e.model ?? "").toLowerCase().includes(q);
 
-      const matchesCat =
-        filters.category === "all" || e.category === filters.category;
-
+      const matchesCat = filters.category === "all" || e.category === filters.category;
       const matchesStock = !filters.onlyInStock || e.totalUnits > 0;
 
       return matchesQ && matchesCat && matchesStock;
@@ -70,12 +75,20 @@ export default function RentalCatalogPage() {
           </p>
         </div>
 
-        <Link
-          href="/"
-          className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-        >
-          ← Back
-        </Link>
+        <div className="flex gap-3">
+          <Link
+            href="/rental/account"
+            className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+          >
+            My account
+          </Link>
+          <Link
+            href="/"
+            className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+          >
+            Back
+          </Link>
+        </div>
       </div>
 
       <div className="mt-4">
@@ -84,7 +97,7 @@ export default function RentalCatalogPage() {
 
       {loading ? (
         <div className="mt-8 rounded-xl border border-slate-200 bg-white p-6 text-sm text-slate-600">
-          Loading equipment…
+          Loading equipment...
         </div>
       ) : filtered.length === 0 ? (
         <div className="mt-8 rounded-xl border border-slate-200 bg-white p-6 text-sm text-slate-600">
@@ -92,8 +105,8 @@ export default function RentalCatalogPage() {
         </div>
       ) : (
         <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {filtered.map((e) => (
-            <EquipmentCard key={e.id} equipment={e} />
+          {filtered.map((equipment) => (
+            <EquipmentCard key={equipment.id} equipment={equipment} />
           ))}
         </div>
       )}

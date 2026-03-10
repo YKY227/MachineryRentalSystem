@@ -1,4 +1,3 @@
-// src/app/rental/checkout/page.tsx
 "use client";
 
 import { Suspense, useEffect, useMemo, useState } from "react";
@@ -13,11 +12,11 @@ import {
   ClipboardList,
 } from "lucide-react";
 
-import type { Equipment, EquipmentHold } from "@/lib/rental/types";
-import { localEquipmentRepo } from "@/lib/rental/equipment-repo";
-import { localHoldsRepo } from "@/lib/rental/holds-repo";
-import { computeAvailableUnitsForRange } from "@/lib/rental/availability";
-import { calculateRentalCharges } from "@/lib/rental/orders/pricing";
+import type { Equipment } from "@/lib/rental/types";
+import {
+  calculateAuthoritativeRentalPricing,
+  calculateRentalDaysInclusive,
+} from "@/lib/rental/orders/pricing";
 import type { CreateRentalOrderInput, RentalCustomer } from "@/lib/rental/orders/types";
 
 type FulfillmentMode = "deliver" | "self_collect";
@@ -28,34 +27,6 @@ function formatMoney(n: number) {
     currency: "SGD",
     maximumFractionDigits: 0,
   }).format(n);
-}
-
-function daysInclusive(startISO: string, endISO: string) {
-  const s = new Date(startISO);
-  const e = new Date(endISO);
-  if (Number.isNaN(s.getTime()) || Number.isNaN(e.getTime())) return 0;
-  const ms = e.getTime() - s.getTime();
-  return Math.floor(ms / (1000 * 60 * 60 * 24)) + 1;
-}
-
-function calcRentalSubtotal(e: Equipment, days: number, qty: number) {
-  const day = e.pricing.dayRate ?? 0;
-  const week = e.pricing.weekRate ?? null;
-  const month = e.pricing.monthRate ?? null;
-
-  if (days <= 0 || qty <= 0) return 0;
-
-  let perUnit = day * days;
-
-  if (month && days >= 28) {
-    const months = days / 30;
-    perUnit = month * months;
-  } else if (week && days >= 7) {
-    const weeks = days / 7;
-    perUnit = week * weeks;
-  }
-
-  return Math.round(perUnit * qty);
 }
 
 function toInt(v: string | null, fallback: number) {
@@ -77,17 +48,13 @@ function newPublicId() {
   return `RNT-${dd}${mm}${yy}-${rand}`;
 }
 
-/**
- * ✅ This outer component exists ONLY to satisfy Next's requirement:
- * useSearchParams() must be under a Suspense boundary.
- */
 export default function RentalCheckoutPage() {
   return (
     <Suspense
       fallback={
         <div className="mx-auto max-w-6xl p-4">
           <div className="rounded-xl border border-slate-200 bg-white p-6 text-sm text-slate-600">
-            Loading checkout…
+            Loading checkout...
           </div>
         </div>
       }
@@ -100,10 +67,7 @@ export default function RentalCheckoutPage() {
 function CheckoutInner() {
   const searchParams = useSearchParams();
 
-  // ✅ null-safe
-  const getParam = (key: string): string | null => {
-    return searchParams?.get(key) ?? null;
-  };
+  const getParam = (key: string): string | null => searchParams?.get(key) ?? null;
 
   const equipmentId = getParam("equipmentId") ?? "";
   const qty = toInt(getParam("qty"), 1);
@@ -113,9 +77,9 @@ function CheckoutInner() {
 
   const [loading, setLoading] = useState(true);
   const [equipment, setEquipment] = useState<Equipment | null>(null);
-
   const [confirming, setConfirming] = useState(false);
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
+  const [checkoutNotice, setCheckoutNotice] = useState<string | null>(null);
   const [checkoutOrderId] = useState(() => newPublicId());
   const [companyName, setCompanyName] = useState("");
   const [contactName, setContactName] = useState("");
@@ -123,33 +87,24 @@ function CheckoutInner() {
   const [contactPhone, setContactPhone] = useState("");
   const [authCustomer, setAuthCustomer] = useState<RentalCustomer | null>(null);
 
-  // MVP fixed fees
   const deliveryFee = fulfillment === "deliver" ? 60 : 0;
   const collectionFee = fulfillment === "deliver" ? 60 : 0;
 
-  // ✅ holds for availability checks
-  const [activeHolds, setActiveHolds] = useState<EquipmentHold[]>([]);
-
   useEffect(() => {
     let mounted = true;
-    (async () => {
-      const holds = await localHoldsRepo.listActive();
-      if (!mounted) return;
-      setActiveHolds(holds);
-    })();
-    return () => {
-      mounted = false;
-    };
-  }, []);
 
-  useEffect(() => {
-    let mounted = true;
     (async () => {
       setLoading(true);
-      const e = await localEquipmentRepo.getById(equipmentId);
-      if (!mounted) return;
-      setEquipment(e);
-      setLoading(false);
+      try {
+        const res = await fetch(`/api/public/rental/equipment/${encodeURIComponent(equipmentId)}`, {
+          cache: "no-store",
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!mounted) return;
+        setEquipment(res.ok ? ((data?.equipment ?? null) as Equipment | null) : null);
+      } finally {
+        if (mounted) setLoading(false);
+      }
     })();
 
     return () => {
@@ -159,6 +114,7 @@ function CheckoutInner() {
 
   useEffect(() => {
     let mounted = true;
+
     (async () => {
       try {
         const res = await fetch("/api/public/rental/auth/me", {
@@ -178,6 +134,7 @@ function CheckoutInner() {
         if (mounted) setAuthCustomer(null);
       }
     })();
+
     return () => {
       mounted = false;
     };
@@ -185,42 +142,34 @@ function CheckoutInner() {
 
   const days = useMemo(() => {
     if (!start || !end) return 0;
-    return daysInclusive(start, end);
-  }, [start, end]);
+    return calculateRentalDaysInclusive(start, end);
+  }, [end, start]);
+
+  const repricedPreview = useMemo(() => {
+    if (!equipment || !start || !end) return null;
+    try {
+      return calculateAuthoritativeRentalPricing({
+        equipment,
+        qty,
+        start,
+        end,
+        fulfillment,
+      });
+    } catch {
+      return null;
+    }
+  }, [end, equipment, fulfillment, qty, start]);
 
   const minDays = equipment?.pricing?.minDays ?? 1;
-  const deposit = equipment?.pricing?.deposit ?? 0;
+  const deposit = repricedPreview?.pricingSnapshot.deposit ?? equipment?.pricing?.deposit ?? 0;
+  const rentalSubtotal = repricedPreview?.pricingSnapshot.rentalSubtotal ?? 0;
+  const pricing = {
+    gstAmount: repricedPreview?.pricingSnapshot.gstAmount ?? 0,
+    payableTotal: repricedPreview?.pricingSnapshot.payableTotal ?? 0,
+    displayTotal: repricedPreview?.pricingSnapshot.total ?? 0,
+  };
 
-  const rentalSubtotal = useMemo(() => {
-    if (!equipment) return 0;
-    return calcRentalSubtotal(equipment, days, qty);
-  }, [equipment, days, qty]);
-
-  const pricing = useMemo(
-    () =>
-      calculateRentalCharges({
-        rentalSubtotal,
-        deliveryFee,
-        collectionFee,
-        deposit,
-      }),
-    [rentalSubtotal, deliveryFee, collectionFee, deposit]
-  );
-
-  // ✅ availability (orders + holds)
-  const availability = useMemo(() => {
-    if (!equipment || !start || !end) return null;
-    return computeAvailableUnitsForRange({
-      equipment,
-      orders: [],
-      holds: activeHolds,
-      start,
-      end,
-    });
-  }, [equipment, start, end, activeHolds]);
-
-  const availableUnits = availability?.available ?? (equipment?.totalUnits ?? 0);
-
+  const availableUnits = equipment?.totalUnits ?? 0;
   const valid =
     !!equipment &&
     !!authCustomer &&
@@ -238,6 +187,7 @@ function CheckoutInner() {
 
     setConfirming(true);
     setCheckoutError(null);
+    setCheckoutNotice(null);
 
     const order: CreateRentalOrderInput = {
       id: checkoutOrderId,
@@ -277,10 +227,45 @@ function CheckoutInner() {
         body: JSON.stringify({ order }),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data?.error ?? "Failed to start payment");
+      if (!res.ok) {
+        if (data?.availabilityBlocked) {
+          const availabilityMessage = String(
+            data?.message ?? data?.error ?? "Selected equipment is no longer available for those dates."
+          ).trim();
+          setCheckoutError(
+            availabilityMessage || "Selected equipment is no longer available for those dates."
+          );
+          setConfirming(false);
+          return;
+        }
+        if (data?.creditCheckoutBlocked) {
+          const blockedMessage = String(
+            data?.creditCheckoutMessage ?? data?.error ?? "Credit checkout is unavailable."
+          ).trim();
+          setCheckoutError(blockedMessage || "Credit checkout is unavailable.");
+          setConfirming(false);
+          return;
+        }
+        throw new Error(data?.error ?? "Failed to start payment");
+      }
+
+      const notices = [
+        String(data?.creditCheckoutMessage ?? "").trim(),
+        String(data?.pricingNotice ?? "").trim(),
+      ].filter(Boolean);
+      const combinedNotice = notices.join(" ");
+      if (combinedNotice) {
+        setCheckoutNotice(combinedNotice);
+        if (typeof window !== "undefined") {
+          window.sessionStorage.setItem("rental_checkout_notice", combinedNotice);
+        }
+      }
 
       const redirectUrl = String(data?.redirectUrl ?? "");
       if (!redirectUrl) throw new Error("Missing hosted payment URL");
+      if (combinedNotice) {
+        await new Promise((resolve) => window.setTimeout(resolve, 900));
+      }
       window.location.href = redirectUrl;
     } catch (e) {
       setCheckoutError(e instanceof Error ? e.message : "Failed to start payment");
@@ -292,7 +277,7 @@ function CheckoutInner() {
     return (
       <div className="mx-auto max-w-6xl p-4">
         <div className="rounded-xl border border-slate-200 bg-white p-6 text-sm text-slate-600">
-          Loading checkout…
+          Loading checkout...
         </div>
       </div>
     );
@@ -312,7 +297,7 @@ function CheckoutInner() {
             href="/rental"
             className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
           >
-            ← Back to catalog
+            Back to catalog
           </Link>
         </div>
       </div>
@@ -330,7 +315,7 @@ function CheckoutInner() {
           </p>
           <h1 className="mt-1 text-2xl font-semibold text-slate-900">Checkout</h1>
           <p className="mt-1 text-sm text-slate-600">
-            Review your rental details before continuing to secure payment for the invoice amount.
+            Review your rental details before continuing to payment or invoice-later processing.
           </p>
         </div>
 
@@ -338,7 +323,7 @@ function CheckoutInner() {
           href={`/rental/${encodeURIComponent(equipment.id)}`}
           className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
         >
-          ← Back
+          Back
         </Link>
       </div>
 
@@ -363,7 +348,7 @@ function CheckoutInner() {
               <div>
                 <h2 className="text-lg font-semibold text-slate-900">{equipment.title}</h2>
                 <p className="mt-1 text-sm text-slate-600">
-                  {equipment.brand ?? "—"}
+                  {equipment.brand ?? "-"}
                   {equipment.model ? ` • ${equipment.model}` : ""}
                 </p>
 
@@ -374,7 +359,7 @@ function CheckoutInner() {
                       Rental period
                     </div>
                     <div className="mt-1 text-sm text-slate-700">
-                      {start} → {end}
+                      {start} to {end}
                     </div>
                     <div className="mt-1 text-xs text-slate-500">
                       {days > 0 ? `${days} day(s)` : "Invalid date range"}
@@ -393,12 +378,7 @@ function CheckoutInner() {
                     </div>
                     <div className="mt-1 text-sm text-slate-700">Qty: {qty}</div>
                     <div className="mt-1 text-xs text-slate-500">
-                      Available units: {availableUnits}
-                      {availability && (
-                        <span className="ml-2 text-slate-400">
-                          (reserved: {availability.reserved}, hold: {availability.held})
-                        </span>
-                      )}
+                      Current catalog units: {availableUnits}
                     </div>
                     {qty > availableUnits && (
                       <div className="mt-2 text-xs font-medium text-rose-600">
@@ -433,7 +413,7 @@ function CheckoutInner() {
                 </div>
 
                 <div className="mt-4 text-xs text-slate-500">
-                  Tip: Later we can convert this rental booking into a real “job” workflow (delivery + collection legs).
+                  Equipment pricing and inventory come from the published rental catalog. Final availability is rechecked on the server.
                 </div>
               </div>
             </div>
@@ -538,86 +518,95 @@ function CheckoutInner() {
             </div>
 
             <div className="mt-6 border-t border-slate-200 pt-5">
-            <h2 className="text-sm font-semibold text-slate-900">Price breakdown</h2>
-            <p className="mt-1 text-xs text-slate-500">
-              GST is included in the payable amount below. Deposit is tracked separately and not collected online in this phase.
-            </p>
+              <h2 className="text-sm font-semibold text-slate-900">Price breakdown</h2>
+              <p className="mt-1 text-xs text-slate-500">
+                GST is included in rental charges below. Any refundable deposit is shown separately and charged distinctly at checkout.
+              </p>
 
-            <div className="mt-4 space-y-2 text-sm">
-              <div className="flex items-center justify-between">
-                <span className="text-slate-600">Rental subtotal</span>
-                <span className="font-semibold text-slate-900">
-                  {formatMoney(rentalSubtotal)}
-                </span>
-              </div>
-
-              <div className="flex items-center justify-between">
-                <span className="text-slate-600">Delivery fee</span>
-                <span className="text-slate-900">{formatMoney(deliveryFee)}</span>
-              </div>
-
-              <div className="flex items-center justify-between">
-                <span className="text-slate-600">Collection fee</span>
-                <span className="text-slate-900">{formatMoney(collectionFee)}</span>
-              </div>
-
-              <div className="flex items-center justify-between">
-                <span className="text-slate-600">GST</span>
-                <span className="text-slate-900">{formatMoney(pricing.gstAmount)}</span>
-              </div>
-
-              <div className="flex items-center justify-between">
-                <span className="text-slate-600">Deposit</span>
-                <span className="text-slate-900">{formatMoney(deposit)} (not charged online)</span>
-              </div>
-
-              <div className="mt-3 border-t border-slate-200 pt-3">
+              <div className="mt-4 space-y-2 text-sm">
                 <div className="flex items-center justify-between">
-                  <span className="font-semibold text-slate-700">Payable now</span>
-                  <span className="text-lg font-semibold text-slate-900">
-                    {formatMoney(pricing.payableTotal)}
-                  </span>
+                  <span className="text-slate-600">Rental subtotal</span>
+                  <span className="font-semibold text-slate-900">{formatMoney(rentalSubtotal)}</span>
                 </div>
-                <div className="mt-1 text-xs text-slate-500">
-                  Deposit remains recorded separately for future collection and refund handling.
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-600">Delivery fee</span>
+                  <span className="text-slate-900">{formatMoney(deliveryFee)}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-600">Collection fee</span>
+                  <span className="text-slate-900">{formatMoney(collectionFee)}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-600">GST</span>
+                  <span className="text-slate-900">{formatMoney(pricing.gstAmount)}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-600">Refundable deposit</span>
+                  <span className="text-slate-900">{formatMoney(deposit)}</span>
+                </div>
+
+                <div className="mt-3 border-t border-slate-200 pt-3">
+                  <div className="flex items-center justify-between">
+                    <span className="font-semibold text-slate-700">Rental charges due now</span>
+                    <span className="text-slate-900">{formatMoney(pricing.payableTotal)}</span>
+                  </div>
+                  <div className="mt-2 flex items-center justify-between">
+                    <span className="font-semibold text-slate-700">Total charged now</span>
+                    <span className="text-lg font-semibold text-slate-900">
+                      {formatMoney(pricing.displayTotal)}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="mt-1 text-xs text-slate-500">
+                      Deposit remains tracked separately from rental revenue in our accounting records.
+                    </span>
+                  </div>
+                  <div className="mt-1 text-xs text-slate-500">
+                    Temporary availability hold and final inventory validation are handled on the server when checkout starts.
+                  </div>
                 </div>
               </div>
-            </div>
 
-            {!valid && (
-              <div className="mt-4 rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs text-rose-700">
-                {!authCustomer
-                  ? "Sign in or register to continue with booking."
-                  : authCustomer.accountStatus !== "active"
-                    ? "This customer account is suspended."
-                    : "Invalid checkout parameters or insufficient availability. Please go back and reselect your dates/quantity."}
+              {!valid && (
+                <div className="mt-4 rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs text-rose-700">
+                  {!authCustomer
+                    ? "Sign in or register to continue with booking."
+                    : authCustomer.accountStatus !== "active"
+                      ? "This customer account is suspended."
+                      : "Invalid checkout parameters. Please go back and reselect your dates or quantity."}
+                </div>
+              )}
+
+              {checkoutError && (
+                <div className="mt-4 rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs text-rose-700">
+                  {checkoutError}
+                </div>
+              )}
+
+              {checkoutNotice && (
+                <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+                  {checkoutNotice}
+                </div>
+              )}
+
+              <button
+                type="button"
+                disabled={!valid || confirming}
+                onClick={confirmBooking}
+                className={[
+                  "mt-4 inline-flex w-full items-center justify-center rounded-xl px-4 py-3 text-sm font-semibold",
+                  valid && !confirming
+                    ? "bg-sky-600 text-white hover:bg-sky-700"
+                    : "cursor-not-allowed bg-slate-200 text-slate-500",
+                ].join(" ")}
+              >
+                {confirming ? "Processing..." : "Continue checkout"}
+                <ArrowRight className="ml-2 h-4 w-4" />
+              </button>
+
+              <div className="mt-3 text-xs text-slate-500">
+                Orders are created server-side. Upfront customers are redirected to hosted payment, while eligible credit customers continue through the existing invoice-later flow.
               </div>
-            )}
-
-            {checkoutError && (
-              <div className="mt-4 rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs text-rose-700">
-                {checkoutError}
-              </div>
-            )}
-
-            <button
-              type="button"
-              disabled={!valid || confirming}
-              onClick={confirmBooking}
-              className={[
-                "mt-4 inline-flex w-full items-center justify-center rounded-xl px-4 py-3 text-sm font-semibold",
-                valid && !confirming
-                  ? "bg-sky-600 text-white hover:bg-sky-700"
-                  : "cursor-not-allowed bg-slate-200 text-slate-500",
-              ].join(" ")}
-            >
-              {confirming ? "Processing..." : "Continue checkout"}
-              <ArrowRight className="ml-2 h-4 w-4" />
-            </button>
-
-            <div className="mt-3 text-xs text-slate-500">
-              Orders are created server-side first. Upfront customers are redirected to hosted PayNow payment. Pre-vetted credit customers are invoiced directly.
-            </div>
             </div>
           </div>
         </div>

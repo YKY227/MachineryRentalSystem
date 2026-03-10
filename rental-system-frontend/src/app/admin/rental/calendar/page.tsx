@@ -4,7 +4,6 @@
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import type { Equipment } from "@/lib/rental/types";
-import { localEquipmentRepo } from "@/lib/rental/equipment-repo";
 import { useRouter } from "next/navigation";
 import { useAdminEquipments } from "@/lib/rental/hooks/useAdminEquipments";
 /**

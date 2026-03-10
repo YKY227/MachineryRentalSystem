@@ -56,6 +56,11 @@ export type UpdateRentalCustomerInput = {
   paymentTerms?: RentalCustomerPaymentTerms;
   accountStatus?: RentalCustomerAccountStatus;
   internalNotes?: string;
+  creditLimit?: number | null;
+  creditControlEnabled?: boolean;
+  creditHoldReason?: string | null;
+  creditLastReviewedAt?: string | null;
+  creditLastReviewedBy?: string | null;
 };
 
 const CUSTOMER_COLUMNS = [
@@ -139,6 +144,19 @@ function toUpdatePayload(input: UpdateRentalCustomerInput) {
   if (input.paymentTerms) payload.payment_terms = input.paymentTerms;
   if (input.accountStatus) payload.account_status = input.accountStatus;
   if (typeof input.internalNotes === "string") payload.internal_notes = input.internalNotes.trim() || null;
+  if (input.creditLimit !== undefined) payload.credit_limit = input.creditLimit;
+  if (typeof input.creditControlEnabled === "boolean") {
+    payload.credit_control_enabled = input.creditControlEnabled;
+  }
+  if (input.creditHoldReason !== undefined) {
+    payload.credit_hold_reason = input.creditHoldReason?.trim() || null;
+  }
+  if (input.creditLastReviewedAt !== undefined) {
+    payload.credit_last_reviewed_at = input.creditLastReviewedAt;
+  }
+  if (input.creditLastReviewedBy !== undefined) {
+    payload.credit_last_reviewed_by = input.creditLastReviewedBy?.trim() || null;
+  }
 
   return payload;
 }

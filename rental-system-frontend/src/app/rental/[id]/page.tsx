@@ -1,4 +1,3 @@
-// src/app/rental/[id]/page.tsx
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -16,10 +15,11 @@ import {
   MapPin,
 } from "lucide-react";
 
-import type { Equipment, EquipmentHold } from "@/lib/rental/types";
-import { localEquipmentRepo } from "@/lib/rental/equipment-repo";
-import { localHoldsRepo } from "@/lib/rental/holds-repo";
-import { computeAvailableUnitsForRange } from "@/lib/rental/availability";
+import type { Equipment } from "@/lib/rental/types";
+import {
+  calculateAuthoritativeRentalPricing,
+  calculateRentalDaysInclusive,
+} from "@/lib/rental/orders/pricing";
 
 type FulfillmentMode = "deliver" | "self_collect";
 
@@ -31,76 +31,6 @@ function formatMoney(n: number) {
   }).format(n);
 }
 
-function daysInclusive(startISO: string, endISO: string) {
-  const s = new Date(startISO);
-  const e = new Date(endISO);
-  if (Number.isNaN(s.getTime()) || Number.isNaN(e.getTime())) return 0;
-  const ms = e.getTime() - s.getTime();
-  const days = Math.floor(ms / (1000 * 60 * 60 * 24)) + 1;
-  return days;
-}
-
-/**
- * Simple tier logic for MVP:
- * - days >= 28 => monthRate prorated by 30-day "months"
- * - else days >= 7 => weekRate prorated by 7-day "weeks"
- * - else dayRate
- *
- * Later: replace with backend quote endpoint or a shared pricing lib.
- */
-function calcRentalSubtotal(e: Equipment, days: number, qty: number) {
-  const day = e.pricing.dayRate ?? 0;
-  const week = e.pricing.weekRate ?? null;
-  const month = e.pricing.monthRate ?? null;
-
-  if (days <= 0 || qty <= 0) return 0;
-
-  let perUnit = day * days;
-
-  if (month && days >= 28) {
-    const months = days / 30;
-    perUnit = month * months;
-  } else if (week && days >= 7) {
-    const weeks = days / 7;
-    perUnit = week * weeks;
-  }
-
-  return Math.round(perUnit * qty);
-}
-
-type LocalRentalOrder = {
-  id: string; // publicId
-  equipmentId: string;
-  equipmentTitle: string;
-  qty: number;
-  start: string;
-  end: string;
-  fulfillment: FulfillmentMode;
-  pricingSnapshot: {
-    days: number;
-    rentalSubtotal: number;
-    deliveryFee: number;
-    collectionFee: number;
-    deposit: number;
-    total: number;
-  };
-  createdAt: string;
-};
-
-const ORDERS_LS_KEY = "cms_rental_orders_v1";
-
-function readOrders(): LocalRentalOrder[] {
-  if (typeof window === "undefined") return [];
-  try {
-    const raw = localStorage.getItem(ORDERS_LS_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? (parsed as LocalRentalOrder[]) : [];
-  } catch {
-    return [];
-  }
-}
-
 export default function RentalDetailPage() {
   const params = useParams();
   const router = useRouter();
@@ -110,54 +40,35 @@ export default function RentalDetailPage() {
   const [loading, setLoading] = useState(true);
   const [equipment, setEquipment] = useState<Equipment | null>(null);
   const [selectedImg, setSelectedImg] = useState(0);
-
-  // booking inputs (MVP)
   const [qty, setQty] = useState(1);
-  const [startDate, setStartDate] = useState(() => {
-    const d = new Date();
-    return d.toISOString().slice(0, 10);
-  });
+  const [startDate, setStartDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [endDate, setEndDate] = useState(() => {
     const d = new Date();
     d.setDate(d.getDate() + 2);
     return d.toISOString().slice(0, 10);
   });
-
   const [fulfillment, setFulfillment] = useState<FulfillmentMode>("deliver");
-
-  // ✅ NEW: delivery address (only required when deliver)
   const [deliveryAddress, setDeliveryAddress] = useState("");
 
-  // ✅ NEW: holds (maintenance buffers etc.) for availability checks
-  const [activeHolds, setActiveHolds] = useState<EquipmentHold[]>([]);
-
-  // MVP fixed fees (you can later switch to region-based or distance-based)
   const deliveryFee = fulfillment === "deliver" ? 60 : 0;
   const collectionFee = fulfillment === "deliver" ? 60 : 0;
 
   useEffect(() => {
     let mounted = true;
-    (async () => {
-      const holds = await localHoldsRepo.listActive();
-      if (!mounted) return;
-      setActiveHolds(holds);
-    })();
-    return () => {
-      mounted = false;
-    };
-  }, []);
 
-  useEffect(() => {
-    let mounted = true;
     (async () => {
       setLoading(true);
-      const e = await localEquipmentRepo.getById(equipmentId);
-      if (!mounted) return;
-
-      setEquipment(e);
-      setSelectedImg(0);
-
-      setLoading(false);
+      try {
+        const res = await fetch(`/api/public/rental/equipment/${encodeURIComponent(equipmentId)}`, {
+          cache: "no-store",
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!mounted) return;
+        setEquipment(res.ok ? ((data?.equipment ?? null) as Equipment | null) : null);
+        setSelectedImg(0);
+      } finally {
+        if (mounted) setLoading(false);
+      }
     })();
 
     return () => {
@@ -165,73 +76,51 @@ export default function RentalDetailPage() {
     };
   }, [equipmentId]);
 
-  // ✅ optional UX: if switching to self-collect, clear delivery address
   useEffect(() => {
     if (fulfillment === "self_collect" && deliveryAddress) {
       setDeliveryAddress("");
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fulfillment]);
+  }, [deliveryAddress, fulfillment]);
 
-  const days = useMemo(
-    () => daysInclusive(startDate, endDate),
-    [startDate, endDate]
-  );
-
+  const days = useMemo(() => calculateRentalDaysInclusive(startDate, endDate), [startDate, endDate]);
   const minDays = equipment?.pricing?.minDays ?? 1;
-  const deposit = equipment?.pricing?.deposit ?? 0;
+  const availableUnitsForRange = equipment?.totalUnits ?? 0;
 
-  // ✅ compute availability for selected date range
-  const availability = useMemo(() => {
-    if (!equipment) return null;
-    if (!startDate || !endDate) return null;
-
-    const orders = readOrders();
-
-    return computeAvailableUnitsForRange({
-      equipment,
-      orders,
-      holds: activeHolds,
-      start: startDate,
-      end: endDate,
-    });
-  }, [equipment, startDate, endDate, activeHolds]);
-
-  // total units might be 3, but availableUnits might be 2 (if 1 unit held/ordered overlapping)
-  const availableUnitsForRange = availability?.available ?? (equipment?.totalUnits ?? 0);
-
-  // clamp qty when availability changes (prevents qty being > available and getting stuck)
   useEffect(() => {
-    setQty((prev) => {
-      const next = Math.max(1, Math.min(prev, Math.max(1, availableUnitsForRange)));
-      return next;
-    });
+    setQty((prev) => Math.max(1, Math.min(prev, Math.max(1, availableUnitsForRange))));
   }, [availableUnitsForRange]);
 
-  const rentalSubtotal = useMemo(() => {
-    if (!equipment) return 0;
-    return calcRentalSubtotal(equipment, days, qty);
-  }, [equipment, days, qty]);
+  const repricedPreview = useMemo(() => {
+    if (!equipment) return null;
+    try {
+      return calculateAuthoritativeRentalPricing({
+        equipment,
+        qty,
+        start: startDate,
+        end: endDate,
+        fulfillment,
+      });
+    } catch {
+      return null;
+    }
+  }, [endDate, equipment, fulfillment, qty, startDate]);
+  const deposit = repricedPreview?.pricingSnapshot.deposit ?? equipment?.pricing?.deposit ?? 0;
+  const rentalSubtotal = repricedPreview?.pricingSnapshot.rentalSubtotal ?? 0;
 
   const total = useMemo(() => {
     return rentalSubtotal + deliveryFee + collectionFee + deposit;
-  }, [rentalSubtotal, deliveryFee, collectionFee, deposit]);
+  }, [collectionFee, deliveryFee, deposit, rentalSubtotal]);
 
   const inStock = availableUnitsForRange > 0;
-
   const dateValid = days > 0 && days >= minDays;
   const qtyValid = qty >= 1 && qty <= availableUnitsForRange;
-
-  // ✅ address required only for deliver
   const addressRequired = fulfillment === "deliver";
-  const addressValid = !addressRequired || deliveryAddress.trim().length >= 8; // simple MVP rule
+  const addressValid = !addressRequired || deliveryAddress.trim().length >= 8;
 
-  const canProceed =
-    !!equipment && inStock && dateValid && qtyValid && addressValid;
+  const canProceed = !!equipment && inStock && dateValid && qtyValid && addressValid;
 
   function handleProceed() {
-    if (!equipment) return;
-    if (!canProceed) return;
+    if (!equipment || !canProceed) return;
 
     const qp = new URLSearchParams();
     qp.set("equipmentId", equipment.id);
@@ -239,10 +128,7 @@ export default function RentalDetailPage() {
     qp.set("start", startDate);
     qp.set("end", endDate);
     qp.set("fulfillment", fulfillment);
-
-    // ✅ pass address only when deliver
     if (fulfillment === "deliver") qp.set("address", deliveryAddress.trim());
-
     router.push(`/rental/checkout?${qp.toString()}`);
   }
 
@@ -250,7 +136,7 @@ export default function RentalDetailPage() {
     return (
       <div className="mx-auto max-w-6xl p-4">
         <div className="rounded-xl border border-slate-200 bg-white p-6 text-sm text-slate-600">
-          Loading equipment…
+          Loading equipment...
         </div>
       </div>
     );
@@ -263,14 +149,14 @@ export default function RentalDetailPage() {
           <div>
             <h1 className="text-2xl font-semibold text-slate-900">Not found</h1>
             <p className="mt-1 text-sm text-slate-600">
-              This equipment does not exist (or is not available).
+              This equipment does not exist or is no longer published.
             </p>
           </div>
           <Link
             href="/rental"
             className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
           >
-            ← Back to catalog
+            Back to catalog
           </Link>
         </div>
       </div>
@@ -278,20 +164,13 @@ export default function RentalDetailPage() {
   }
 
   const heroImg = equipment.images?.[selectedImg] ?? equipment.images?.[0] ?? "";
-
-  const catalogueUrl = (equipment as any).catalogueUrl?.trim?.() ?? ""; // adjust once type updated
-const trainingVideoUrl = (equipment as any).trainingVideoUrl?.trim?.() ?? "";
-
-const hasCatalogue = !!catalogueUrl;
-const hasTrainingVideo = !!trainingVideoUrl;
-
-// optional: basic “safe-ish” check (MVP)
-const safeCatalogueUrl = hasCatalogue && /^https?:\/\//i.test(catalogueUrl) ? catalogueUrl : "";
-const safeTrainingUrl = hasTrainingVideo && /^https?:\/\//i.test(trainingVideoUrl) ? trainingVideoUrl : "";
+  const catalogueUrl = equipment.catalogueUrl?.trim() ?? "";
+  const trainingVideoUrl = equipment.trainingVideoUrl?.trim() ?? "";
+  const safeCatalogueUrl = /^https?:\/\//i.test(catalogueUrl) ? catalogueUrl : "";
+  const safeTrainingUrl = /^https?:\/\//i.test(trainingVideoUrl) ? trainingVideoUrl : "";
 
   return (
     <div className="mx-auto max-w-6xl p-4">
-      {/* Top row */}
       <div className="flex items-start justify-between gap-4">
         <div>
           <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
@@ -301,21 +180,20 @@ const safeTrainingUrl = hasTrainingVideo && /^https?:\/\//i.test(trainingVideoUr
             {equipment.title}
           </h1>
           <p className="mt-1 text-sm text-slate-600">
-            {equipment.brand ?? "—"}
+            {equipment.brand ?? "-"}
             {equipment.model ? ` • ${equipment.model}` : ""}
           </p>
         </div>
 
         <Link
-          href="/"
+          href="/rental"
           className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
         >
-          ← Back
+          Back
         </Link>
       </div>
 
       <div className="mt-6 grid gap-6 lg:grid-cols-12">
-        {/* Left: gallery + details */}
         <div className="lg:col-span-7">
           <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
             <div className="relative aspect-[16/10] w-full bg-slate-100">
@@ -332,21 +210,18 @@ const safeTrainingUrl = hasTrainingVideo && /^https?:\/\//i.test(trainingVideoUr
               )}
             </div>
 
-            {/* thumbnails */}
             {equipment.images?.length > 1 && (
               <div className="flex gap-2 overflow-x-auto border-t border-slate-200 p-3">
                 {equipment.images.map((url, idx) => {
                   const active = idx === selectedImg;
                   return (
                     <button
-                      key={url + idx}
+                      key={`${url}-${idx}`}
                       type="button"
                       onClick={() => setSelectedImg(idx)}
                       className={[
                         "h-16 w-24 flex-shrink-0 overflow-hidden rounded-lg border",
-                        active
-                          ? "border-slate-900"
-                          : "border-slate-200 hover:border-slate-300",
+                        active ? "border-slate-900" : "border-slate-200 hover:border-slate-300",
                       ].join(" ")}
                       aria-label={`Select image ${idx + 1}`}
                     >
@@ -363,34 +238,22 @@ const safeTrainingUrl = hasTrainingVideo && /^https?:\/\//i.test(trainingVideoUr
             )}
           </div>
 
-          {/* Overview + Specifications */}
           <div className="mt-6 grid gap-6 md:grid-cols-2">
-            {/* Overview */}
             <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
               <h2 className="text-sm font-semibold text-slate-900">Overview</h2>
-              <p className="mt-2 text-sm text-slate-600">{equipment.shortDesc}</p>
+              <p className="mt-2 text-sm text-slate-600">
+                {equipment.description || equipment.shortDesc}
+              </p>
 
               <div className="mt-4 space-y-2 text-xs text-slate-600">
                 <div className="flex items-center gap-2">
                   <CheckCircle2 className="h-4 w-4 text-emerald-600" />
-                  {inStock
-                    ? `${availableUnitsForRange} unit(s) available for selected dates`
-                    : "No units available for selected dates"}
+                  {inStock ? `${availableUnitsForRange} unit(s) in catalog inventory` : "Out of stock"}
                 </div>
-
-                {/* Optional detail: where the availability came from */}
-                {availability && (
-                  <div className="text-[11px] text-slate-500">
-                    Total: {equipment.totalUnits} • Reserved: {availability.reserved} • Held:{" "}
-                    {availability.held}
-                  </div>
-                )}
-
                 <div className="flex items-center gap-2">
                   <CalendarDays className="h-4 w-4 text-slate-500" />
                   Min rental: {minDays} day(s)
                 </div>
-
                 {deposit > 0 && (
                   <div className="flex items-center gap-2">
                     <Shield className="h-4 w-4 text-slate-500" />
@@ -400,10 +263,8 @@ const safeTrainingUrl = hasTrainingVideo && /^https?:\/\//i.test(trainingVideoUr
               </div>
             </div>
 
-            {/* Specifications */}
             <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
               <h2 className="text-sm font-semibold text-slate-900">Specifications</h2>
-
               <div className="mt-3 space-y-2">
                 {Object.entries(equipment.specs ?? {}).map(([k, v]) => (
                   <div
@@ -414,8 +275,7 @@ const safeTrainingUrl = hasTrainingVideo && /^https?:\/\//i.test(trainingVideoUr
                     <div className="text-xs text-slate-900">{v}</div>
                   </div>
                 ))}
-
-                {(!equipment.specs || Object.keys(equipment.specs).length === 0) && (
+                {Object.keys(equipment.specs ?? {}).length === 0 && (
                   <div className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">
                     No specs provided yet.
                   </div>
@@ -424,114 +284,100 @@ const safeTrainingUrl = hasTrainingVideo && /^https?:\/\//i.test(trainingVideoUr
             </div>
           </div>
 
-          {/* ✅ Resources (Catalogue + Training Video) */}
-<div className="mt-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-  <div className="flex items-center justify-between gap-3">
-    <div>
-      <h2 className="text-sm font-semibold text-slate-900">Resources</h2>
-      <p className="mt-1 text-xs text-slate-500">
-        Operator references (optional). Buttons disable if not provided.
-      </p>
-    </div>
-  </div>
+          <div className="mt-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div>
+              <h2 className="text-sm font-semibold text-slate-900">Resources</h2>
+              <p className="mt-1 text-xs text-slate-500">
+                Optional supporting references for operators and planners.
+              </p>
+            </div>
 
-  <div className="mt-4 grid gap-3 sm:grid-cols-2">
-    {/* Catalogue */}
-    {safeCatalogueUrl ? (
-      <a
-        href={safeCatalogueUrl}
-        target="_blank"
-        rel="noreferrer"
-        className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-900 hover:bg-slate-50"
-      >
-        {/* icon */}
-        <Package className="h-4 w-4 text-slate-700" />
-        Open catalogue
-      </a>
-    ) : (
-      <button
-        type="button"
-        disabled
-        className="inline-flex cursor-not-allowed items-center justify-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-400"
-        title="No catalogue provided"
-      >
-        <Package className="h-4 w-4 text-slate-300" />
-        Catalogue unavailable
-      </button>
-    )}
+            <div className="mt-4 grid gap-3 sm:grid-cols-2">
+              {safeCatalogueUrl ? (
+                <a
+                  href={safeCatalogueUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-900 hover:bg-slate-50"
+                >
+                  <Package className="h-4 w-4 text-slate-700" />
+                  Open catalogue
+                </a>
+              ) : (
+                <button
+                  type="button"
+                  disabled
+                  className="inline-flex cursor-not-allowed items-center justify-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-400"
+                >
+                  <Package className="h-4 w-4 text-slate-300" />
+                  Catalogue unavailable
+                </button>
+              )}
 
-    {/* Training video */}
-    {safeTrainingUrl ? (
-      <a
-        href={safeTrainingUrl}
-        target="_blank"
-        rel="noreferrer"
-        className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-900 hover:bg-slate-50"
-      >
-        {/* icon */}
-        <Sparkles className="h-4 w-4 text-slate-700" />
-        Watch training video
-      </a>
-    ) : (
-      <button
-        type="button"
-        disabled
-        className="inline-flex cursor-not-allowed items-center justify-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-400"
-        title="No training video provided"
-      >
-        <Sparkles className="h-4 w-4 text-slate-300" />
-        Training video unavailable
-      </button>
-    )}
-  </div>
-</div>
+              {safeTrainingUrl ? (
+                <a
+                  href={safeTrainingUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-900 hover:bg-slate-50"
+                >
+                  <Sparkles className="h-4 w-4 text-slate-700" />
+                  Watch training video
+                </a>
+              ) : (
+                <button
+                  type="button"
+                  disabled
+                  className="inline-flex cursor-not-allowed items-center justify-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-400"
+                >
+                  <Sparkles className="h-4 w-4 text-slate-300" />
+                  Training video unavailable
+                </button>
+              )}
+            </div>
+          </div>
 
-          {/* Key features + Applications */}
           <div className="mt-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
             <div className="grid gap-6 md:grid-cols-2">
-              {/* Key features */}
               <div>
                 <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
                   <Sparkles className="h-4 w-4 text-amber-600" />
                   Key features
                 </div>
-
                 <ul className="mt-3 space-y-2 text-sm text-slate-600">
                   {(equipment.keyFeatures?.length
                     ? equipment.keyFeatures
                     : [
                         "Transparent tiered pricing (day / week / month)",
-                        "Delivery + collection available, or self-collect option",
-                        "Refundable deposit for asset protection (if applicable)",
+                        "Delivery and collection or self-collect",
+                        "Refundable deposit where applicable",
                       ]
-                  ).map((f) => (
-                    <li key={f} className="flex items-start gap-2">
+                  ).map((item) => (
+                    <li key={item} className="flex items-start gap-2">
                       <span className="mt-1 inline-block h-1.5 w-1.5 rounded-full bg-slate-400" />
-                      <span>{f}</span>
+                      <span>{item}</span>
                     </li>
                   ))}
                 </ul>
               </div>
 
-              {/* Applications */}
               <div className="md:border-l md:border-slate-200 md:pl-6">
                 <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
                   <Factory className="h-4 w-4 text-slate-700" />
                   Applications
                 </div>
-
                 <ul className="mt-3 space-y-2 text-sm text-slate-600">
                   {(equipment.applications?.length
                     ? equipment.applications
                     : [
-                        "Construction & renovation works",
-                        "Events & temporary site setup",
-                        "Maintenance & facility operations",
+                        "Construction and renovation works",
+                        "Events and temporary site setup",
+                        "Maintenance and facility operations",
                       ]
-                  ).map((a) => (
-                    <li key={a} className="flex items-start gap-2">
+                  ).map((item) => (
+                    <li key={item} className="flex items-start gap-2">
                       <span className="mt-1 inline-block h-1.5 w-1.5 rounded-full bg-slate-400" />
-                      <span>{a}</span>
+                      <span>{item}</span>
                     </li>
                   ))}
                 </ul>
@@ -540,17 +386,15 @@ const safeTrainingUrl = hasTrainingVideo && /^https?:\/\//i.test(trainingVideoUr
           </div>
         </div>
 
-        {/* Right: booking panel */}
         <div className="lg:col-span-5">
           <div className="sticky top-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
             <h2 className="text-sm font-semibold text-slate-900">
-              Create rental booking (MVP)
+              Create rental booking
             </h2>
             <p className="mt-1 text-xs text-slate-500">
-              Availability updates based on selected dates (orders + maintenance holds).
+              Final availability is checked and locked server-side when checkout begins.
             </p>
 
-            {/* Pricing card */}
             <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
               <div className="flex items-baseline justify-between">
                 <div className="text-xs text-slate-500">From</div>
@@ -561,41 +405,30 @@ const safeTrainingUrl = hasTrainingVideo && /^https?:\/\//i.test(trainingVideoUr
               </div>
               <div className="mt-2 grid grid-cols-3 gap-2 text-center">
                 <div className="rounded-lg bg-white p-2">
-                  <div className="text-[10px] uppercase tracking-wide text-slate-500">
-                    Day
-                  </div>
+                  <div className="text-[10px] uppercase tracking-wide text-slate-500">Day</div>
                   <div className="text-sm font-semibold text-slate-900">
                     {formatMoney(equipment.pricing.dayRate)}
                   </div>
                 </div>
                 <div className="rounded-lg bg-white p-2">
-                  <div className="text-[10px] uppercase tracking-wide text-slate-500">
-                    Week
-                  </div>
+                  <div className="text-[10px] uppercase tracking-wide text-slate-500">Week</div>
                   <div className="text-sm font-semibold text-slate-900">
-                    {equipment.pricing.weekRate ? formatMoney(equipment.pricing.weekRate) : "—"}
+                    {equipment.pricing.weekRate ? formatMoney(equipment.pricing.weekRate) : "-"}
                   </div>
                 </div>
                 <div className="rounded-lg bg-white p-2">
-                  <div className="text-[10px] uppercase tracking-wide text-slate-500">
-                    Month
-                  </div>
+                  <div className="text-[10px] uppercase tracking-wide text-slate-500">Month</div>
                   <div className="text-sm font-semibold text-slate-900">
-                    {equipment.pricing.monthRate ? formatMoney(equipment.pricing.monthRate) : "—"}
+                    {equipment.pricing.monthRate ? formatMoney(equipment.pricing.monthRate) : "-"}
                   </div>
                 </div>
               </div>
             </div>
 
-            
-
-            {/* Inputs */}
             <div className="mt-4 space-y-3">
               <div className="grid gap-3 sm:grid-cols-2">
                 <div>
-                  <label className="text-xs font-medium text-slate-700">
-                    Start date
-                  </label>
+                  <label className="text-xs font-medium text-slate-700">Start date</label>
                   <input
                     type="date"
                     value={startDate}
@@ -604,9 +437,7 @@ const safeTrainingUrl = hasTrainingVideo && /^https?:\/\//i.test(trainingVideoUr
                   />
                 </div>
                 <div>
-                  <label className="text-xs font-medium text-slate-700">
-                    End date
-                  </label>
+                  <label className="text-xs font-medium text-slate-700">End date</label>
                   <input
                     type="date"
                     value={endDate}
@@ -623,9 +454,7 @@ const safeTrainingUrl = hasTrainingVideo && /^https?:\/\//i.test(trainingVideoUr
               )}
 
               <div>
-                <label className="text-xs font-medium text-slate-700">
-                  Quantity
-                </label>
+                <label className="text-xs font-medium text-slate-700">Quantity</label>
                 <input
                   type="number"
                   min={1}
@@ -635,12 +464,12 @@ const safeTrainingUrl = hasTrainingVideo && /^https?:\/\//i.test(trainingVideoUr
                   className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-slate-400"
                 />
                 <div className="mt-1 text-xs text-slate-500">
-                  Available for selected dates:{" "}
+                  Current catalog units:{" "}
                   <span className="font-semibold text-slate-700">{availableUnitsForRange}</span>
                 </div>
                 {!qtyValid && (
                   <p className="mt-1 text-xs text-rose-600">
-                    Quantity exceeds availability for selected dates.
+                    Quantity exceeds available inventory.
                   </p>
                 )}
               </div>
@@ -677,7 +506,6 @@ const safeTrainingUrl = hasTrainingVideo && /^https?:\/\//i.test(trainingVideoUr
                   </button>
                 </div>
 
-                {/* delivery address */}
                 {fulfillment === "deliver" ? (
                   <div className="mt-3">
                     <label className="text-xs font-medium text-slate-700">
@@ -691,7 +519,7 @@ const safeTrainingUrl = hasTrainingVideo && /^https?:\/\//i.test(trainingVideoUr
                         onChange={(e) => setDeliveryAddress(e.target.value)}
                         placeholder="e.g. 10 Ubi Crescent, #05-12, Singapore 408564"
                         className={[
-                          "w-full rounded-xl border bg-white pl-9 pr-3 py-2 text-sm outline-none",
+                          "w-full rounded-xl border bg-white py-2 pl-9 pr-3 text-sm outline-none",
                           addressValid
                             ? "border-slate-200 focus:border-slate-400"
                             : "border-rose-300 focus:border-rose-400",
@@ -712,35 +540,29 @@ const safeTrainingUrl = hasTrainingVideo && /^https?:\/\//i.test(trainingVideoUr
               </div>
             </div>
 
-            {/* Quote */}
             <div className="mt-5 rounded-xl border border-slate-200 bg-white p-4">
               <div className="flex items-center justify-between">
                 <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
                   Price estimate
                 </div>
                 <div className="text-xs text-slate-500">
-                  {days > 0 ? `${days} day(s)` : "—"}
+                  {days > 0 ? `${days} day(s)` : "-"}
                 </div>
               </div>
 
               <div className="mt-3 space-y-2 text-sm">
                 <div className="flex items-center justify-between">
                   <span className="text-slate-600">Rental subtotal</span>
-                  <span className="font-semibold text-slate-900">
-                    {formatMoney(rentalSubtotal)}
-                  </span>
+                  <span className="font-semibold text-slate-900">{formatMoney(rentalSubtotal)}</span>
                 </div>
-
                 <div className="flex items-center justify-between">
                   <span className="text-slate-600">Delivery fee</span>
                   <span className="text-slate-900">{formatMoney(deliveryFee)}</span>
                 </div>
-
                 <div className="flex items-center justify-between">
                   <span className="text-slate-600">Collection fee</span>
                   <span className="text-slate-900">{formatMoney(collectionFee)}</span>
                 </div>
-
                 <div className="flex items-center justify-between">
                   <span className="text-slate-600">Deposit (refundable)</span>
                   <span className="text-slate-900">{formatMoney(deposit)}</span>
@@ -748,20 +570,17 @@ const safeTrainingUrl = hasTrainingVideo && /^https?:\/\//i.test(trainingVideoUr
 
                 <div className="mt-2 border-t border-slate-200 pt-3">
                   <div className="flex items-center justify-between">
-                    <span className="text-slate-700 font-semibold">Total</span>
-                    <span className="text-slate-900 font-semibold">
-                      {formatMoney(total)}
-                    </span>
+                    <span className="font-semibold text-slate-700">Total</span>
+                    <span className="font-semibold text-slate-900">{formatMoney(total)}</span>
                   </div>
                 </div>
 
                 <p className="mt-2 text-xs text-slate-500">
-                  MVP estimate — availability is date-aware (orders + maintenance holds).
+                  Final inventory and temporary checkout hold are enforced on the server.
                 </p>
               </div>
             </div>
 
-            {/* CTA */}
             <button
               type="button"
               onClick={handleProceed}
@@ -779,7 +598,7 @@ const safeTrainingUrl = hasTrainingVideo && /^https?:\/\//i.test(trainingVideoUr
 
             {!inStock && (
               <p className="mt-2 text-xs text-rose-600">
-                No units available for the selected dates. Try different dates.
+                This equipment is currently out of stock.
               </p>
             )}
           </div>

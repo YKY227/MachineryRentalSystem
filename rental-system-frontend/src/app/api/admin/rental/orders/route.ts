@@ -5,6 +5,7 @@ import {
   assertAdmin,
   isAdminUnauthorized,
 } from "@/lib/auth/admin";
+import { dbRentalDepositRepo } from "@/lib/rental/deposits/db-rental-deposit-repo";
 import { dbOrderRepo } from "@/lib/rental/orders/db-order-repo";
 import type { CreateRentalOrderInput } from "@/lib/rental/orders/types";
 
@@ -23,7 +24,10 @@ export async function GET(req: Request) {
     assertAdmin(req);
     requireOrderEnv();
     const orders = await dbOrderRepo.list();
-    return NextResponse.json({ orders });
+    const depositSummariesByOrderId = await dbRentalDepositRepo.listByOrderIds(
+      orders.map((order) => order.id)
+    );
+    return NextResponse.json({ orders, depositSummariesByOrderId });
   } catch (e) {
     if (isAdminUnauthorized(e)) return adminUnauthorizedResponse();
     const message = e instanceof Error ? e.message : "Order list failed";

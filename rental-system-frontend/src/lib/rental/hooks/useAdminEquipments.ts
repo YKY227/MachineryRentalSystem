@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState } from "react";
 import type { Equipment } from "@/lib/rental/types";
-import { localEquipmentRepo } from "@/lib/rental/equipment-repo";
 
 export function useAdminEquipments(opts?: {
   persistKey?: string;
@@ -16,21 +15,32 @@ export function useAdminEquipments(opts?: {
     let mounted = true;
 
     (async () => {
-      const list = await localEquipmentRepo.listAdmin();
-      if (!mounted) return;
+      try {
+        const res = await fetch("/api/admin/rental/equipment", {
+          cache: "no-store",
+          credentials: "include",
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!mounted || !res.ok) return;
+        const list = Array.isArray(data?.equipment) ? (data.equipment as Equipment[]) : [];
 
-      setEquipments(list);
+        setEquipments(list);
 
-      const stored = typeof window !== "undefined"
-        ? window.localStorage.getItem(persistKey)
-        : null;
+        const stored = typeof window !== "undefined"
+          ? window.localStorage.getItem(persistKey)
+          : null;
 
-      const first =
-        stored && list.some((e) => e.id === stored)
-          ? stored
-          : list[0]?.id ?? "";
+        const first =
+          stored && list.some((e) => e.id === stored)
+            ? stored
+            : list[0]?.id ?? "";
 
-      setSelectedEquipmentId(first);
+        setSelectedEquipmentId(first);
+      } catch {
+        if (!mounted) return;
+        setEquipments([]);
+        setSelectedEquipmentId("");
+      }
     })();
 
     return () => {

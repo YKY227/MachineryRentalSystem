@@ -6,7 +6,7 @@ const PAYMENT_ALLOCATIONS_TABLE =
   process.env.SUPABASE_RENTAL_PAYMENT_ALLOCATIONS_TABLE ?? "rental_payment_allocations";
 
 export type RentalPaymentAllocationSourceType = "checkout_session";
-export type RentalPaymentAllocationType = "invoice";
+export type RentalPaymentAllocationType = "invoice" | "deposit";
 
 export type RentalPaymentAllocation = {
   id: string;
@@ -131,6 +131,53 @@ export const dbPaymentAllocationRepo = {
           sourceType: "checkout_session",
           sourceId: input.sourceId,
           allocationType: "invoice",
+          targetId: input.targetId,
+        });
+        if (duplicate) return duplicate;
+      }
+      throw new Error(`Payment allocation insert failed: ${error.message}`);
+    }
+
+    return toAllocation(data);
+  },
+
+  async ensureCheckoutSessionDepositAllocation(input: {
+    sourceId: string;
+    targetId: string;
+    amountCents: number;
+  }): Promise<RentalPaymentAllocation> {
+    const amountCents = Math.round(Number(input.amountCents));
+    if (!Number.isFinite(amountCents) || amountCents <= 0) {
+      throw new Error("Allocation amount must be greater than 0");
+    }
+
+    const existing = await dbPaymentAllocationRepo.findBySourceAndTarget({
+      sourceType: "checkout_session",
+      sourceId: input.sourceId,
+      allocationType: "deposit",
+      targetId: input.targetId,
+    });
+    if (existing) return existing;
+
+    const supabase = supabaseAdmin();
+    const { data, error } = await supabase
+      .from(PAYMENT_ALLOCATIONS_TABLE)
+      .insert({
+        source_type: "checkout_session",
+        source_id: input.sourceId,
+        allocation_type: "deposit",
+        target_id: input.targetId,
+        amount_cents: amountCents,
+      })
+      .select("id,source_type,source_id,allocation_type,target_id,amount_cents,created_at")
+      .single<PaymentAllocationRow>();
+
+    if (error) {
+      if ((error as { code?: string }).code === "23505") {
+        const duplicate = await dbPaymentAllocationRepo.findBySourceAndTarget({
+          sourceType: "checkout_session",
+          sourceId: input.sourceId,
+          allocationType: "deposit",
           targetId: input.targetId,
         });
         if (duplicate) return duplicate;
