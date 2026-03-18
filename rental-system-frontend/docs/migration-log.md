@@ -845,18 +845,112 @@ Files changed:
 - `src/app/rental/checkout/page.tsx`
 - `docs/migration-log.md`
 
+## 2026-03-14 | Scope: developer-only rental order delete tools
+
+Summary:
+- Added a DB-backed admin setting to enable developer delete tools, defaulting off and requiring explicit confirmation before exposing destructive UI controls.
+- Added transactional rental order deletion cleanup for test data, including linked invoice emails, payment allocations, extensions, holds, invoices, and cascaded order-linked records.
+- Added protected single-order and bulk delete admin endpoints plus gated delete controls in admin rental orders.
+
+Files changed:
+- `docs/sql/rental_order_developer_delete_v1.sql`
+- `src/lib/settings/db-admin-settings-repo.ts`
+- `src/app/api/admin/settings/route.ts`
+- `src/app/admin/settings/page.tsx`
+- `src/lib/rental/orders/delete-rental-order-service.ts`
+- `src/app/api/admin/rental/orders/route.ts`
+- `src/app/api/admin/rental/orders/[id]/route.ts`
+- `src/app/api/admin/rental/orders/bulk-delete/route.ts`
+- `src/app/admin/rental/orders/page.tsx`
+- `docs/migration-log.md`
+
 DB / Infra changes:
-- Added append-only SQL for `rental_equipment` with DB-backed inventory, rates, publish state, media URLs, JSON content blocks, display ordering, and maintenance buffer days.
-- Server-side availability config now reads equipment totals and maintenance buffer days from `rental_equipment`.
+- Added append-only SQL migration `docs/sql/rental_order_developer_delete_v1.sql` for DB-backed developer delete orchestration.
+- Reused the existing `system_settings` store for the developer delete tools toggle instead of introducing a separate feature-flag path.
 
 API / Page changes:
-- Added admin equipment APIs for list/create/update and public equipment APIs for published list/detail.
-- `/admin/rental` now reads and writes DB-backed rental equipment instead of localStorage demo inventory.
-- `/rental`, `/rental/[id]`, and `/rental/checkout` now read published equipment from the public API instead of `localEquipmentRepo`.
+- Added protected `DELETE /api/admin/rental/orders/[id]` and `POST /api/admin/rental/orders/bulk-delete`.
+- Existing `GET /api/admin/rental/orders` now exposes whether developer delete tools are enabled so the page can gate destructive controls.
+- Admin settings now exposes the developer delete tools toggle and admin rental orders now shows single and bulk delete actions only when enabled.
 
 Risks / follow-up notes:
-- Legacy/demo admin screens outside the main production inventory path, such as older orders/calendar pages, still reference `localEquipmentRepo` and should be migrated separately to remove the last non-authoritative equipment reads.
-- Checkout pricing payloads are still assembled client-side from the fetched equipment record and should be validated server-side in a later hardening pass if pricing tamper resistance becomes a priority.
+- This is a developer/test-data cleanup feature only and should be removed or replaced with a safer archive/cancel flow before final customer handover.
+- Bulk delete is processed per order using the shared transactional delete path, so a failure on one order does not automatically roll back the rest of the batch.
+
+## 2026-03-14 | Scope: landing/account auth polish and admin checkout guard
+
+Summary:
+- Made the public landing page auth-aware for guests, signed-in customers, and signed-in admins while keeping rental browsing primary on the public site.
+- Polished the customer account page with Lucide-backed hero, summary cards, section headers, notices, and empty states without changing portal workflows.
+- Added admin-session checkout blocking in the public detail page, checkout page, and server-side public checkout/order APIs so admin sessions cannot proceed through customer checkout.
+
+Files changed:
+- `src/lib/auth/admin.ts`
+- `src/app/api/public/rental/auth/me/route.ts`
+- `src/app/api/public/rental/checkout/start-payment/route.ts`
+- `src/app/api/public/rental/orders/route.ts`
+- `src/app/(public-pages)/page.tsx`
+- `src/app/rental/[id]/page.tsx`
+- `src/app/rental/checkout/page.tsx`
+- `src/app/rental/account/page.tsx`
+- `docs/migration-log.md`
+
+DB / Infra changes:
+- No migration added.
+
+API / Page changes:
+- Existing `GET /api/public/rental/auth/me` now also exposes admin-session awareness for public UI state.
+- Existing public checkout start-payment and order-create routes now reject admin-session attempts so checkout remains customer-only.
+- The landing page now renders guest, signed-in customer, and signed-in admin states without changing the public browsing flow.
+
+Risks / follow-up notes:
+- Public equipment browsing remains available to admins by design; only customer checkout progression is blocked.
+- The current public auth-aware UI depends on shared customer/admin session helpers, so future auth-state changes should reuse those helpers rather than duplicating cookie logic.
+
+## 2026-03-14 | Scope: landing hero brand refinement
+
+Summary:
+- Refined the public landing hero to use the Teesin red palette more intentionally while keeping the page mostly neutral and public-first.
+- Added “Teesin Machinery Pte Ltd” as the hero brand anchor without inserting the logo asset.
+- Replaced the right-side hero action card with a branded trust/operations panel and kept auth awareness as lightweight status content only.
+
+Files changed:
+- `src/app/(public-pages)/page.tsx`
+- `docs/migration-log.md`
+
+DB / Infra changes:
+- No migration added.
+
+API / Page changes:
+- No API contract changes.
+- The landing page now presents branded hero content and lightweight auth-aware status without duplicating header login or portal actions inside the hero panel.
+
+Risks / follow-up notes:
+- Brand colors are still applied inline on this page; if the same palette is reused across more public pages, shared theme tokens would reduce drift.
+
+## 2026-03-14 | Scope: branded auth shell polish
+
+Summary:
+- Added a shared branded auth-shell treatment for customer sign-in, customer registration, and admin login using the locked Teesin palette and Lucide-backed context framing.
+- Added clear back-to-landing navigation on all three auth entry pages without changing auth logic, validation, or redirect behavior.
+- Refined customer auth pages to feel warmer and customer-first, while keeping admin login visually aligned but more restrained and operational.
+
+Files changed:
+- `src/components/auth/AuthShell.tsx`
+- `src/app/rental/account/login/page.tsx`
+- `src/app/rental/account/register/page.tsx`
+- `src/app/admin/login/page.tsx`
+- `docs/migration-log.md`
+
+DB / Infra changes:
+- No migration added.
+
+API / Page changes:
+- No API contract changes.
+- Customer sign-in, customer registration, and admin login now share a branded auth-shell presentation while preserving existing auth submission and redirect behavior.
+
+Risks / follow-up notes:
+- This shared auth-shell is intentionally presentation-focused; deeper form grouping or auth-flow changes should be handled separately if needed.
 
 ## 2026-03-10 | Scope: server-side checkout repricing from DB equipment
 Summary:
@@ -1080,3 +1174,718 @@ API / Page changes:
 Risks / follow-up notes:
 - Invoice PDF/download access is still admin-oriented; the customer portal currently exposes invoice/payment visibility but not customer self-service downloads.
 - The portal currently surfaces recent notice history from existing invoice email events. If broader customer-safe notice types are added later, they should be folded into the same read model rather than creating parallel state.
+
+## 2026-03-14 | Scope: admin customer detail workspace polish
+
+Summary:
+- Polished the admin customer detail page into a stronger account workspace with a richer customer identity header, grouped financial summary cards, and a more cohesive credit-control module.
+- Added Lucide-backed section identity across customer info, finance, credit, account settings, notes, and recent activity tables without changing overview data or business logic.
+- Replaced older sky-blue accents on the page with the locked Teesin admin palette for focus states, selected emphasis, and primary save actions.
+
+Files changed:
+- `src/app/admin/rental/customers/[id]/page.tsx`
+- `docs/migration-log.md`
+
+DB / Infra changes:
+- No migration added.
+
+API / Page changes:
+- No API contract changes.
+- The admin customer detail page now presents the same overview data in a more structured customer-account workspace without changing save or navigation behavior.
+
+Risks / follow-up notes:
+- The page remains a large single component; a later maintainability pass could extract presentation-only sections without changing customer or credit-control logic.
+
+## 2026-03-14 | Scope: admin invoice detail finance workspace polish
+
+Summary:
+- Polished the admin invoice detail page into a clearer finance workspace with a stronger invoice header, grouped action bands, and a more deliberate right-side finance control rail.
+- Improved payment emphasis, section identity, and lower payment/email activity areas using Lucide icons and the locked Teesin admin palette without changing invoice, payment, email, or PDF behavior.
+- Replaced older sky-blue accents on the page with Teesin-aligned focus and action styling while preserving semantic finance state colors.
+
+Files changed:
+- `src/app/admin/rental/invoices/[id]/page.tsx`
+- `docs/migration-log.md`
+
+DB / Infra changes:
+- No migration added.
+
+API / Page changes:
+- No API contract changes.
+- The admin invoice detail page now groups finance actions and payment context more clearly while preserving the existing invoice preview, payment history, email history, and PDF workflows.
+
+Risks / follow-up notes:
+- Direct customer-account navigation was not added because the current invoice detail payload does not expose a reusable customer route target without new data fetching.
+
+## 2026-03-15 | Scope: admin settings workspace split
+
+Summary:
+- Split the admin settings UI into a sidebar-based workspace with dedicated pages for organisation, notifications, operations, reminder automation, and developer tools.
+- Added a shared frontend settings hook so each settings page continues to load with `GET /api/admin/settings` and save the full settings object with `PUT /api/admin/settings`.
+- Replaced older indigo accents in the settings UI with the Teesin admin palette and kept all existing backend DTOs, API routes, and behaviors unchanged.
+
+Files changed:
+- `src/lib/admin-settings/use-admin-settings.ts`
+- `src/app/admin/settings/layout.tsx`
+- `src/app/admin/settings/page.tsx`
+- `src/app/admin/settings/_components.tsx`
+- `src/app/admin/settings/organisation/page.tsx`
+- `src/app/admin/settings/notifications/page.tsx`
+- `src/app/admin/settings/operations/page.tsx`
+- `src/app/admin/settings/reminders/page.tsx`
+- `src/app/admin/settings/developer/page.tsx`
+- `docs/migration-log.md`
+
+DB / Infra changes:
+- No migration added.
+
+API / Page changes:
+- No API contract changes.
+- `/admin/settings` now acts as a sidebar-based workspace entry point and routes the user into dedicated settings sections while preserving the existing `GET /api/admin/settings` and `PUT /api/admin/settings` behavior.
+
+Risks / follow-up notes:
+- Each settings page loads settings independently through the shared hook; if cross-page unsaved-state persistence is needed later, that should be added as a separate provider-based enhancement.
+
+## 2026-03-15 | Scope: admin sidebar nav highlight fix
+
+Summary:
+- Tightened admin sidebar path matching so `Rental Inventory` only highlights on the exact `/admin/rental` route instead of all deeper rental subpages.
+- Replaced the remaining sky-blue sidebar active and brand treatments with restrained Teesin palette accents while preserving the existing hover-expand layout and nav structure.
+
+Files changed:
+- `src/app/admin/layout.tsx`
+- `docs/migration-log.md`
+
+DB / Infra changes:
+- No migration added.
+
+API / Page changes:
+- No API contract changes.
+- Sidebar active-state matching now distinguishes exact versus prefix matches so rental subpages highlight the correct navigation item.
+
+Risks / follow-up notes:
+- If more admin rental subroutes are added later, they should explicitly choose exact or prefix matching in the same sidebar config to avoid reintroducing broad base-path highlights.
+
+## 2026-03-15 | Scope: organisation billing identity settings
+
+Summary:
+- Extended admin organisation settings to store richer billing identity and bank details, using the existing settings persistence path without changing API routes or DTO grouping structure.
+- Reworked the Organisation Details UI into grouped business identity, contact, and payment sections while preserving the current settings workspace flow.
+- Updated the admin invoice detail preview to use organisation settings as the primary source for supplier identity and payment instructions, with graceful fallback to the existing invoice supplier snapshot when fields are missing.
+
+Files changed:
+- `src/lib/settings/db-admin-settings-repo.ts`
+- `src/app/api/admin/settings/route.ts`
+- `src/lib/admin-settings/use-admin-settings.ts`
+- `src/app/admin/settings/organisation/page.tsx`
+- `src/app/admin/rental/invoices/[id]/page.tsx`
+- `docs/migration-log.md`
+
+DB / Infra changes:
+- No migration added.
+- Reused the existing `system_settings` storage for richer organisation billing identity and bank details instead of introducing a separate billing-profile store.
+
+API / Page changes:
+- Existing `GET /api/admin/settings` and `PUT /api/admin/settings` now carry the expanded organisation fields through the same settings DTO shape.
+- Admin settings `Organisation` now exposes grouped company identity, contact, and payment detail fields.
+- Admin invoice detail preview now prefers organisation settings for supplier identity and payment instructions while falling back to the stored invoice supplier snapshot.
+
+Risks / follow-up notes:
+- The invoice preview is now aligned to organisation settings, but other render paths that still read invoice supplier snapshots directly may need the same organisation-first resolution separately.
+
+## 2026-03-15 | Scope: PDF supplier identity alignment
+
+Summary:
+- Updated invoice and receipt PDF rendering to prefer organisation settings for supplier identity and bank/payment details while keeping invoice supplier snapshots as fallback.
+- Added a small shared server-side supplier-profile resolver so admin invoice preview and generated PDFs now follow the same organisation-first sourcing approach.
+- Preserved existing invoice calculations, lifecycle rules, and PDF layout structure while removing hardcoded bank placeholders from the invoice PDF path.
+
+Files changed:
+- `src/lib/rental/invoices/pdf-supplier-profile.ts`
+- `src/lib/rental/invoices/invoice-pdf.ts`
+- `src/lib/rental/invoices/receipt-pdf.ts`
+- `docs/migration-log.md`
+
+DB / Infra changes:
+- No migration added.
+
+API / Page changes:
+- No API contract changes.
+- Invoice and receipt PDFs now resolve supplier identity and invoice-payment instructions using the same organisation-settings-first logic as the admin invoice preview.
+
+Risks / follow-up notes:
+- Persisted `inv.supplier` snapshot data remains as fallback for older invoices and for resilience when organisation settings are incomplete.
+
+## 2026-03-15 | Scope: admin settings GET cache bypass
+
+Summary:
+- Marked `GET /api/admin/settings` as explicitly dynamic with zero revalidation so admin settings reads always come from the latest persisted Supabase values after save and refresh.
+- Kept the existing settings repo, response DTO shape, and PUT save path unchanged.
+
+Files changed:
+- `src/app/api/admin/settings/route.ts`
+- `docs/migration-log.md`
+
+DB / Infra changes:
+- No migration added.
+
+API / Page changes:
+- Existing `GET /api/admin/settings` is now forced dynamic with zero revalidation so saved settings values are read fresh from Supabase after refresh.
+
+Risks / follow-up notes:
+- If stale reads are still observed after this fix, the next likely source would be client-side fetch caching rather than the settings repo or API route itself.
+
+## 2026-03-11 | Scope: customer invoice detail/pdf + customer password reset
+Summary:
+- Added customer-owned invoice detail and PDF download flows using existing invoice repos, payment totals, deposit summaries, and the shared invoice PDF renderer with strict customer ownership checks.
+- Added a DB-backed forgot/reset password flow for customer accounts with hashed reset tokens, expiry, single-use semantics, per-customer resend/rate guards, and reset email delivery using the existing email-provider pattern.
+
+Files changed:
+- `docs/sql/customer_password_resets_v1.sql`
+- `src/lib/auth/customer-password-reset-repo.ts`
+- `src/lib/auth/customer-password-reset.ts`
+- `src/lib/rental/invoices/customer-invoice-access.ts`
+- `src/app/api/public/rental/invoices/[invoiceId]/route.ts`
+- `src/app/api/public/rental/invoices/[invoiceId]/pdf/route.ts`
+- `src/app/api/public/rental/auth/forgot-password/route.ts`
+- `src/app/api/public/rental/auth/reset-password/route.ts`
+- `src/app/rental/account/page.tsx`
+- `src/app/rental/account/invoices/[invoiceId]/page.tsx`
+- `src/app/rental/account/login/page.tsx`
+- `src/app/rental/forgot-password/page.tsx`
+- `src/app/rental/reset-password/page.tsx`
+- `docs/migration-log.md`
+
+DB / Infra changes:
+- Added append-only SQL migration `docs/sql/customer_password_resets_v1.sql` for hashed customer reset tokens with expiry and single-use tracking.
+- Reused existing Supabase customer auth, invoice/payment repos, deposit ledger, and invoice PDF renderer instead of introducing parallel systems.
+
+API / Page changes:
+- Added `GET /api/public/rental/invoices/[invoiceId]` for authenticated customer-safe invoice detail.
+- Added `GET /api/public/rental/invoices/[invoiceId]/pdf` for authenticated customer-owned invoice PDF download.
+- Added `POST /api/public/rental/auth/forgot-password` and `GET/POST /api/public/rental/auth/reset-password`.
+- Added `/rental/account/invoices/[invoiceId]`, `/rental/forgot-password`, and `/rental/reset-password`.
+- Customer portal invoice cards now link to detail pages and expose PDF download for issued invoices.
+
+Risks / follow-up notes:
+- Password reset email delivery uses the same provider/env pattern as the current email infrastructure, but there is still no dedicated customer email log/history table for reset emails.
+- Reset token invalidation is DB-backed and safe for normal reruns, but it is not wrapped in a DB transaction with the auth password update; if stronger cross-system atomicity is needed later, that should be handled in a dedicated auth hardening pass.
+
+## 2026-03-11 | Scope: checkout page pricing access crash fix
+Summary:
+- Fixed the customer checkout runtime crash caused by one stale direct `equipment.pricing.deposit` read when some DB-backed equipment payloads do not include a nested pricing block at render time.
+- Normalized checkout pricing access to use a single safe pricing source and the existing repriced deposit value, keeping deposit display aligned with current pricing logic.
+
+Files changed:
+- `src/app/rental/checkout/page.tsx`
+- `docs/migration-log.md`
+
+DB / Infra changes:
+- No migration added.
+
+API / Page changes:
+- Customer checkout page now uses normalized pricing access and no longer dereferences `equipment.pricing` directly in the deposit card.
+
+Risks / follow-up notes:
+- The DB-backed equipment repo still intends to return nested `pricing`; this fix hardens the checkout page against incomplete payloads without changing catalog or repricing behavior.
+
+## 2026-03-11 | Scope: customer invoice payment v1
+Summary:
+- Added customer-owned invoice payment initiation from the portal using HitPay for the current DB-authoritative outstanding balance only, with strict auth-based ownership checks and no client-supplied amount trust.
+- Reused the existing payment session table and HitPay webhook flow by adding a focused customer-invoice settlement automation branch that records invoice payment and allocation only after webhook-confirmed payment.
+
+Files changed:
+- `src/lib/rental/invoices/customer-invoice-payment-automation.ts`
+- `src/app/api/public/rental/invoices/[invoiceId]/pay/route.ts`
+- `src/app/api/public/rental/payments/hitpay/webhook/route.ts`
+- `src/app/rental/account/invoices/[invoiceId]/page.tsx`
+- `docs/migration-log.md`
+
+DB / Infra changes:
+- No migration added.
+- Reused existing `rental_order_payment_sessions`, invoice payment recording, payment allocation, and HitPay request/webhook infrastructure.
+
+API / Page changes:
+- Added `POST /api/public/rental/invoices/[invoiceId]/pay` for authenticated customer-owned invoice payment session creation.
+- Customer invoice detail page now shows `Pay Now` only for payable issued invoices with outstanding balance and redirects to HitPay.
+- Customer invoice detail page shows a lightweight submitted notice on return while webhook-confirmed payment status catches up.
+
+Risks / follow-up notes:
+- v1 only supports paying the full current outstanding balance for one invoice at a time.
+- If an invoice balance changes after the payment session is created but before webhook settlement, the automation applies up to the remaining balance and records any residual as unapplied in session metadata for audit; a fuller overpayment/reconciliation workflow would be a separate follow-up.
+
+## 2026-03-11 | Scope: equipment return and inspection workflow v1
+Summary:
+- Added an admin-driven post-rental workflow for recording return state, inspection state, returned timestamp, and operational notes directly on rental orders, while keeping deposit release and retention as a separate follow-on workflow.
+- Extended customer portal recent-order visibility with customer-safe return and inspection status so customers can see post-rental progress without operational editing or internal note exposure.
+
+Files changed:
+- `docs/sql/rental_order_return_inspection_v1.sql`
+- `src/lib/rental/orders/types.ts`
+- `src/lib/rental/orders/db-order-repo.ts`
+- `src/app/api/admin/rental/orders/[id]/operations/route.ts`
+- `src/lib/rental/customers/db-rental-customer-overview.ts`
+- `src/lib/rental/customers/portal-types.ts`
+- `src/app/admin/rental/orders/page.tsx`
+- `src/app/rental/account/page.tsx`
+- `docs/migration-log.md`
+
+DB / Infra changes:
+- Added append-only SQL migration `docs/sql/rental_order_return_inspection_v1.sql` to extend `rental_orders` with explicit return and inspection workflow fields.
+- Reused the existing `rental_orders` table and order repo instead of introducing a disconnected operational subsystem for v1.
+
+API / Page changes:
+- Added `POST /api/admin/rental/orders/[id]/operations` for admin-only return and inspection updates.
+- Admin rental orders page now includes a `Return / Inspect` panel for recording returned state, inspection outcome, notes, and workflow completion.
+- Customer portal recent orders now show customer-safe return status, returned date, inspection status, and workflow completion date.
+
+Risks / follow-up notes:
+- v1 stores the current return and inspection state directly on `rental_orders`; detailed checklists, condition grading, and photo evidence should be added later in a dedicated return module if needed.
+- Per-admin actor identity is still not recorded because the current admin auth path does not expose a trustworthy individual admin identity.
+
+## 2026-03-11 | Scope: customer receipt self-service and statement summary improvements
+Summary:
+- Audited the existing portal and finance stack and found that recent payments, invoice visibility, and receipt email history already existed, but customer-owned receipt downloads and aging-bucket statement summaries were still missing.
+- Added a customer-safe receipt PDF download route for owned invoice payments and extended the portal overview with open-invoice counts, current vs overdue balances, and aging buckets derived from invoice and payment truth.
+
+Files changed:
+- `src/lib/rental/invoices/db-payment-repo.ts`
+- `src/lib/rental/invoices/customer-payment-receipt-access.ts`
+- `src/lib/rental/invoices/receipt-pdf.ts`
+- `src/app/api/public/rental/payments/[paymentId]/receipt/route.ts`
+- `src/lib/rental/customers/portal-types.ts`
+- `src/lib/rental/customers/db-rental-customer-overview.ts`
+- `src/lib/rental/customers/db-rental-customer-portal-overview.ts`
+- `src/app/rental/account/page.tsx`
+- `src/app/rental/account/invoices/[invoiceId]/page.tsx`
+- `docs/migration-log.md`
+
+DB / Infra changes:
+- No migration added.
+- Reused existing invoice, payment, customer-auth, and portal overview infrastructure instead of introducing a parallel statement store.
+
+API / Page changes:
+- Added `GET /api/public/rental/payments/[paymentId]/receipt` for authenticated customer-owned receipt PDF download.
+- Customer invoice detail payment history now exposes receipt download links per recorded payment.
+- Customer portal recent payments now expose receipt download links and the account page now includes a read-only statement summary with open invoices and aging buckets.
+
+Risks / follow-up notes:
+- Receipt PDFs are newly rendered from current payment and invoice truth; they are not yet stored as durable receipt artifacts.
+- Aging buckets are derived from current invoice due dates and outstanding balances, which is appropriate for v1 but not a substitute for a formal month-end statement snapshot if that is needed later.
+
+## 2026-03-11 | Scope: rental extension workflow v1
+Summary:
+- Added a DB-backed rental extension request model linked to the original order, with server-side request-window checks, extension pricing estimates, availability checks, admin review, and customer-safe portal visibility.
+- Reused the existing availability, pricing, credit-control, invoice, HitPay session, and webhook-confirmed payment infrastructure so approved upfront extensions require payment before confirmation, while eligible credit extensions can be confirmed on invoice terms.
+
+Files changed:
+- `docs/sql/rental_order_extensions_v1.sql`
+- `src/lib/rental/extensions/types.ts`
+- `src/lib/rental/extensions/db-rental-order-extension-repo.ts`
+- `src/lib/rental/extensions/rental-extension-service.ts`
+- `src/lib/rental/orders/db-order-repo.ts`
+- `src/lib/rental/invoices/db-invoice-repo.ts`
+- `src/app/api/public/rental/orders/[id]/extensions/route.ts`
+- `src/app/api/public/rental/extensions/[extensionId]/pay/route.ts`
+- `src/app/api/admin/rental/orders/[id]/extensions/route.ts`
+- `src/app/api/admin/rental/orders/[id]/extensions/[extensionId]/route.ts`
+- `src/app/api/public/rental/payments/hitpay/webhook/route.ts`
+- `src/lib/rental/customers/portal-types.ts`
+- `src/lib/rental/customers/db-rental-customer-overview.ts`
+- `src/lib/rental/customers/db-rental-customer-portal-overview.ts`
+- `src/app/rental/account/page.tsx`
+- `src/app/admin/rental/orders/page.tsx`
+- `docs/migration-log.md`
+
+DB / Infra changes:
+- Added append-only SQL migration `docs/sql/rental_order_extensions_v1.sql` to create `rental_order_extensions` with auditable request, review, payment, and confirmation state.
+- Reused existing `rental_order_payment_sessions`, invoice issuance, invoice payment mapping, credit evaluation, and order period update paths rather than mutating order dates directly from the customer portal.
+
+API / Page changes:
+- Added `POST /api/public/rental/orders/[id]/extensions` for authenticated customer extension requests.
+- Added `POST /api/public/rental/extensions/[extensionId]/pay` for customer-owned approved extension payment initiation.
+- Added `GET /api/admin/rental/orders/[id]/extensions` and `POST /api/admin/rental/orders/[id]/extensions/[extensionId]` for admin review.
+- Existing HitPay webhook now handles `paymentMode = "order_extension"` to confirm paid extensions server-side.
+- Customer portal now shows extension requests per order, allows lightweight request submission, and exposes payment actions only when admin approval requires upfront payment.
+- Admin rental orders page now includes an inline extension review panel for approve/reject actions.
+
+Risks / follow-up notes:
+- v1 stores only the extension request/review/payment workflow. It does not add negotiation threads, auto-suggested alternatives, or extension-specific reminder automation.
+- Extension invoices are created as separate invoices linked to the same parent order. That preserves auditability for v1, but if a future finance policy requires a distinct extension-order or more formal statement grouping, that should be handled in a dedicated accounting pass.
+
+## 2026-03-12 | Scope: extension request customer-safe wording
+Summary:
+- Audited the existing customer extension flow and found the submit/status wording did not clearly state that pending review does not reserve availability.
+- Reused the existing extension service and customer portal surfaces to show `Extension request submitted for review.` plus `Approval depends on availability and account review.` without changing workflow logic or schema.
+
+Files changed:
+- `src/lib/rental/extensions/customer-messages.ts`
+- `src/lib/rental/extensions/rental-extension-service.ts`
+- `src/app/rental/account/page.tsx`
+- `docs/migration-log.md`
+
+DB / Infra changes:
+- No migration added.
+
+API / Page changes:
+- Existing `POST /api/public/rental/orders/[id]/extensions` now returns the clarified customer-safe review wording for new pending requests.
+- Customer portal extension cards and request area now show the same non-reservation clarification while status is `awaiting_admin_review`.
+
+Risks / follow-up notes:
+- Older pending extension rows keep their original stored `customerMessage`, so the portal now applies the clarified wording at render time for `awaiting_admin_review` records without rewriting historical data.
+
+## 2026-03-12 | Scope: return reminder + extension CTA automation v1
+Summary:
+- Audited the existing reminder stack and confirmed overdue invoice reminders, admin reminder triggering, and invoice email history already existed, but return-date reminder automation and non-invoice reminder idempotency did not.
+- Added a DB-backed return reminder event log, a safe admin-triggered return reminder engine for active rentals nearing end date, and customer-safe extension CTA messaging that does not imply availability is reserved.
+
+Files changed:
+- `docs/sql/rental_order_reminder_events_v1.sql`
+- `src/lib/rental/invoices/email-delivery.ts`
+- `src/lib/rental/orders/db-order-repo.ts`
+- `src/lib/rental/orders/db-order-reminder-event-repo.ts`
+- `src/lib/rental/orders/return-reminder-service.ts`
+- `src/app/api/admin/rental/orders/return-reminders/route.ts`
+- `docs/migration-log.md`
+
+DB / Infra changes:
+- Added append-only SQL migration `docs/sql/rental_order_reminder_events_v1.sql` for non-invoice rental order reminder events with per-order/stage sent dedupe.
+- Reused the existing email provider wiring and admin reminder service pattern instead of redesigning the mail stack or altering overdue reminder automation.
+
+API / Page changes:
+- Added protected `POST /api/admin/rental/orders/return-reminders` for dry-run or live return reminder processing by order or batch.
+- Active return reminders now send a customer-safe extension CTA that points customers back to the existing portal workflow and states that approval depends on availability and account review.
+
+Risks / follow-up notes:
+- v1 keeps return reminder policy route-driven with safe defaults (`3`, `1`, and optionally `0` days) rather than expanding admin settings/UI in the same pass.
+- The sent-stage dedupe is DB-backed and safe for reruns; like the existing overdue reminder flow, it is not a fully transactional send-lock for simultaneous parallel runs.
+
+## 2026-03-12 | Scope: equipment maintenance / downtime blocking v1
+Summary:
+- Audited the rental scheduling stack and confirmed per-equipment maintenance buffer days, DB-backed availability holds, DB-backed equipment inventory, and admin settings already existed, but explicit downtime blocking was still missing from production availability truth and the calendar still relied on localStorage for operational order/hold data.
+- Added a DB-backed equipment downtime model, wired downtime into checkout hold acquisition and extension availability reads, replaced the calendar’s authoritative operational data with DB-backed orders/downtime, and added a minimal admin downtime workflow plus an admin/settings operations default for maintenance buffer fallback.
+
+Files changed:
+- `docs/sql/rental_equipment_downtime_v1.sql`
+- `src/lib/rental/downtime/types.ts`
+- `src/lib/rental/downtime/db-rental-equipment-downtime-repo.ts`
+- `src/app/api/admin/rental/downtime/route.ts`
+- `src/app/api/admin/rental/downtime/[id]/route.ts`
+- `src/lib/rental/holds/db-rental-availability-service.ts`
+- `src/lib/rental/extensions/rental-extension-service.ts`
+- `src/app/admin/rental/calendar/page.tsx`
+- `src/app/admin/rental/orders/page.tsx`
+- `src/app/admin/rental/page.tsx`
+- `src/lib/settings/db-admin-settings-repo.ts`
+- `src/app/api/admin/settings/route.ts`
+- `src/app/admin/settings/page.tsx`
+- `src/lib/rental/server-equipment-config.ts`
+- `docs/migration-log.md`
+
+DB / Infra changes:
+- Added append-only SQL migration `docs/sql/rental_equipment_downtime_v1.sql` to create `rental_equipment_downtime` and to extend `acquire_rental_availability_hold(...)` so checkout hold acquisition counts active downtime against available units.
+- Reused the existing `system_settings` table for a minimal operations policy (`defaultMaintenanceBufferDays`) instead of introducing a separate settings store.
+
+API / Page changes:
+- Added protected `GET/POST /api/admin/rental/downtime` and `PATCH /api/admin/rental/downtime/[id]` for minimal downtime create/list/cancel workflows.
+- Checkout availability snapshots and extension availability evaluation now subtract active downtime quantities.
+- Admin rental calendar now loads DB-backed orders and downtime instead of localStorage for production scheduling data, while preserving local lane-assignment persistence as a UI-only aid.
+- Admin settings now expose a minimal operations default for maintenance buffer fallback only.
+
+Risks / follow-up notes:
+- v1 models operational blocking only; it does not add work orders, technician workflows, recurring schedules, or maintenance completion checklists.
+- The calendar still keeps lane-assignment persistence in localStorage as a presentation aid, but orders and downtime are now DB-backed operational truth.
+
+## 2026-03-12 | Scope: admin rental calendar downtime UX refinement
+
+Summary:
+- Extended DB-backed downtime records with optional unit assignments for lane-targeted downtime while preserving legacy quantity-based compatibility.
+- Added server-authoritative downtime conflict preview and confirmation against active orders, overlapping downtime, and pending or approved extension periods.
+- Refined the admin rental calendar with quick filters, a scrollable downtime list, richer downtime drawer details, and clearer admin-facing buffer behavior messaging.
+
+Files changed:
+- `docs/sql/rental_equipment_downtime_v1_5_unit_assignments.sql`
+- `src/lib/rental/downtime/types.ts`
+- `src/lib/rental/downtime/db-rental-equipment-downtime-repo.ts`
+- `src/lib/rental/downtime/downtime-conflicts.ts`
+- `src/app/api/admin/rental/downtime/route.ts`
+- `src/app/api/admin/rental/downtime/[id]/route.ts`
+- `src/app/admin/rental/calendar/page.tsx`
+- `docs/migration-log.md`
+
+DB / Infra changes:
+- Added append-only SQL migration `docs/sql/rental_equipment_downtime_v1_5_unit_assignments.sql` to extend downtime rows with optional unit assignments while keeping quantity-based compatibility.
+
+API / Page changes:
+- Existing `POST /api/admin/rental/downtime` now supports conflict preview and conflict-confirmed create flow using the same server-authoritative validation path.
+- Admin rental calendar now supports unit-targeted downtime creation, quick filters, richer drawer details, and a more usable downtime list without changing downtime business rules.
+
+Risks / follow-up notes:
+- Unit assignment remains pseudo-unit scheduling based on equipment unit count, not a full physical asset registry.
+- Order conflict checks remain equipment-level because orders themselves are not assigned to physical unit identities.
+
+## 2026-03-14 | Scope: admin rental calendar workspace polish
+
+Summary:
+- Polished the admin rental calendar into a clearer operational workspace with stronger header hierarchy, grouped controls, and selected-equipment context.
+- Refined downtime creation, current downtime, legend, conflict surfacing, timeline readability, and detail-drawer presentation using restrained Teesin-brand accents and Lucide icons.
+- Kept calendar, downtime, availability, and drawer behavior unchanged while improving scanability and operator orientation.
+
+Files changed:
+- `src/app/admin/rental/calendar/page.tsx`
+- `src/app/admin/dashboard/page.tsx`
+- `docs/migration-log.md`
+
+DB / Infra changes:
+- No migration added.
+
+API / Page changes:
+- No API contract changes.
+- The admin rental calendar now presents the same planning controls and workflows with clearer hierarchy, selected-equipment context, and detail-drawer grouping.
+
+Risks / follow-up notes:
+- `src/app/admin/dashboard/page.tsx` was touched only to restore it as a valid module so TypeScript could pass; no dashboard behavior was redesigned in this pass.
+
+## 2026-03-14 | Scope: admin rental calendar layout rebalance
+
+Summary:
+- Rebalanced the admin rental calendar so the timeline sits higher as the primary workspace, with compact scope controls above it and lower-priority display controls moved lower in the page flow.
+- Made the right-side detail drawer usable for long content by keeping a fixed shell/header and a scrollable content region.
+- Kept calendar, downtime, availability, lane assignment, and drawer actions unchanged while reducing top-heaviness and improving operator access to controls and details.
+
+Files changed:
+- `src/app/admin/rental/calendar/page.tsx`
+- `docs/migration-log.md`
+
+DB / Infra changes:
+- No migration added.
+
+API / Page changes:
+- No API contract changes.
+- The admin rental calendar now places equipment/date scope controls above the timeline while moving lower-priority display controls and supporting panels lower in the page flow.
+
+Risks / follow-up notes:
+- The page still carries a large amount of presentation and workflow logic in one file; this entry only rebalanced layout and drawer overflow handling.
+
+## 2026-03-14 | Scope: admin rental orders workspace polish
+
+Summary:
+- Refined the admin rental orders page into a more operations-led workspace with clearer header hierarchy, triage filters, attention-focused summary cards, and improved row scanability.
+- Simplified row actions by separating primary actions from secondary actions and moved return, inspection, deposit, and extension workflows into a contained right-side order workspace instead of inline expanding table rows.
+- Kept the existing DB-backed order, invoice, deposit, return/inspection, extension, downtime, and developer-delete behavior unchanged while improving usability and operator focus.
+
+Files changed:
+- `src/app/admin/rental/orders/page.tsx`
+- `docs/migration-log.md`
+
+DB / Infra changes:
+- No migration added.
+
+API / Page changes:
+- No API contract changes.
+- The admin rental orders page now emphasizes triage, operations state, and contained right-side workflow handling without changing the underlying order workflows or endpoints.
+
+Risks / follow-up notes:
+- Extension-attention filtering still relies on the extension data loaded into the page state; if broader server-backed triage is needed later, that should be added as a separate enhancement.
+
+## 2026-03-14 | Scope: admin invoice list finance workspace polish
+
+Summary:
+- Refined the admin invoice list into a calmer finance and credit-control workspace with a stronger header, finance-first summary cards, and clearer filter/control grouping.
+- Improved invoice row scanability by emphasizing due dates, overdue and unpaid states, outstanding balances, and communication status while keeping the existing DB-backed listing, filters, sorting, pagination, and export behavior intact.
+- Applied restrained Teesin-brand accents and Lucide icons for page identity and utility actions without changing invoice or payment business logic.
+
+Files changed:
+- `src/app/admin/rental/invoices/page.tsx`
+- `docs/migration-log.md`
+
+DB / Infra changes:
+- No migration added.
+
+API / Page changes:
+- No API contract changes.
+- The admin invoice list now presents the same DB-backed receivables data with stronger finance hierarchy, summary signals, and control grouping.
+
+Risks / follow-up notes:
+- Top-level finance summaries are still derived from the currently loaded result set rather than a separate global receivables aggregate.
+
+## 2026-03-17 | Scope: admin user manual added
+
+Summary:
+- Added a concise admin user manual covering the main rental admin workspaces: overview, inventory, orders, calendar, customers, and invoices.
+- Documented page purpose, key concepts, step-by-step use, and operational warnings using real UI terminology rather than developer internals.
+- Kept the documentation user-facing and aligned to currently implemented features only.
+
+Files changed:
+- `docs/admin-user-manual/01-overview.md`
+- `docs/admin-user-manual/02-equipment.md`
+- `docs/admin-user-manual/03-orders.md`
+- `docs/admin-user-manual/04-calendar.md`
+- `docs/admin-user-manual/05-customers.md`
+- `docs/admin-user-manual/06-invoices.md`
+- `docs/migration-log.md`
+
+DB / Infra changes:
+- No migration added.
+
+API / Page changes:
+- No API contract changes.
+- Added user-manual documentation only; no application behavior changed.
+
+Risks / follow-up notes:
+- The manual should be updated alongside future UI changes so labels and step-by-step guidance stay aligned with the product.
+
+## 2026-03-14 | Scope: admin invoice top-section tightening
+
+Summary:
+- Tightened the admin invoice page top-right action area by grouping secondary actions more compactly and keeping the main CSV export visually primary.
+- Updated the lifecycle snapshot card to display Draft, Issued, and Void horizontally in a single balanced row.
+- Kept all invoice actions, exports, metrics, and business behavior unchanged while refining only the top section layout.
+
+Files changed:
+- `src/app/admin/rental/invoices/page.tsx`
+- `docs/migration-log.md`
+
+DB / Infra changes:
+- No migration added.
+
+API / Page changes:
+- No API contract changes.
+- The admin invoice list top section now presents export and utility actions more compactly and shows the lifecycle snapshot as a single horizontal row.
+
+Risks / follow-up notes:
+- If more utility actions are added later, the header may need an overflow pattern rather than continued horizontal expansion.
+
+## 2026-03-14 | Scope: admin rental customers workspace polish
+
+Summary:
+- Refined the admin rental customers page into a clearer customer-account workspace with a stronger header, more polished search area, clearer customer-state chips, and improved selected-row visibility.
+- Strengthened the right-side master-detail panel into a more deliberate customer summary and controls workspace with grouped account controls, notes, and follow-through actions.
+- Replaced older sky/blue accents with restrained Teesin-aligned styling and added Lucide icons where they improved hierarchy and scanability without changing customer business logic.
+
+Files changed:
+- `src/app/admin/rental/customers/page.tsx`
+- `docs/migration-log.md`
+
+DB / Infra changes:
+- No migration added.
+
+API / Page changes:
+- No API contract changes.
+- The admin rental customers page now presents the same searchable master-detail workflow with stronger customer state visibility and a more deliberate detail panel.
+
+Risks / follow-up notes:
+- The customer list remains a simple table-based triage view; if higher-volume customer operations are needed later, quick filters can be added separately without changing the underlying workflow.
+
+## 2026-03-14 | Scope: buffer snapshots, early release, and public availability fixes
+
+Summary:
+- Fixed the maintenance buffer read path so equipment without an explicit override uses the saved operations default instead of a hardcoded fallback.
+- Added order-level maintenance buffer snapshots plus DB-backed per-order-unit buffer release overrides so future bookings use the latest default while existing bookings keep their original applied buffer.
+- Added a public availability endpoint and updated customer rental detail and checkout pages to show server-authoritative available units for the selected date range.
+
+Files changed:
+- `docs/sql/rental_order_buffer_controls_v1.sql`
+- `src/lib/rental/orders/types.ts`
+- `src/lib/rental/orders/db-order-repo.ts`
+- `src/lib/rental/orders/db-order-buffer-override-repo.ts`
+- `src/lib/rental/availability.ts`
+- `src/lib/rental/holds/db-rental-availability-service.ts`
+- `src/lib/rental/extensions/rental-extension-service.ts`
+- `src/lib/rental/equipment/db-rental-equipment-repo.ts`
+- `src/app/api/admin/rental/orders/route.ts`
+- `src/app/api/admin/rental/orders/[id]/buffer-release/route.ts`
+- `src/app/api/public/rental/equipment/[id]/availability/route.ts`
+- `src/app/admin/rental/calendar/page.tsx`
+- `src/app/admin/rental/orders/page.tsx`
+- `src/app/admin/rental/page.tsx`
+- `src/app/rental/[id]/page.tsx`
+- `src/app/rental/checkout/page.tsx`
+- `docs/migration-log.md`
+
+DB / Infra changes:
+- Added append-only SQL migration `docs/sql/rental_order_buffer_controls_v1.sql` for order-level maintenance buffer snapshots and per-order-unit buffer overrides.
+- Reused the existing availability and equipment settings infrastructure instead of changing the overall buffer model.
+
+API / Page changes:
+- Added admin `POST /api/admin/rental/orders/[id]/buffer-release` for DB-backed early buffer release.
+- Added public `GET /api/public/rental/equipment/[id]/availability` for server-authoritative date-range availability.
+- Customer rental detail and checkout now show actual available units for the selected range, and admin calendar now reflects stored buffer snapshots plus any early release override.
+
+Risks / follow-up notes:
+- Older historical orders without a stored applied buffer still rely on fallback behavior, so only new or updated snapshot-backed records are fully insulated from future default buffer changes.
+
+## 2026-03-17 | Scope: admin user manual operational refinement
+Summary:
+- Refined the admin user manuals in place so they are more useful for day-to-day operations, adding practical workflows, clearer explanations of system behavior, common warnings, and related-page guidance.
+- Expanded the rental calendar manual to explain lanes, buffers, holds, unassigned blocks, overbooking, and practical block inspection without introducing unimplemented workflows.
+
+Files changed:
+- `docs/admin-user-manual/01-overview.md`
+- `docs/admin-user-manual/02-equipment.md`
+- `docs/admin-user-manual/03-orders.md`
+- `docs/admin-user-manual/04-calendar.md`
+- `docs/admin-user-manual/05-customers.md`
+- `docs/admin-user-manual/06-invoices.md`
+- `docs/migration-log.md`
+
+DB / Infra changes:
+- No migration added.
+
+API / Page changes:
+- No API contract changes.
+- Documentation only; no application behavior changed.
+
+Risks / follow-up notes:
+- The manuals now better match operational use, but they should be updated whenever labels, warnings, or page-to-page workflows change.
+
+## 2026-03-17 | Scope: admin rental manual testing documentation set
+Summary:
+- Added a manual testing documentation set for the currently visible admin rental workflows, including a concise test plan, module-based test cases, edge cases, and a simple bug log template.
+- Kept the testing docs user-facing and limited them to supported UI behavior only, with explicit notes where something is not part of normal testing.
+
+Files changed:
+- `docs/testing/test-plan.md`
+- `docs/testing/test-cases/01-equipment.md`
+- `docs/testing/test-cases/02-orders.md`
+- `docs/testing/test-cases/03-calendar.md`
+- `docs/testing/test-cases/04-customers.md`
+- `docs/testing/test-cases/05-invoices.md`
+- `docs/testing/edge-cases.md`
+- `docs/testing/bug-log.md`
+- `docs/migration-log.md`
+
+DB / Infra changes:
+- No migration added.
+
+API / Page changes:
+- No API contract changes.
+- Documentation only; no application behavior changed.
+
+Risks / follow-up notes:
+- The testing pack is based on currently visible workflows and should be updated when admin page labels, actions, or supported states change.
+
+## 2026-03-17 | Scope: manual testing pack execution refinement
+Summary:
+- Refined the manual testing pack so testers can run it more consistently by adding a dedicated test data setup guide, clearer bug severity guidance, and explicit test type labels across module test cases.
+- Tightened expected results to be more concrete and observable for manual execution without changing the underlying testing scope.
+
+Files changed:
+- `docs/testing/test-data-setup.md`
+- `docs/testing/bug-log.md`
+- `docs/testing/test-cases/01-equipment.md`
+- `docs/testing/test-cases/02-orders.md`
+- `docs/testing/test-cases/03-calendar.md`
+- `docs/testing/test-cases/04-customers.md`
+- `docs/testing/test-cases/05-invoices.md`
+- `docs/migration-log.md`
+
+DB / Infra changes:
+- No migration added.
+
+API / Page changes:
+- No API contract changes.
+- Documentation only; no application behavior changed.
+
+Risks / follow-up notes:
+- Test data coverage still depends on the environment having suitable records for extension review, planning warnings, and invoice payment states.

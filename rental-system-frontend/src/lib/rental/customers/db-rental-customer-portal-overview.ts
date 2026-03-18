@@ -30,6 +30,7 @@ export async function loadRentalCustomerPortalOverview(
   return {
     profile: toPortalProfile(overview.customer),
     financialSummary: overview.financialSummary,
+    agingSummary: overview.agingSummary,
     depositSummary: overview.depositSummary,
     creditSummary: {
       paymentTerms: overview.customer.paymentTerms,
@@ -42,7 +43,9 @@ export async function loadRentalCustomerPortalOverview(
       creditControlEnabled: overview.creditControl.creditControlEnabled,
       status: overview.creditControl.recommendedDecision,
     },
+    openInvoices: overview.openInvoices,
     recentOrders: overview.recentOrders,
+    recentExtensions: overview.recentExtensions,
     recentInvoices: overview.recentInvoices,
     recentPayments: overview.recentPayments,
     recentNotices: overview.emailEvents

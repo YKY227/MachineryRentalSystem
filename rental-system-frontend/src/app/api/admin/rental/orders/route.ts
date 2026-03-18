@@ -6,8 +6,10 @@ import {
   isAdminUnauthorized,
 } from "@/lib/auth/admin";
 import { dbRentalDepositRepo } from "@/lib/rental/deposits/db-rental-deposit-repo";
+import { dbOrderBufferOverrideRepo } from "@/lib/rental/orders/db-order-buffer-override-repo";
 import { dbOrderRepo } from "@/lib/rental/orders/db-order-repo";
 import type { CreateRentalOrderInput } from "@/lib/rental/orders/types";
+import { dbAdminSettingsRepo } from "@/lib/settings/db-admin-settings-repo";
 
 export const runtime = "nodejs";
 
@@ -24,10 +26,19 @@ export async function GET(req: Request) {
     assertAdmin(req);
     requireOrderEnv();
     const orders = await dbOrderRepo.list();
+    const bufferOverridesByOrderId = await dbOrderBufferOverrideRepo.listByOrderIds(
+      orders.map((order) => order.id)
+    );
     const depositSummariesByOrderId = await dbRentalDepositRepo.listByOrderIds(
       orders.map((order) => order.id)
     );
-    return NextResponse.json({ orders, depositSummariesByOrderId });
+    const operationsPolicy = await dbAdminSettingsRepo.getOperationsPolicy();
+    return NextResponse.json({
+      orders,
+      depositSummariesByOrderId,
+      bufferOverridesByOrderId,
+      developerDeleteEnabled: operationsPolicy.enableDeveloperDeleteTools,
+    });
   } catch (e) {
     if (isAdminUnauthorized(e)) return adminUnauthorizedResponse();
     const message = e instanceof Error ? e.message : "Order list failed";
@@ -58,14 +69,7 @@ export async function POST(req: Request) {
 export async function DELETE(req: Request) {
   try {
     assertAdmin(req);
-    requireOrderEnv();
-
-    if (process.env.NODE_ENV !== "development") {
-      return NextResponse.json({ error: "Not allowed in this environment" }, { status: 403 });
-    }
-
-    const deleted = await dbOrderRepo.clearAll();
-    return NextResponse.json({ ok: true, deleted });
+    return NextResponse.json({ error: "Use the dedicated developer delete endpoints" }, { status: 405 });
   } catch (e) {
     if (isAdminUnauthorized(e)) return adminUnauthorizedResponse();
     const message = e instanceof Error ? e.message : "Order clear failed";

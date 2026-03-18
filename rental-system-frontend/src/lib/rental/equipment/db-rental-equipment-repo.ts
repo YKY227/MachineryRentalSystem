@@ -67,8 +67,6 @@ const EQUIPMENT_COLUMNS = [
   "updated_at",
 ].join(",");
 
-const DEFAULT_MAINTENANCE_BUFFER_DAYS = 7;
-
 function toNumber(value: string | number | null | undefined, fallback = 0) {
   if (value === null || value === undefined || value === "") return fallback;
   const parsed = Number(value);
@@ -157,10 +155,10 @@ function toEquipment(row: RentalEquipmentRow): RentalEquipment {
     specs: toSpecs(row.specifications),
     totalUnits: Math.max(0, Number(row.total_units ?? 0)),
     isPublished: row.is_published,
-    maintenanceBufferDays: Math.max(
-      0,
-      Number(row.maintenance_buffer_days ?? DEFAULT_MAINTENANCE_BUFFER_DAYS)
-    ),
+    maintenanceBufferDays:
+      row.maintenance_buffer_days === null || row.maintenance_buffer_days === undefined
+        ? undefined
+        : Math.max(0, Number(row.maintenance_buffer_days)),
     pricing: {
       minDays: Math.max(1, Number(row.min_rental_days ?? 1)),
       dayRate: toNumber(row.day_rate),

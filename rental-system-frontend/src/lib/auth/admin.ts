@@ -24,17 +24,20 @@ function readCookie(req: Request, name: string): string | null {
   return null;
 }
 
-export function assertAdmin(req: Request): void {
+export function isAdminAuthenticated(req: Request): boolean {
   const expected = (process.env.ADMIN_API_KEY ?? "").trim();
-  if (!expected) {
-    throw new Error("ADMIN_API_KEY is not configured");
-  }
+  if (!expected) return false;
 
   const headerKey = (req.headers.get("x-admin-key") ?? "").trim();
   const cookieKey = (readCookie(req, ADMIN_AUTH_COOKIE) ?? "").trim();
   const provided = headerKey || cookieKey;
+  return !!provided && provided === expected;
+}
 
-  if (!provided || provided !== expected) {
+export function assertAdmin(req: Request): void {
+  const expected = (process.env.ADMIN_API_KEY ?? "").trim();
+  if (!expected) throw new Error("ADMIN_API_KEY is not configured");
+  if (!isAdminAuthenticated(req)) {
     throw new AdminUnauthorizedError();
   }
 }

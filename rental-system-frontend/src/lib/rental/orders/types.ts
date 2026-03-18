@@ -2,6 +2,9 @@ export type FulfillmentMode = "deliver" | "self_collect";
 export type RentalCustomerPaymentTerms = "upfront" | "credit";
 export type RentalCustomerVettingStatus = "new" | "under_review" | "pre_vetted" | "rejected";
 export type RentalCustomerAccountStatus = "active" | "suspended";
+export type RentalOrderReturnStatus = "out" | "returned" | "completed";
+export type RentalOrderInspectionStatus = "not_started" | "pending" | "passed" | "issues_found";
+export type RentalOrderBufferOverrideStatus = "active" | "cancelled";
 
 export type RentalOrderPricingSnapshot = {
   days: number;
@@ -37,7 +40,14 @@ export type RentalOrder = {
   end: string; // YYYY-MM-DD
   fulfillment: FulfillmentMode;
   pricingSnapshot: RentalOrderPricingSnapshot;
+  maintenanceBufferDaysApplied?: number;
   customerSnapshot?: RentalOrderCustomerSnapshot;
+  returnStatus: RentalOrderReturnStatus;
+  returnedAt?: string;
+  returnNotes?: string;
+  inspectionStatus: RentalOrderInspectionStatus;
+  inspectionNotes?: string;
+  completedAt?: string;
   createdAt: string;
   updatedAt: string;
 };
@@ -52,7 +62,26 @@ export type CreateRentalOrderInput = {
   end: string;
   fulfillment: FulfillmentMode;
   pricingSnapshot: RentalOrderPricingSnapshot;
+  maintenanceBufferDaysApplied?: number;
   customerSnapshot: RentalOrderCustomerSnapshot;
+  returnStatus?: RentalOrderReturnStatus;
+  returnedAt?: string;
+  returnNotes?: string;
+  inspectionStatus?: RentalOrderInspectionStatus;
+  inspectionNotes?: string;
+  completedAt?: string;
+};
+
+export type RentalOrderBufferOverride = {
+  id: string;
+  orderId: string;
+  orderUnitIndex: number;
+  overrideBufferEndDate: string;
+  status: RentalOrderBufferOverrideStatus;
+  reason?: string;
+  notes?: string;
+  createdAt: string;
+  updatedAt: string;
 };
 
 export type RentalCustomer = {

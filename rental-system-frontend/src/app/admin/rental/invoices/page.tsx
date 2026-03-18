@@ -3,6 +3,20 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import {
+  ArrowLeft,
+  BadgeDollarSign,
+  CircleDollarSign,
+  Clock3,
+  Download,
+  Filter,
+  Mail,
+  ReceiptText,
+  RefreshCw,
+  Search,
+  Send,
+  ShieldAlert,
+} from "lucide-react";
 
 import type {
   Invoice,
@@ -105,6 +119,20 @@ function emailTypeChip(type?: InvoiceEmailEventType) {
       return "bg-emerald-100 text-emerald-800";
     default:
       return "bg-slate-100 text-slate-500";
+  }
+}
+
+function emailTypeIcon(type?: InvoiceEmailEventType) {
+  switch (type) {
+    case "receipt":
+      return CircleDollarSign;
+    case "reminder":
+      return ShieldAlert;
+    case "resent":
+    case "sent":
+      return Send;
+    default:
+      return Mail;
   }
 }
 
@@ -236,10 +264,26 @@ export default function AdminInvoicesPage() {
   const summary = useMemo(() => {
     const total = pagination.totalItems;
     const totalInclGstCents = items.reduce((sum, item) => sum + (item.invoice.totalInclGstCents ?? 0), 0);
+    const outstandingBalanceCents = items.reduce((sum, item) => sum + (item.paymentTotals.balanceCents ?? 0), 0);
+    const overdueCount = items.filter(({ paymentTotals }) => paymentTotals.status === "overdue").length;
+    const unpaidCount = items.filter(({ paymentTotals }) => paymentTotals.status === "unpaid").length;
+    const partiallyPaidCount = items.filter(({ paymentTotals }) => paymentTotals.status === "partially_paid").length;
+    const paidCount = items.filter(({ paymentTotals }) => paymentTotals.status === "paid").length;
     const issuedCount = items.filter(({ invoice }) => invoice.status === "issued").length;
     const draftCount = items.filter(({ invoice }) => invoice.status === "draft").length;
     const voidCount = items.filter(({ invoice }) => invoice.status === "void").length;
-    return { total, totalInclGstCents, issuedCount, draftCount, voidCount };
+    return {
+      total,
+      totalInclGstCents,
+      outstandingBalanceCents,
+      overdueCount,
+      unpaidCount,
+      partiallyPaidCount,
+      paidCount,
+      issuedCount,
+      draftCount,
+      voidCount,
+    };
   }, [items, pagination.totalItems]);
 
   function onExportCsv() {
@@ -268,159 +312,250 @@ export default function AdminInvoicesPage() {
   }
 
   return (
-    <div className="mx-auto max-w-6xl p-4">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold text-slate-900">Invoices</h1>
-          <p className="mt-1 text-sm text-slate-600">
-            DB-backed invoice list. Search by invoice no, order ref, customer, or payment status.
-          </p>
-        </div>
+    <div className="mx-auto max-w-7xl space-y-6 bg-slate-50 p-4">
+      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+          <div>
+            <div className="inline-flex items-center gap-2 rounded-full border border-[#F2C7C2] bg-[#FCE9E7] px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-[#B9382E]">
+              <ReceiptText className="h-4 w-4" />
+              Billing and receivables
+            </div>
+            <h1 className="mt-3 text-2xl font-semibold text-[#2A2A2A]">Invoices</h1>
+            <p className="mt-1 text-sm text-slate-600">
+              Track receivables, overdue follow-up, payment progress, and invoice communication from one DB-backed finance workspace.
+            </p>
+          </div>
 
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => router.push("/admin/rental/orders")}
-            className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
-          >
-            Orders
-          </button>
+          <div className="flex flex-wrap items-center justify-end gap-3 xl:max-w-[430px]">
+            <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-slate-200 bg-slate-50 p-1.5">
+              <button
+                type="button"
+                onClick={() => router.push("/admin/rental/orders")}
+                className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+              >
+                <span className="inline-flex items-center gap-2">
+                  <ArrowLeft className="h-4 w-4" />
+                  Orders
+                </span>
+              </button>
 
-          <button
-            type="button"
-            onClick={() => refresh({ q: searchDraft, status, paymentStatus })}
-            className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
-          >
-            Refresh
-          </button>
+              <button
+                type="button"
+                onClick={() => refresh({ q: searchDraft, status, paymentStatus })}
+                className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+              >
+                <span className="inline-flex items-center gap-2">
+                  <RefreshCw className="h-4 w-4" />
+                  Refresh
+                </span>
+              </button>
 
-          <button
-            type="button"
-            onClick={onExportCsv}
-            className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-800"
-          >
-            Export CSV
-          </button>
+              <button
+                type="button"
+                onClick={onExportPaymentsCsv}
+                className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+              >
+                <span className="inline-flex items-center gap-2">
+                  <BadgeDollarSign className="h-4 w-4" />
+                  Export Payments CSV
+                </span>
+              </button>
+            </div>
 
-          <button
-            type="button"
-            onClick={onExportPaymentsCsv}
-            className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
-          >
-            Export Payments CSV
-          </button>
+            <button
+              type="button"
+              onClick={onExportCsv}
+              className="rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-800"
+            >
+              <span className="inline-flex items-center gap-2">
+                <Download className="h-4 w-4" />
+                Export CSV
+              </span>
+            </button>
+          </div>
         </div>
       </div>
 
-      <div className="mt-6 grid gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm md:grid-cols-12 md:items-center">
-        <div className="md:col-span-5">
-          <label className="text-xs font-semibold text-slate-600">Search</label>
-          <input
-            value={searchDraft}
-            onChange={(e) => {
-              setSearchDraft(e.target.value);
-              setQ(e.target.value);
-              setPage(1);
-            }}
-            placeholder="invoice no / customer / contact person"
-            className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-sky-400"
-          />
-        </div>
-
-        <div className="md:col-span-3">
-          <label className="text-xs font-semibold text-slate-600">Lifecycle Status</label>
-          <select
-            value={status}
-            onChange={(e) => {
-              setStatus(e.target.value as StatusFilter);
-              setPage(1);
-            }}
-            className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-sky-400"
-          >
-            <option value="all">All</option>
-            <option value="draft">Draft</option>
-            <option value="issued">Issued</option>
-            <option value="void">Void</option>
-          </select>
-        </div>
-
-        <div className="md:col-span-2">
-          <label className="text-xs font-semibold text-slate-600">Payment Status</label>
-          <select
-            value={paymentStatus}
-            onChange={(e) => {
-              setPaymentStatus(e.target.value as PaymentStatusFilter);
-              setPage(1);
-            }}
-            className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-sky-400"
-          >
-            <option value="all">All</option>
-            <option value="unpaid">Unpaid</option>
-            <option value="partially_paid">Partially Paid</option>
-            <option value="paid">Paid</option>
-            <option value="overdue">Overdue</option>
-          </select>
-        </div>
-
-        <div className="md:col-span-2">
-          <label className="text-xs font-semibold text-slate-600">Sort</label>
-          <div className="mt-1 grid grid-cols-2 gap-2">
-            <select
-              value={sortBy}
-              onChange={(e) => {
-                setSortBy(e.target.value as InvoiceListSortBy);
-                setPage(1);
-              }}
-              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-sky-400"
-            >
-              <option value="created_at">Created</option>
-              <option value="due_date">Due Date</option>
-              <option value="total">Total</option>
-              <option value="invoice_number">Invoice No</option>
-            </select>
-            <select
-              value={sortDir}
-              onChange={(e) => {
-                setSortDir(e.target.value as InvoiceListSortDir);
-                setPage(1);
-              }}
-              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-sky-400"
-            >
-              <option value="desc">Desc</option>
-              <option value="asc">Asc</option>
-            </select>
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4 shadow-sm">
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-xs uppercase tracking-wide text-rose-700">Overdue</div>
+              <Clock3 className="h-4 w-4 text-rose-600" />
+            </div>
+            <div className="mt-2 text-2xl font-semibold text-rose-900">{summary.overdueCount}</div>
+            <div className="mt-1 text-xs text-rose-700">Past due and still unpaid.</div>
           </div>
-        </div>
-
-        <div className="md:col-span-12 grid grid-cols-1 gap-2 sm:grid-cols-4">
-          <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-            <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Invoices</div>
-            <div className="mt-1 text-lg font-semibold text-slate-900">{summary.total}</div>
-          </div>
-          <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-            <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Page</div>
-            <div className="mt-1 text-lg font-semibold text-slate-900">
-              {pagination.page} / {pagination.totalPages}
+          <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 shadow-sm">
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-xs uppercase tracking-wide text-amber-700">Open receivables</div>
+              <BadgeDollarSign className="h-4 w-4 text-amber-600" />
+            </div>
+            <div className="mt-2 text-2xl font-semibold text-amber-900">
+              {summary.unpaidCount + summary.partiallyPaidCount}
+            </div>
+            <div className="mt-1 text-xs text-amber-700">
+              Unpaid {summary.unpaidCount} · partial {summary.partiallyPaidCount}
             </div>
           </div>
-          <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-            <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Page Size</div>
+          <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-xs uppercase tracking-wide text-slate-500">Outstanding balance</div>
+              <CircleDollarSign className="h-4 w-4 text-[#D24338]" />
+            </div>
+            <div className="mt-2 text-2xl font-semibold text-slate-900">{moneyFromCents(summary.outstandingBalanceCents)}</div>
+            <div className="mt-1 text-xs text-slate-500">Balance still to be collected in this result set.</div>
+          </div>
+          <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-xs uppercase tracking-wide text-slate-500">Paid invoices</div>
+              <BadgeDollarSign className="h-4 w-4 text-emerald-600" />
+            </div>
+            <div className="mt-2 text-2xl font-semibold text-slate-900">{summary.paidCount}</div>
+            <div className="mt-1 text-xs text-slate-500">Fully settled invoices in the current result set.</div>
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="text-xs uppercase tracking-wide text-slate-500">Lifecycle snapshot</div>
+          <div className="mt-3 grid grid-cols-3 divide-x divide-slate-200 overflow-hidden rounded-xl border border-slate-200 bg-slate-50">
+            <div className="px-4 py-3">
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Draft</div>
+              <div className="mt-1 text-xl font-semibold text-slate-900">{summary.draftCount}</div>
+            </div>
+            <div className="px-4 py-3">
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Issued</div>
+              <div className="mt-1 text-xl font-semibold text-slate-900">{summary.issuedCount}</div>
+            </div>
+            <div className="px-4 py-3">
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Void</div>
+              <div className="mt-1 text-xl font-semibold text-slate-900">{summary.voidCount}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+          <div>
+            <div className="inline-flex items-center gap-2 text-sm font-semibold text-slate-900">
+              <Filter className="h-4 w-4 text-[#D24338]" />
+              Filters and controls
+            </div>
+            <div className="mt-1 text-xs text-slate-500">
+              Search receivables, refine lifecycle and payment state, then adjust list controls.
+            </div>
+          </div>
+          <div className="text-xs text-slate-500">
+            Result set total <span className="font-semibold text-slate-700">{moneyFromCents(summary.totalInclGstCents)}</span> ·{" "}
+            <span className="font-semibold text-slate-700">{pagination.totalItems}</span> invoices
+          </div>
+        </div>
+
+        <div className="mt-4 grid gap-3 xl:grid-cols-[minmax(0,1.5fr)_repeat(3,minmax(170px,1fr))]">
+          <div>
+            <label className="text-xs font-semibold text-slate-600">Search</label>
+            <div className="mt-1 flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+              <Search className="h-4 w-4 text-slate-400" />
+              <input
+                value={searchDraft}
+                onChange={(e) => {
+                  setSearchDraft(e.target.value);
+                  setQ(e.target.value);
+                  setPage(1);
+                }}
+                placeholder="invoice no / customer / contact person"
+                className="w-full bg-transparent text-sm outline-none"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="text-xs font-semibold text-slate-600">Lifecycle Status</label>
+            <select
+              value={status}
+              onChange={(e) => {
+                setStatus(e.target.value as StatusFilter);
+                setPage(1);
+              }}
+              className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-[#D24338]"
+            >
+              <option value="all">All</option>
+              <option value="draft">Draft</option>
+              <option value="issued">Issued</option>
+              <option value="void">Void</option>
+            </select>
+          </div>
+
+          <div>
+            <label className="text-xs font-semibold text-slate-600">Payment Status</label>
+            <select
+              value={paymentStatus}
+              onChange={(e) => {
+                setPaymentStatus(e.target.value as PaymentStatusFilter);
+                setPage(1);
+              }}
+              className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-[#D24338]"
+            >
+              <option value="all">All</option>
+              <option value="unpaid">Unpaid</option>
+              <option value="partially_paid">Partially Paid</option>
+              <option value="paid">Paid</option>
+              <option value="overdue">Overdue</option>
+            </select>
+          </div>
+
+          <div>
+            <label className="text-xs font-semibold text-slate-600">Sort</label>
+            <div className="mt-1 grid grid-cols-2 gap-2">
+              <select
+                value={sortBy}
+                onChange={(e) => {
+                  setSortBy(e.target.value as InvoiceListSortBy);
+                  setPage(1);
+                }}
+                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-[#D24338]"
+              >
+                <option value="created_at">Created</option>
+                <option value="due_date">Due Date</option>
+                <option value="total">Total</option>
+                <option value="invoice_number">Invoice No</option>
+              </select>
+              <select
+                value={sortDir}
+                onChange={(e) => {
+                  setSortDir(e.target.value as InvoiceListSortDir);
+                  setPage(1);
+                }}
+                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-[#D24338]"
+              >
+                <option value="desc">Desc</option>
+                <option value="asc">Asc</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-4 flex flex-col gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-3 xl:flex-row xl:items-center xl:justify-between">
+          <div className="text-sm text-slate-600">
+            Page <span className="font-semibold text-slate-900">{pagination.page}</span> of{" "}
+            <span className="font-semibold text-slate-900">{pagination.totalPages}</span> · Showing{" "}
+            <span className="font-semibold text-slate-900">{items.length}</span> row{items.length === 1 ? "" : "s"}
+          </div>
+          <div className="rounded-xl border border-slate-200 bg-white p-2">
+            <label className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Page size</label>
             <select
               value={pageSize}
               onChange={(e) => {
                 setPageSize(Number(e.target.value) as PageSizeOption);
                 setPage(1);
               }}
-              className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-sm outline-none focus:border-sky-400"
+              className="mt-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-sm outline-none focus:border-[#D24338]"
             >
               <option value={10}>10</option>
               <option value={20}>20</option>
               <option value={50}>50</option>
             </select>
-          </div>
-          <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-            <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Showing</div>
-            <div className="mt-1 text-lg font-semibold text-slate-900">{items.length}</div>
           </div>
         </div>
       </div>
@@ -439,7 +574,7 @@ export default function AdminInvoicesPage() {
         <div className="mt-6 rounded-xl border border-slate-200 bg-white p-6 text-sm text-slate-600">
           No invoices found for the current filters. Create one from{" "}
           <button
-            className="font-semibold text-sky-700 hover:underline"
+            className="font-semibold text-[#B9382E] hover:underline"
             onClick={() => router.push("/admin/rental/orders")}
             type="button"
           >
@@ -448,47 +583,54 @@ export default function AdminInvoicesPage() {
           .
         </div>
       ) : (
-        <div className="mt-6 overflow-hidden rounded-xl border border-slate-200 bg-white">
+        <div className="mt-6 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
           <table className="w-full text-left text-sm">
             <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
               <tr>
                 <th className="px-4 py-3">Invoice</th>
-                <th className="px-4 py-3">Order Ref</th>
                 <th className="px-4 py-3">Customer</th>
-                <th className="px-4 py-3">Issue Date</th>
-                <th className="px-4 py-3">Due Date</th>
-                <th className="px-4 py-3 text-right">Total (incl GST)</th>
-                <th className="px-4 py-3">Status</th>
+                <th className="px-4 py-3">Billing timeline</th>
+                <th className="px-4 py-3 text-right">Amounts</th>
+                <th className="px-4 py-3">Lifecycle</th>
                 <th className="px-4 py-3">Payment</th>
-                <th className="px-4 py-3">Last Email</th>
+                <th className="px-4 py-3">Communication</th>
                 <th className="px-4 py-3">Actions</th>
               </tr>
             </thead>
 
             <tbody>
-              {items.map(({ invoice, paymentTotals, emailSummary }) => (
-                <tr key={invoice.id} className="border-t border-slate-100">
+              {items.map(({ invoice, paymentTotals, emailSummary }) => {
+                const isOverdue = paymentTotals.status === "overdue";
+                const isOpenBalance = paymentTotals.status === "unpaid" || paymentTotals.status === "partially_paid" || paymentTotals.status === "overdue";
+                const EmailIcon = emailTypeIcon(emailSummary?.lastEmailType);
+                return (
+                <tr key={invoice.id} className={`border-t border-slate-100 ${isOverdue ? "bg-rose-50/30" : ""}`}>
                   <td className="px-4 py-3">
                     <div className="font-semibold text-slate-900">{invoice.invoiceNo ?? "- (draft)"}</div>
-                    <div className="text-xs text-slate-500">{invoice.id}</div>
-                  </td>
-
-                  <td className="px-4 py-3">
-                    <span className="font-mono text-xs font-semibold text-slate-900">{invoice.orderId}</span>
+                    <div className="mt-1 text-xs text-slate-500">{invoice.id}</div>
+                    <div className="mt-2 text-xs text-slate-500">
+                      Order <span className="font-mono font-semibold text-slate-700">{invoice.orderId}</span>
+                    </div>
                   </td>
 
                   <td className="px-4 py-3">
                     <div className="font-medium text-slate-900">{invoice.billTo?.name ?? "-"}</div>
-                    <div className="text-xs text-slate-500">{invoice.billTo?.email ?? "-"}</div>
+                    <div className="mt-1 text-xs text-slate-500">{invoice.billTo?.email ?? "-"}</div>
                   </td>
 
-                  <td className="px-4 py-3 text-slate-700">{formatDate(invoice.issueDate)}</td>
-                  <td className="px-4 py-3 text-slate-700">{formatDate(invoice.dueDate)}</td>
+                  <td className="px-4 py-3">
+                    <div className="text-sm text-slate-700">Issued {formatDate(invoice.issueDate)}</div>
+                    <div className={`mt-2 inline-flex rounded-full px-2 py-1 text-xs font-semibold ${isOverdue ? "bg-rose-100 text-rose-800" : "bg-slate-100 text-slate-700"}`}>
+                      Due {formatDate(invoice.dueDate)}
+                    </div>
+                  </td>
 
                   <td className="px-4 py-3 text-right">
-                    <div className="font-semibold text-slate-900">{moneyFromCents(invoice.totalInclGstCents)}</div>
-                    <div className="text-xs text-slate-500">
-                      Balance: {moneyFromCents(paymentTotals.balanceCents)}
+                    <div className={`font-semibold ${isOpenBalance ? "text-[#2A2A2A]" : "text-slate-900"}`}>
+                      {moneyFromCents(paymentTotals.balanceCents)}
+                    </div>
+                    <div className="mt-1 text-xs text-slate-500">
+                      Total {moneyFromCents(invoice.totalInclGstCents)}
                     </div>
                   </td>
 
@@ -499,20 +641,28 @@ export default function AdminInvoicesPage() {
                   </td>
 
                   <td className="px-4 py-3">
-                    <span className={["rounded-full px-2 py-1 text-xs font-semibold", paymentStatusChip(paymentTotals.status)].join(" ")}>
-                      {paymentStatusLabel(paymentTotals.status).toUpperCase()}
-                    </span>
+                    <div className="space-y-2">
+                      <span className={["rounded-full px-2 py-1 text-xs font-semibold", paymentStatusChip(paymentTotals.status)].join(" ")}>
+                        {paymentStatusLabel(paymentTotals.status).toUpperCase()}
+                      </span>
+                      {isOpenBalance && (
+                        <div className="text-xs text-slate-500">
+                          Outstanding <span className="font-semibold text-slate-700">{moneyFromCents(paymentTotals.balanceCents)}</span>
+                        </div>
+                      )}
+                    </div>
                   </td>
 
                   <td className="px-4 py-3">
                     {emailSummary?.emailCount ? (
-                      <div className="space-y-1">
+                      <div className="space-y-1.5">
                         <span
                           className={[
-                            "inline-flex rounded-full px-2 py-1 text-xs font-semibold",
+                            "inline-flex items-center gap-1.5 rounded-full px-2 py-1 text-xs font-semibold",
                             emailTypeChip(emailSummary.lastEmailType),
                           ].join(" ")}
                         >
+                          <EmailIcon className="h-3.5 w-3.5" />
                           {emailTypeLabel(emailSummary.lastEmailType).toUpperCase()}
                         </span>
                         <div className="text-xs text-slate-500">{formatDateTime(emailSummary.lastEmailAt)}</div>
@@ -532,7 +682,10 @@ export default function AdminInvoicesPage() {
                         onClick={() => router.push(`/admin/rental/invoices/${encodeURIComponent(invoice.id)}`)}
                         className="rounded-lg bg-slate-900 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-800"
                       >
-                        View
+                        <span className="inline-flex items-center gap-2">
+                          <ReceiptText className="h-4 w-4" />
+                          View invoice
+                        </span>
                       </button>
 
                       <button
@@ -541,19 +694,22 @@ export default function AdminInvoicesPage() {
                         className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
                         title="Create/view invoices via Orders in MVP"
                       >
-                        Go to Orders
+                        <span className="inline-flex items-center gap-2">
+                          <ArrowLeft className="h-4 w-4" />
+                          Related order
+                        </span>
                       </button>
                     </div>
                   </td>
                 </tr>
-              ))}
+              )})}
             </tbody>
           </table>
         </div>
       )}
 
       {!loading && pagination.totalItems > 0 && (
-        <div className="mt-4 flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3">
+        <div className="mt-4 flex items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
           <div className="text-sm text-slate-600">
             Showing page <span className="font-semibold text-slate-900">{pagination.page}</span> of{" "}
             <span className="font-semibold text-slate-900">{pagination.totalPages}</span> ({pagination.totalItems} invoices)
@@ -588,21 +744,6 @@ export default function AdminInvoicesPage() {
           </div>
         </div>
       )}
-
-      <div className="mt-4 grid gap-3 sm:grid-cols-3">
-        <div className="rounded-xl border border-slate-200 bg-white p-4">
-          <div className="text-xs uppercase tracking-wide text-slate-500">Draft</div>
-          <div className="mt-1 text-xl font-semibold text-slate-900">{summary.draftCount}</div>
-        </div>
-        <div className="rounded-xl border border-slate-200 bg-white p-4">
-          <div className="text-xs uppercase tracking-wide text-slate-500">Issued</div>
-          <div className="mt-1 text-xl font-semibold text-slate-900">{summary.issuedCount}</div>
-        </div>
-        <div className="rounded-xl border border-slate-200 bg-white p-4">
-          <div className="text-xs uppercase tracking-wide text-slate-500">Void</div>
-          <div className="mt-1 text-xl font-semibold text-slate-900">{summary.voidCount}</div>
-        </div>
-      </div>
     </div>
   );
 }

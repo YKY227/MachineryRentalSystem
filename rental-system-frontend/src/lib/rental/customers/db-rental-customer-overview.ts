@@ -7,9 +7,15 @@ import {
 import { dbRentalCustomerRepo } from "@/lib/rental/customers/db-rental-customer-repo";
 import { dbRentalDepositRepo } from "@/lib/rental/deposits/db-rental-deposit-repo";
 import type { RentalOrderDepositStatus } from "@/lib/rental/deposits/types";
+import { dbRentalOrderExtensionRepo } from "@/lib/rental/extensions/db-rental-order-extension-repo";
+import type { RentalOrderExtensionStatus } from "@/lib/rental/extensions/types";
 import { dbPaymentRepo } from "@/lib/rental/invoices/db-payment-repo";
 import type { InvoicePaymentStatus } from "@/lib/rental/invoices/types";
-import type { RentalCustomer } from "@/lib/rental/orders/types";
+import type {
+  RentalCustomer,
+  RentalOrderInspectionStatus,
+  RentalOrderReturnStatus,
+} from "@/lib/rental/orders/types";
 import { supabaseAdmin } from "@/lib/supabase/server";
 
 const ORDERS_TABLE = process.env.SUPABASE_RENTAL_ORDERS_TABLE ?? "rental_orders";
@@ -26,6 +32,10 @@ type OrderOverviewRow = {
   qty: number;
   start_date: string;
   end_date: string;
+  return_status: RentalOrderReturnStatus | null;
+  returned_at: string | null;
+  inspection_status: RentalOrderInspectionStatus | null;
+  completed_at: string | null;
   created_at: string;
 };
 
@@ -77,6 +87,10 @@ export type RentalCustomerRecentOrder = {
   depositRetainedCents: number;
   depositUnresolvedCents: number;
   depositStatus: RentalOrderDepositStatus;
+  returnStatus: RentalOrderReturnStatus;
+  returnedAt?: string;
+  inspectionStatus: RentalOrderInspectionStatus;
+  completedAt?: string;
   createdAt: string;
 };
 
@@ -103,6 +117,21 @@ export type RentalCustomerRecentPayment = {
   createdAt: string;
 };
 
+export type RentalCustomerRecentExtension = {
+  id: string;
+  orderId: string;
+  equipmentSummary: string;
+  currentRentalEnd: string;
+  requestedRentalEnd: string;
+  status: RentalOrderExtensionStatus;
+  extensionChargeEstimateCents: number;
+  finalExtensionChargeCents?: number;
+  customerMessage?: string;
+  paymentRequired: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type RentalCustomerEmailEvent = {
   id: string;
   invoiceId: string;
@@ -117,7 +146,17 @@ export type RentalCustomerFinancialSummary = {
   totalInvoices: number;
   totalPaidCents: number;
   outstandingBalanceCents: number;
+  currentBalanceCents: number;
+  overdueBalanceCents: number;
   overdueInvoicesCount: number;
+  openInvoicesCount: number;
+};
+
+export type RentalCustomerAgingSummary = {
+  currentCents: number;
+  overdue1To30Cents: number;
+  overdue31To60Cents: number;
+  overdue61PlusCents: number;
 };
 
 export type RentalCustomerDepositSummary = {
@@ -133,13 +172,25 @@ export type { RentalCustomerCreditControlSummary } from "@/lib/rental/credit-con
 export type RentalCustomerOverview = {
   customer: RentalCustomer;
   recentOrders: RentalCustomerRecentOrder[];
+  recentExtensions: RentalCustomerRecentExtension[];
   recentInvoices: RentalCustomerRecentInvoice[];
+  openInvoices: RentalCustomerRecentInvoice[];
   recentPayments: RentalCustomerRecentPayment[];
   emailEvents: RentalCustomerEmailEvent[];
   financialSummary: RentalCustomerFinancialSummary;
+  agingSummary: RentalCustomerAgingSummary;
   depositSummary: RentalCustomerDepositSummary;
   creditControl: RentalCustomerCreditControlSummary;
 };
+
+function daysOverdueFromDueDate(dueDate?: string | null, now = new Date()): number | null {
+  if (!dueDate) return null;
+  const dueAt = new Date(dueDate);
+  if (Number.isNaN(dueAt.getTime())) return null;
+  const diffMs = now.getTime() - dueAt.getTime();
+  if (diffMs <= 0) return 0;
+  return Math.floor(diffMs / (1000 * 60 * 60 * 24));
+}
 
 function deriveOrderStatus(input: {
   latestSessionStatus?: OrderSessionRow["status"];
@@ -173,7 +224,7 @@ export async function loadRentalCustomerOverview(customerId: string): Promise<Re
 
   const { data: recentOrdersData, error: recentOrdersError } = await supabase
     .from(ORDERS_TABLE)
-    .select("id,customer_id,equipment_title,qty,start_date,end_date,created_at")
+    .select("id,customer_id,equipment_title,qty,start_date,end_date,return_status,returned_at,inspection_status,completed_at,created_at")
     .eq("customer_id", customerId)
     .order("created_at", { ascending: false })
     .limit(recentOrderLimit);
@@ -192,14 +243,25 @@ export async function loadRentalCustomerOverview(customerId: string): Promise<Re
     return {
       customer,
       recentOrders: [],
+      recentExtensions: [],
       recentInvoices: [],
+      openInvoices: [],
       recentPayments: [],
       emailEvents: [],
       financialSummary: {
         totalInvoices: 0,
         totalPaidCents: 0,
         outstandingBalanceCents: 0,
+        currentBalanceCents: 0,
+        overdueBalanceCents: 0,
         overdueInvoicesCount: 0,
+        openInvoicesCount: 0,
+      },
+      agingSummary: {
+        currentCents: 0,
+        overdue1To30Cents: 0,
+        overdue31To60Cents: 0,
+        overdue61PlusCents: 0,
       },
       depositSummary: {
         totalRequiredCents: 0,
@@ -256,6 +318,7 @@ export async function loadRentalCustomerOverview(customerId: string): Promise<Re
     }))
   );
   const depositSummariesByOrderId = await dbRentalDepositRepo.listByOrderIds(allOrderIds);
+  const extensionsByOrderId = await dbRentalOrderExtensionRepo.listByOrderIds(allOrderIds);
 
   const recentInvoices = allInvoices.slice(0, recentInvoiceLimit).map((invoice) => ({
     id: invoice.id,
@@ -272,6 +335,26 @@ export async function loadRentalCustomerOverview(customerId: string): Promise<Re
 
   const invoiceIds = allInvoices.map((invoice) => invoice.id);
   const invoiceNoById = new Map(allInvoices.map((invoice) => [invoice.id, invoice.invoice_no ?? undefined]));
+  const openInvoices = allInvoices
+    .filter((invoice) => (totalsByInvoiceId[invoice.id]?.balanceCents ?? Number(invoice.total_incl_gst_cents ?? 0)) > 0)
+    .map((invoice) => ({
+      id: invoice.id,
+      invoiceNo: invoice.invoice_no ?? undefined,
+      issueDate: invoice.issue_date ?? undefined,
+      status: invoice.status,
+      totalInclGstCents: Number(invoice.total_incl_gst_cents ?? 0),
+      paymentStatus: totalsByInvoiceId[invoice.id]?.status ?? "unpaid",
+      paidCents: totalsByInvoiceId[invoice.id]?.paidCents ?? 0,
+      outstandingBalanceCents:
+        totalsByInvoiceId[invoice.id]?.balanceCents ?? Math.max(0, Number(invoice.total_incl_gst_cents ?? 0)),
+      dueDate: invoice.due_date ?? undefined,
+    }))
+    .sort((a, b) => {
+      const aTime = a.dueDate ? new Date(a.dueDate).getTime() : Number.MAX_SAFE_INTEGER;
+      const bTime = b.dueDate ? new Date(b.dueDate).getTime() : Number.MAX_SAFE_INTEGER;
+      return aTime - bTime;
+    })
+    .slice(0, recentInvoiceLimit);
 
   let recentPayments: RentalCustomerRecentPayment[] = [];
   let emailEvents: RentalCustomerEmailEvent[] = [];
@@ -317,23 +400,58 @@ export async function loadRentalCustomerOverview(customerId: string): Promise<Re
     }));
   }
 
+  const now = new Date();
   const financialSummary = allInvoices.reduce<RentalCustomerFinancialSummary>(
     (summary, invoice) => {
       const totals = totalsByInvoiceId[invoice.id];
       const totalPaid = totals?.paidCents ?? 0;
       const balance = totals?.balanceCents ?? Math.max(0, Number(invoice.total_incl_gst_cents ?? 0));
+      const isOpen = balance > 0;
+      const isOverdue = totals?.status === "overdue";
       return {
         totalInvoices: summary.totalInvoices + 1,
         totalPaidCents: summary.totalPaidCents + totalPaid,
         outstandingBalanceCents: summary.outstandingBalanceCents + balance,
-        overdueInvoicesCount: summary.overdueInvoicesCount + (totals?.status === "overdue" ? 1 : 0),
+        currentBalanceCents: summary.currentBalanceCents + (isOpen && !isOverdue ? balance : 0),
+        overdueBalanceCents: summary.overdueBalanceCents + (isOverdue ? balance : 0),
+        overdueInvoicesCount: summary.overdueInvoicesCount + (isOverdue ? 1 : 0),
+        openInvoicesCount: summary.openInvoicesCount + (isOpen ? 1 : 0),
       };
     },
     {
       totalInvoices: 0,
       totalPaidCents: 0,
       outstandingBalanceCents: 0,
+      currentBalanceCents: 0,
+      overdueBalanceCents: 0,
       overdueInvoicesCount: 0,
+      openInvoicesCount: 0,
+    }
+  );
+
+  const agingSummary = allInvoices.reduce<RentalCustomerAgingSummary>(
+    (summary, invoice) => {
+      const totals = totalsByInvoiceId[invoice.id];
+      const balance = totals?.balanceCents ?? Math.max(0, Number(invoice.total_incl_gst_cents ?? 0));
+      if (balance <= 0) return summary;
+
+      const overdueDays = daysOverdueFromDueDate(invoice.due_date, now);
+      if (overdueDays === null || overdueDays <= 0) {
+        summary.currentCents += balance;
+      } else if (overdueDays <= 30) {
+        summary.overdue1To30Cents += balance;
+      } else if (overdueDays <= 60) {
+        summary.overdue31To60Cents += balance;
+      } else {
+        summary.overdue61PlusCents += balance;
+      }
+      return summary;
+    },
+    {
+      currentCents: 0,
+      overdue1To30Cents: 0,
+      overdue31To60Cents: 0,
+      overdue61PlusCents: 0,
     }
   );
 
@@ -394,13 +512,35 @@ export async function loadRentalCustomerOverview(customerId: string): Promise<Re
         depositRetainedCents: deposit.retainedAmountCents,
         depositUnresolvedCents: deposit.unresolvedAmountCents,
         depositStatus: deposit.status,
+        returnStatus: order.return_status ?? "out",
+        returnedAt: order.returned_at ?? undefined,
+        inspectionStatus: order.inspection_status ?? "not_started",
+        completedAt: order.completed_at ?? undefined,
         createdAt: order.created_at,
       };
     }),
+    recentExtensions: recentOrders.flatMap((order) =>
+      (extensionsByOrderId[order.id] ?? []).map((extension) => ({
+        id: extension.id,
+        orderId: extension.orderId,
+        equipmentSummary: `${order.equipment_title} x${order.qty}`,
+        currentRentalEnd: extension.currentRentalEnd,
+        requestedRentalEnd: extension.requestedRentalEnd,
+        status: extension.status,
+        extensionChargeEstimateCents: extension.extensionChargeEstimateCents,
+        finalExtensionChargeCents: extension.finalExtensionChargeCents,
+        customerMessage: extension.customerMessage,
+        paymentRequired: extension.status === "approved_pending_payment",
+        createdAt: extension.createdAt,
+        updatedAt: extension.updatedAt,
+      }))
+    ),
     recentInvoices,
+    openInvoices,
     recentPayments,
     emailEvents,
     financialSummary,
+    agingSummary,
     depositSummary,
     creditControl,
   };

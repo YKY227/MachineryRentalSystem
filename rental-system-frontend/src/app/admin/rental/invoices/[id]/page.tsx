@@ -3,6 +3,20 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
+import {
+  ArrowLeft,
+  Bell,
+  FileDown,
+  FileSpreadsheet,
+  FileText,
+  Mail,
+  MailCheck,
+  Receipt,
+  ReceiptText,
+  RefreshCcw,
+  ShieldAlert,
+  Wallet,
+} from "lucide-react";
 
 import type {
   Invoice,
@@ -12,6 +26,7 @@ import type {
   InvoicePaymentStatus,
   InvoicePaymentTotals,
 } from "@/lib/rental/invoices/types";
+import type { OrgSettingsDto } from "@/lib/admin-settings/use-admin-settings";
 
 function moneyFromCents(cents: number) {
   const v = Number.isFinite(cents) ? cents : 0;
@@ -103,7 +118,7 @@ function emailTypeLabel(type: InvoiceEmailEventType) {
 function emailTypeChip(type: InvoiceEmailEventType) {
   switch (type) {
     case "sent":
-      return "bg-sky-100 text-sky-800";
+      return "border border-[#F2C7C2] bg-[#FCE9E7] text-[#B9382E]";
     case "resent":
       return "bg-indigo-100 text-indigo-800";
     case "reminder":
@@ -113,6 +128,30 @@ function emailTypeChip(type: InvoiceEmailEventType) {
     default:
       return "bg-slate-100 text-slate-700";
   }
+}
+
+function SectionHeader({
+  icon: Icon,
+  title,
+  subtitle,
+}: {
+  icon: typeof FileText;
+  title: string;
+  subtitle?: string;
+}) {
+  return (
+    <div className="min-w-0">
+      <div className="flex items-center gap-3">
+        <div className="flex h-9 w-9 items-center justify-center rounded-xl border border-[#F2C7C2] bg-[#FCE9E7]">
+          <Icon className="h-4 w-4 text-[#B9382E]" />
+        </div>
+        <div className="min-w-0">
+          <div className="text-sm font-semibold text-slate-900">{title}</div>
+          {subtitle ? <div className="text-xs text-slate-500">{subtitle}</div> : null}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 const EMPTY_PAYMENT_TOTALS: InvoicePaymentTotals = {
@@ -137,6 +176,7 @@ export default function AdminInvoiceDetailPage() {
   const [emails, setEmails] = useState<InvoiceEmailLogItem[]>([]);
   const [payments, setPayments] = useState<InvoicePayment[]>([]);
   const [paymentTotals, setPaymentTotals] = useState<InvoicePaymentTotals>(EMPTY_PAYMENT_TOTALS);
+  const [orgSettings, setOrgSettings] = useState<OrgSettingsDto | null>(null);
   const [loading, setLoading] = useState(true);
   const [paymentsLoading, setPaymentsLoading] = useState(false);
   const [activeAction, setActiveAction] = useState<InvoiceActionKey | null>(null);
@@ -205,6 +245,22 @@ export default function AdminInvoiceDetailPage() {
     }
   }
 
+  async function loadOrgSettings() {
+    try {
+      const res = await fetch("/api/admin/settings", {
+        method: "GET",
+        cache: "no-store",
+        credentials: "include",
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error ?? "Failed to load organisation settings");
+      setOrgSettings(data as OrgSettingsDto);
+    } catch (e) {
+      console.error("loadOrgSettings failed", e);
+      setOrgSettings(null);
+    }
+  }
+
   async function reload() {
     try {
       setLoading(true);
@@ -246,6 +302,7 @@ export default function AdminInvoiceDetailPage() {
 
   useEffect(() => {
     reload();
+    loadOrgSettings();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
@@ -290,6 +347,18 @@ export default function AdminInvoiceDetailPage() {
   const canRecordPayment = Boolean(
     inv && inv.status === "issued" && effectivePaymentTotals.balanceCents > 0
   );
+
+  const supplierName = orgSettings?.orgName?.trim() || inv?.supplier?.name || "-";
+  const supplierAddress =
+    orgSettings?.companyAddress?.trim() ||
+    (inv?.supplier?.addressLines ?? []).filter(Boolean).join("\n");
+  const supplierEmail = orgSettings?.supportEmail?.trim() || "";
+  const supplierPhone = orgSettings?.companyPhone?.trim() || orgSettings?.whatsappNumber?.trim() || "";
+  const supplierUen = orgSettings?.companyUen?.trim() || inv?.supplier?.uen || "";
+  const supplierGst = orgSettings?.companyGstRegNo?.trim() || inv?.supplier?.gstRegNo || "";
+  const bankName = orgSettings?.bankName?.trim() || "";
+  const bankAccountName = orgSettings?.bankAccountName?.trim() || supplierName;
+  const bankAccountNumber = orgSettings?.bankAccountNumber?.trim() || "";
   const canSendReminder = Boolean(
     inv &&
       inv.status === "issued" &&
@@ -539,8 +608,9 @@ export default function AdminInvoiceDetailPage() {
 
   if (loading) {
     return (
-      <div className="mx-auto max-w-6xl p-4">
-        <div className="rounded-xl border border-slate-200 bg-white p-6 text-sm text-slate-600">
+      <div className="mx-auto max-w-6xl bg-slate-50 p-4">
+        <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white p-6 text-sm text-slate-600">
+          <ReceiptText className="h-4 w-4 text-slate-400" />
           Loading invoice...
         </div>
       </div>
@@ -549,17 +619,21 @@ export default function AdminInvoiceDetailPage() {
 
   if (!inv) {
     return (
-      <div className="mx-auto max-w-6xl p-4">
+      <div className="mx-auto max-w-6xl bg-slate-50 p-4">
         <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-          <div className="text-lg font-semibold text-slate-900">Invoice not found</div>
+          <div className="flex items-center gap-2 text-lg font-semibold text-slate-900">
+            <ShieldAlert className="h-5 w-5 text-rose-500" />
+            Invoice not found
+          </div>
           <div className="mt-1 text-sm text-slate-600">
             The invoice ID <span className="font-mono">{id}</span> was not found in the database.
           </div>
           <button
             type="button"
             onClick={() => router.push("/admin/rental/orders")}
-            className="mt-4 rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800"
+            className="mt-4 inline-flex items-center gap-2 rounded-xl bg-[#D24338] px-4 py-2 text-sm font-semibold text-white hover:bg-[#B9382E]"
           >
+            <ArrowLeft className="h-4 w-4" />
             Back to Orders
           </button>
         </div>
@@ -567,190 +641,269 @@ export default function AdminInvoiceDetailPage() {
     );
   }
 
-  const accent = "bg-slate-900";
-  const headerText = "text-white";
-
   return (
-    <div className="mx-auto max-w-6xl p-4">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <div className="flex flex-wrap items-center gap-2">
-            <h1 className="text-2xl font-semibold text-slate-900">
-              {inv.invoiceNo ? inv.invoiceNo : "Invoice (Draft)"}
-            </h1>
-            <span className={["rounded-full px-2 py-0.5 text-xs font-semibold", statusChip(inv.status)].join(" ")}>
-              {inv.status.toUpperCase()}
-            </span>
-            <span
-              className={[
-                "rounded-full px-2 py-0.5 text-xs font-semibold",
-                paymentStatusChip(effectivePaymentTotals.status),
-              ].join(" ")}
-            >
-              {paymentStatusLabel(effectivePaymentTotals.status).toUpperCase()}
-            </span>
+    <div className="mx-auto max-w-6xl space-y-6 bg-slate-50 p-4">
+      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
+          <div className="space-y-4">
+            <div className="inline-flex items-center gap-2 rounded-full border border-[#F2C7C2] bg-[#FCE9E7] px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.22em] text-[#B9382E]">
+              <ReceiptText className="h-3.5 w-3.5" />
+              Finance workspace
+            </div>
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <h1 className="text-3xl font-semibold tracking-tight text-[#2A2A2A]">
+                  {inv.invoiceNo ? inv.invoiceNo : "Invoice Draft"}
+                </h1>
+                <span className={["rounded-full px-2 py-0.5 text-xs font-semibold", statusChip(inv.status)].join(" ")}>
+                  {inv.status.toUpperCase()}
+                </span>
+                <span
+                  className={[
+                    "rounded-full px-2 py-0.5 text-xs font-semibold",
+                    paymentStatusChip(effectivePaymentTotals.status),
+                  ].join(" ")}
+                >
+                  {paymentStatusLabel(effectivePaymentTotals.status).toUpperCase()}
+                </span>
+              </div>
+              <p className="mt-2 text-sm leading-6 text-slate-600">
+                Tax invoice workspace for document control, receivables follow-up, and payment administration.
+              </p>
+            </div>
           </div>
-          <p className="mt-1 text-sm text-slate-600">
-            Order: <span className="font-mono">{inv.orderId}</span> - Updated:{" "}
-            <span className="font-medium text-slate-700">{formatDateTime(inv.updatedAt)}</span>
-          </p>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => router.push("/admin/rental/orders")}
+              className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 transition hover:border-[#F2C7C2] hover:bg-[#FCE9E7]"
+            >
+              <ArrowLeft className="h-4 w-4" />
+              Back to Orders
+            </button>
+            <button
+              type="button"
+              onClick={() => router.push(`/admin/rental/orders`)}
+              className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
+            >
+              <FileSpreadsheet className="h-4 w-4" />
+              Related Order
+            </button>
+          </div>
         </div>
 
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => router.push("/admin/rental/orders")}
-            className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
-          >
-            Back to Orders
-          </button>
-          {inv.status === "issued" && (
-            <button
-              type="button"
-              disabled={isActionBusy}
-              onClick={() => setShowEmailModal(true)}
-              className={[
-                "rounded-lg px-4 py-2 text-sm font-semibold text-white",
-                isActionBusy ? "bg-sky-300" : "bg-sky-600 hover:bg-sky-700",
-              ].join(" ")}
-            >
-              {isSendingEmail ? "Sending..." : emails.length ? "Resend Email" : "Send Email"}
-            </button>
-          )}
-          {canSendReminder && (
-            <button
-              type="button"
-              disabled={isActionBusy}
-              onClick={onSendReminder}
-              className={[
-                "rounded-lg px-4 py-2 text-sm font-semibold text-white",
-                isActionBusy ? "bg-amber-300" : "bg-amber-500 hover:bg-amber-600",
-              ].join(" ")}
-            >
-              {isSendingReminder ? "Sending..." : "Send Reminder"}
-            </button>
-          )}
-          {canSendReceipt && (
-            <button
-              type="button"
-              disabled={isActionBusy}
-              onClick={onSendReceipt}
-              className={[
-                "rounded-lg px-4 py-2 text-sm font-semibold text-white",
-                isActionBusy ? "bg-emerald-300" : "bg-emerald-500 hover:bg-emerald-600",
-              ].join(" ")}
-            >
-              {isSendingReceipt ? "Sending..." : "Send Receipt"}
-            </button>
-          )}
-          {canRecordPayment && (
-            <button
-              type="button"
-              disabled={isActionBusy}
-              onClick={() => {
-                setPaymentDate(toDateInputValue());
-                setShowPaymentModal(true);
-              }}
-              className={[
-                "rounded-lg px-4 py-2 text-sm font-semibold text-white",
-                isActionBusy ? "bg-emerald-300" : "bg-emerald-600 hover:bg-emerald-700",
-              ].join(" ")}
-            >
-              {isRecordingPayment ? "Recording..." : "Record Payment"}
-            </button>
-          )}
-          {isDraft && (
-            <>
-              <button
-                type="button"
-                onClick={onSaveDraft}
-                className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-900 hover:bg-slate-50"
-              >
-                Save Draft
-              </button>
-              <button
-                type="button"
-                disabled={!canIssue}
-                onClick={onIssue}
-                className={[
-                  "rounded-lg px-3 py-2 text-sm font-semibold",
-                  canIssue ? "bg-sky-600 text-white hover:bg-sky-700" : "bg-slate-200 text-slate-500",
-                ].join(" ")}
-                title={!canIssue ? "Fill Bill To name and ensure items exist." : "Issue and lock invoice"}
-              >
-                Issue Invoice
-              </button>
-            </>
-          )}
-
-          {isIssued && (
-            <button
-              type="button"
-              onClick={onVoid}
-              className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-100"
-            >
-              Void
-            </button>
-          )}
-
-          <button
-            type="button"
-            disabled={!inv || inv.status !== "issued"}
-            onClick={async () => {
-              if (!inv || inv.status !== "issued") return;
-
-              const res = await fetch("/api/admin/rental/invoices/pdf", {
-                method: "POST",
-                credentials: "include",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(inv),
-              });
-              if (!res.ok) {
-                const data = await res.json().catch(() => ({}));
-                alert(data?.error ?? "PDF download failed");
-                return;
-              }
-
-              const blob = await res.blob();
-              const url = URL.createObjectURL(blob);
-              const a = document.createElement("a");
-              a.href = url;
-              a.download = `${inv.invoiceNo}.pdf`;
-              a.click();
-              URL.revokeObjectURL(url);
-
-              if (!inv.pdfStorage) {
-                await reload();
-              }
-            }}
+        <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+              Document
+            </div>
+            <div className="mt-1 text-sm font-semibold text-slate-900">Tax Invoice</div>
+            <div className="mt-1 text-xs text-slate-500">
+              {inv.invoiceNo ?? "Number assigned on issue"}
+            </div>
+          </div>
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+              Related Order
+            </div>
+            <div className="mt-1 font-mono text-sm font-semibold text-slate-900">{inv.orderId}</div>
+            <div className="mt-1 text-xs text-slate-500">Operational source document</div>
+          </div>
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+              Last Updated
+            </div>
+            <div className="mt-1 text-sm font-semibold text-slate-900">{formatDateTime(inv.updatedAt)}</div>
+            <div className="mt-1 text-xs text-slate-500">
+              Invoice lifecycle and delivery history stay server-backed
+            </div>
+          </div>
+          <div
             className={[
-              "rounded-lg px-3 py-2 text-sm font-semibold",
-              inv?.status === "issued"
-                ? "border border-slate-200 bg-white text-slate-900 hover:bg-slate-50"
-                : "bg-slate-200 text-slate-500",
+              "rounded-2xl border p-4",
+              effectivePaymentTotals.balanceCents > 0
+                ? "border-[#F2C7C2] bg-[#FCE9E7]"
+                : "border-emerald-200 bg-emerald-50",
             ].join(" ")}
-            title={inv?.status !== "issued" ? "Issue invoice to generate a PDF" : "Download PDF"}
           >
-            Download PDF
-          </button>
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+              Outstanding Balance
+            </div>
+            <div className="mt-1 text-xl font-semibold text-[#2A2A2A]">
+              {moneyFromCents(effectivePaymentTotals.balanceCents)}
+            </div>
+            <div className="mt-1 text-xs text-slate-500">
+              Paid {moneyFromCents(effectivePaymentTotals.paidCents)} of{" "}
+              {moneyFromCents(effectivePaymentTotals.totalCents)}
+            </div>
+          </div>
+        </div>
 
-          {isVoid && (
-            <button
-              type="button"
-              disabled
-              className="rounded-lg bg-slate-200 px-3 py-2 text-sm font-semibold text-slate-500"
-              title="Voided invoice is locked."
-            >
-              Locked
-            </button>
-          )}
+        <div className="mt-5 grid gap-3 xl:grid-cols-[1.2fr_1.1fr_0.9fr]">
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+            <div className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+              <RefreshCcw className="h-3.5 w-3.5 text-[#B9382E]" />
+              Document workflow
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {isDraft && (
+                <>
+                  <button
+                    type="button"
+                    onClick={onSaveDraft}
+                    className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-900 hover:bg-slate-50"
+                  >
+                    <RefreshCcw className="h-4 w-4" />
+                    Save Draft
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!canIssue}
+                    onClick={onIssue}
+                    className={[
+                      "inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold",
+                      canIssue
+                        ? "bg-[#D24338] text-white hover:bg-[#B9382E]"
+                        : "bg-slate-200 text-slate-500",
+                    ].join(" ")}
+                    title={!canIssue ? "Fill Bill To name and ensure items exist." : "Issue and lock invoice"}
+                  >
+                    <Receipt className="h-4 w-4" />
+                    Issue Invoice
+                  </button>
+                </>
+              )}
+              {isIssued && (
+                <button
+                  type="button"
+                  onClick={onVoid}
+                  className="inline-flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-100"
+                >
+                  <ShieldAlert className="h-4 w-4" />
+                  Void
+                </button>
+              )}
+              {isVoid && (
+                <button
+                  type="button"
+                  disabled
+                  className="rounded-xl bg-slate-200 px-3 py-2 text-sm font-semibold text-slate-500"
+                  title="Voided invoice is locked."
+                >
+                  Locked
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+            <div className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+              <Mail className="h-3.5 w-3.5 text-[#B9382E]" />
+              Communication
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {inv.status === "issued" && (
+                <button
+                  type="button"
+                  disabled={isActionBusy}
+                  onClick={() => setShowEmailModal(true)}
+                  className={[
+                    "inline-flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold text-white",
+                    isActionBusy ? "bg-[#F2C7C2]" : "bg-[#D24338] hover:bg-[#B9382E]",
+                  ].join(" ")}
+                >
+                  <Mail className="h-4 w-4" />
+                  {isSendingEmail ? "Sending..." : emails.length ? "Resend Email" : "Send Email"}
+                </button>
+              )}
+              {canSendReminder && (
+                <button
+                  type="button"
+                  disabled={isActionBusy}
+                  onClick={onSendReminder}
+                  className={[
+                    "inline-flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold text-white",
+                    isActionBusy ? "bg-amber-300" : "bg-amber-500 hover:bg-amber-600",
+                  ].join(" ")}
+                >
+                  <Bell className="h-4 w-4" />
+                  {isSendingReminder ? "Sending..." : "Send Reminder"}
+                </button>
+              )}
+              {canSendReceipt && (
+                <button
+                  type="button"
+                  disabled={isActionBusy}
+                  onClick={onSendReceipt}
+                  className={[
+                    "inline-flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold text-white",
+                    isActionBusy ? "bg-emerald-300" : "bg-emerald-500 hover:bg-emerald-600",
+                  ].join(" ")}
+                >
+                  <MailCheck className="h-4 w-4" />
+                  {isSendingReceipt ? "Sending..." : "Send Receipt"}
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+            <div className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+              <FileDown className="h-3.5 w-3.5 text-[#B9382E]" />
+              Utilities
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                disabled={!inv || inv.status !== "issued"}
+                onClick={async () => {
+                  if (!inv || inv.status !== "issued") return;
+
+                  const res = await fetch("/api/admin/rental/invoices/pdf", {
+                    method: "POST",
+                    credentials: "include",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(inv),
+                  });
+                  if (!res.ok) {
+                    const data = await res.json().catch(() => ({}));
+                    alert(data?.error ?? "PDF download failed");
+                    return;
+                  }
+
+                  const blob = await res.blob();
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement("a");
+                  a.href = url;
+                  a.download = `${inv.invoiceNo}.pdf`;
+                  a.click();
+                  URL.revokeObjectURL(url);
+
+                  if (!inv.pdfStorage) {
+                    await reload();
+                  }
+                }}
+                className={[
+                  "inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold",
+                  inv?.status === "issued"
+                    ? "border border-slate-200 bg-white text-slate-900 hover:bg-slate-50"
+                    : "bg-slate-200 text-slate-500",
+                ].join(" ")}
+                title={inv?.status !== "issued" ? "Issue invoice to generate a PDF" : "Download PDF"}
+              >
+                <FileDown className="h-4 w-4" />
+                Download PDF
+              </button>
+            </div>
+          </div>
         </div>
       </div>
 
       {banner && (
         <div
           className={[
-            "mt-4 rounded-xl px-4 py-3 text-sm",
+            "rounded-xl px-4 py-3 text-sm",
             banner.kind === "error"
               ? "border border-rose-200 bg-rose-50 text-rose-700"
               : "border border-emerald-200 bg-emerald-50 text-emerald-800",
@@ -774,7 +927,7 @@ export default function AdminInvoiceDetailPage() {
                   value={emailTo}
                   disabled={isSendingEmail}
                   onChange={(e) => setEmailTo(e.target.value)}
-                  className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                  className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-[#D24338]"
                 />
               </div>
 
@@ -784,7 +937,7 @@ export default function AdminInvoiceDetailPage() {
                   value={emailCc}
                   disabled={isSendingEmail}
                   onChange={(e) => setEmailCc(e.target.value)}
-                  className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                  className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-[#D24338]"
                 />
               </div>
 
@@ -794,7 +947,7 @@ export default function AdminInvoiceDetailPage() {
                   value={emailSubject}
                   disabled={isSendingEmail}
                   onChange={(e) => setEmailSubject(e.target.value)}
-                  className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                  className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-[#D24338]"
                 />
               </div>
 
@@ -805,7 +958,7 @@ export default function AdminInvoiceDetailPage() {
                   value={emailMessage}
                   disabled={isSendingEmail}
                   onChange={(e) => setEmailMessage(e.target.value)}
-                  className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                  className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-[#D24338]"
                 />
               </div>
 
@@ -826,7 +979,7 @@ export default function AdminInvoiceDetailPage() {
               <button
                 onClick={handleSendInvoiceEmail}
                 disabled={isSendingEmail}
-                className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-400"
+                className="rounded-lg bg-[#D24338] px-4 py-2 text-sm font-semibold text-white hover:bg-[#B9382E] disabled:cursor-not-allowed disabled:bg-slate-400"
               >
                 {isSendingEmail ? "Sending..." : emails.length ? "Confirm Resend" : "Send"}
               </button>
@@ -851,7 +1004,7 @@ export default function AdminInvoiceDetailPage() {
                   value={paymentDate}
                   disabled={isRecordingPayment}
                   onChange={(e) => setPaymentDate(e.target.value)}
-                  className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                  className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-[#D24338]"
                 />
               </div>
 
@@ -864,7 +1017,7 @@ export default function AdminInvoiceDetailPage() {
                   value={paymentAmount}
                   disabled={isRecordingPayment}
                   onChange={(e) => setPaymentAmount(e.target.value)}
-                  className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                  className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-[#D24338]"
                   placeholder="0.00"
                 />
               </div>
@@ -875,7 +1028,7 @@ export default function AdminInvoiceDetailPage() {
                   value={paymentMethod}
                   disabled={isRecordingPayment}
                   onChange={(e) => setPaymentMethod(e.target.value)}
-                  className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                  className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-[#D24338]"
                   placeholder="Bank transfer"
                 />
               </div>
@@ -886,7 +1039,7 @@ export default function AdminInvoiceDetailPage() {
                   value={paymentReference}
                   disabled={isRecordingPayment}
                   onChange={(e) => setPaymentReference(e.target.value)}
-                  className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                  className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-[#D24338]"
                   placeholder="Txn / remittance reference"
                 />
               </div>
@@ -898,7 +1051,7 @@ export default function AdminInvoiceDetailPage() {
                   value={paymentNotes}
                   disabled={isRecordingPayment}
                   onChange={(e) => setPaymentNotes(e.target.value)}
-                  className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                  className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-[#D24338]"
                   placeholder="Optional note"
                 />
               </div>
@@ -932,10 +1085,15 @@ export default function AdminInvoiceDetailPage() {
         </div>
       )}
 
-      <div className="mt-6 grid gap-6 lg:grid-cols-12">
+      <div className="grid gap-6 lg:grid-cols-12">
         <div className="lg:col-span-4">
+          <div className="space-y-6 lg:sticky lg:top-4">
           <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <div className="text-sm font-semibold text-slate-900">Invoice Details</div>
+            <SectionHeader
+              icon={FileText}
+              title="Invoice Details"
+              subtitle="Core invoice dates, tax settings, and PDF storage state."
+            />
             <div className="mt-2 grid gap-2 text-sm">
               <div className="flex items-center justify-between">
                 <span className="text-slate-500">Invoice No</span>
@@ -954,8 +1112,11 @@ export default function AdminInvoiceDetailPage() {
                 <span className="font-semibold text-slate-900">{Math.round(inv.gstRate * 100)}%</span>
               </div>
             </div>
-            <div className="mt-3 border-t border-slate-100 pt-3 text-xs text-slate-600">
-              <div className="font-semibold text-slate-700">PDF</div>
+            <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4 text-xs text-slate-600">
+              <div className="flex items-center gap-2 font-semibold text-slate-700">
+                <FileDown className="h-4 w-4 text-[#B9382E]" />
+                PDF Storage
+              </div>
               <div className="mt-1">
                 Status:{" "}
                 <span className="font-medium text-slate-900">
@@ -968,14 +1129,13 @@ export default function AdminInvoiceDetailPage() {
             </div>
           </div>
 
-          <div className="mt-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
             <div className="flex items-start justify-between gap-2">
-              <div>
-                <div className="text-sm font-semibold text-slate-900">Bill To</div>
-                <div className="mt-1 text-xs text-slate-500">
-                  {isDraft ? "Editable (draft only)" : "Locked (issued/void)"}
-                </div>
-              </div>
+              <SectionHeader
+                icon={Receipt}
+                title="Bill To"
+                subtitle={isDraft ? "Editable while draft." : "Locked after issue or void."}
+              />
               {!isDraft && (
                 <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-600">
                   Locked
@@ -990,7 +1150,7 @@ export default function AdminInvoiceDetailPage() {
                   value={billToName}
                   onChange={(e) => setBillToName(e.target.value)}
                   disabled={!isDraft}
-                  className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-sky-400 disabled:bg-slate-50"
+                  className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-[#D24338] disabled:bg-slate-50"
                   placeholder="e.g., ABC Construction Pte Ltd"
                 />
               </div>
@@ -1001,7 +1161,7 @@ export default function AdminInvoiceDetailPage() {
                   value={billToUen}
                   onChange={(e) => setBillToUen(e.target.value)}
                   disabled={!isDraft}
-                  className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-sky-400 disabled:bg-slate-50"
+                  className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-[#D24338] disabled:bg-slate-50"
                   placeholder="e.g., 201998877Z"
                 />
               </div>
@@ -1012,7 +1172,7 @@ export default function AdminInvoiceDetailPage() {
                   value={billToEmail}
                   onChange={(e) => setBillToEmail(e.target.value)}
                   disabled={!isDraft}
-                  className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-sky-400 disabled:bg-slate-50"
+                  className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-[#D24338] disabled:bg-slate-50"
                   placeholder="billing@company.com"
                 />
               </div>
@@ -1024,21 +1184,20 @@ export default function AdminInvoiceDetailPage() {
                   onChange={(e) => setBillToAddress(e.target.value)}
                   disabled={!isDraft}
                   rows={4}
-                  className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-sky-400 disabled:bg-slate-50"
+                  className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-[#D24338] disabled:bg-slate-50"
                   placeholder="Address line 1&#10;Singapore 123456"
                 />
               </div>
             </div>
           </div>
 
-          <div className="mt-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
             <div className="flex items-center justify-between gap-3">
-              <div>
-                <div className="text-sm font-semibold text-slate-900">Payments</div>
-                <div className="mt-1 text-xs text-slate-500">
-                  DB-derived payment summary for this invoice.
-                </div>
-              </div>
+              <SectionHeader
+                icon={Wallet}
+                title="Payment Summary"
+                subtitle="DB-derived receivables position for this invoice."
+              />
               <span
                 className={[
                   "rounded-full px-2 py-0.5 text-xs font-semibold",
@@ -1048,7 +1207,22 @@ export default function AdminInvoiceDetailPage() {
                 {paymentStatusLabel(effectivePaymentTotals.status)}
               </span>
             </div>
-            <div className="mt-4 space-y-2 text-sm">
+            <div className="mt-4 space-y-3 text-sm">
+              <div
+                className={[
+                  "rounded-2xl border p-4",
+                  effectivePaymentTotals.balanceCents > 0
+                    ? "border-[#F2C7C2] bg-[#FCE9E7]"
+                    : "border-emerald-200 bg-emerald-50",
+                ].join(" ")}
+              >
+                <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                  Outstanding
+                </div>
+                <div className="mt-1 text-2xl font-semibold text-[#2A2A2A]">
+                  {moneyFromCents(effectivePaymentTotals.balanceCents)}
+                </div>
+              </div>
               <div className="flex items-center justify-between">
                 <span className="text-slate-600">Total</span>
                 <span className="font-semibold text-slate-900">
@@ -1089,21 +1263,32 @@ export default function AdminInvoiceDetailPage() {
               )}
             </div>
           </div>
+          </div>
         </div>
 
         <div className="lg:col-span-8">
           <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
-            <div className={["rounded-t-2xl px-6 py-5", accent, headerText].join(" ")}>
+            <div className="rounded-t-2xl border-b border-[#F2C7C2] bg-[#2A2A2A] px-6 py-5 text-white">
               <div className="flex items-start justify-between gap-6">
                 <div className="min-w-0">
-                  <div className="text-lg font-semibold leading-tight">{inv.supplier?.name ?? "-"}</div>
-                  <div className="mt-1 text-xs opacity-90">
-                    {(inv.supplier?.addressLines ?? []).filter(Boolean).join(" - ") || "-"}
-                  </div>
-                  <div className="mt-1 text-xs opacity-90">
-                    {inv.supplier?.gstRegNo ? `GST Reg No: ${inv.supplier.gstRegNo}` : "GST Reg No: -"}
-                    {inv.supplier?.uen ? ` - UEN: ${inv.supplier.uen}` : ""}
-                  </div>
+                  <div className="text-lg font-semibold leading-tight">{supplierName}</div>
+                  {supplierAddress ? (
+                    <div className="mt-1 whitespace-pre-line text-xs opacity-90">{supplierAddress}</div>
+                  ) : null}
+                  {(supplierEmail || supplierPhone) ? (
+                    <div className="mt-1 text-xs opacity-90">
+                      {[supplierEmail ? `Email: ${supplierEmail}` : null, supplierPhone ? `Phone: ${supplierPhone}` : null]
+                        .filter(Boolean)
+                        .join(" | ")}
+                    </div>
+                  ) : null}
+                  {(supplierGst || supplierUen) ? (
+                    <div className="mt-1 text-xs opacity-90">
+                      {[supplierGst ? `GST Reg No: ${supplierGst}` : null, supplierUen ? `UEN: ${supplierUen}` : null]
+                        .filter(Boolean)
+                        .join(" | ")}
+                    </div>
+                  ) : null}
                 </div>
 
                 <div className="shrink-0 text-right">
@@ -1187,16 +1372,18 @@ export default function AdminInvoiceDetailPage() {
                 <div className="rounded-xl border border-slate-200 p-4">
                   <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Payment Instructions</div>
                   <div className="mt-2 text-sm text-slate-700">
-                    <div>Bank: DBS Bank Ltd</div>
-                    <div>Account Name: {inv.supplier?.name ?? "-"}</div>
-                    <div>Account No: 123-456789-0</div>
-                    <div className="mt-2">
-                      PayNow UEN: <span className="font-semibold">-</span>
-                    </div>
+                    {bankName ? <div>Bank: {bankName}</div> : null}
+                    {bankAccountName ? <div>Account Name: {bankAccountName}</div> : null}
+                    {bankAccountNumber ? <div>Account No: {bankAccountNumber}</div> : null}
                     <div className="mt-2">
                       Reference:{" "}
                       <span className="font-semibold">{inv.invoiceNo ?? "(issue to generate)"}</span>
                     </div>
+                    {!bankName && !bankAccountName && !bankAccountNumber ? (
+                      <div className="mt-2 text-xs text-slate-500">
+                        No bank details configured in Organisation Details yet.
+                      </div>
+                    ) : null}
                   </div>
 
                   {isVoid && (
@@ -1241,7 +1428,7 @@ export default function AdminInvoiceDetailPage() {
                 </div>
               </div>
 
-              <div className="mt-6 border-t border-slate-100 pt-4 text-xs text-slate-500">
+              <div className="mt-6 rounded-xl border border-slate-200 bg-slate-50 p-4 text-xs text-slate-500">
                 <div>Notes:</div>
                 <ul className="mt-2 list-disc space-y-1 pl-5">
                   <li>Payment due within the agreed terms.</li>
@@ -1260,7 +1447,11 @@ export default function AdminInvoiceDetailPage() {
 
       <div className="mt-8 rounded-2xl border border-slate-200 bg-white p-4">
         <div className="flex items-center justify-between gap-3">
-          <h3 className="text-sm font-semibold text-slate-900">Payment History</h3>
+          <SectionHeader
+            icon={Wallet}
+            title="Payment History"
+            subtitle="Recorded settlements applied to this invoice."
+          />
           <span className="text-xs text-slate-500">Newest first</span>
         </div>
 
@@ -1299,7 +1490,11 @@ export default function AdminInvoiceDetailPage() {
       {emails.length > 0 && (
         <div className="mt-8 rounded-2xl border border-slate-200 bg-white p-4">
           <div className="flex items-center justify-between gap-3">
-            <h3 className="text-sm font-semibold text-slate-900">Email History</h3>
+            <SectionHeader
+              icon={MailCheck}
+              title="Email History"
+              subtitle="Delivery activity for invoice, reminder, and receipt messages."
+            />
             <span className="text-xs text-slate-500">{emails.length} event{emails.length === 1 ? "" : "s"}</span>
           </div>
 

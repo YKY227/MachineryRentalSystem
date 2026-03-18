@@ -1,37 +1,38 @@
 import { NextResponse } from "next/server";
+import { revalidatePath } from "next/cache";
 
 import {
   adminUnauthorizedResponse,
   assertAdmin,
   isAdminUnauthorized,
 } from "@/lib/auth/admin";
-import { dbOrderRepo } from "@/lib/rental/orders/db-order-repo";
+import { deleteRentalOrder } from "@/lib/rental/orders/delete-rental-order-service";
 
 export const runtime = "nodejs";
 
-type RouteContext = {
-  params: Promise<{ id: string }>;
-};
-
-function requireOrderEnv() {
-  const required = ["SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY"] as const;
-  const missing = required.filter((name) => !process.env[name]);
-  if (missing.length) {
-    throw new Error(`Missing required env vars: ${missing.join(", ")}`);
-  }
+function revalidateRentalDeletePaths() {
+  revalidatePath("/admin/rental/orders");
+  revalidatePath("/admin/rental/calendar");
+  revalidatePath("/admin/rental/invoices");
+  revalidatePath("/rental/account");
 }
 
-export async function GET(req: Request, ctx: RouteContext) {
+export async function DELETE(
+  req: Request,
+  context: { params: Promise<{ id: string }> }
+) {
   try {
     assertAdmin(req);
-    requireOrderEnv();
-    const { id } = await ctx.params;
-    const order = await dbOrderRepo.get(id);
-    if (!order) return NextResponse.json({ error: "Order not found" }, { status: 404 });
-    return NextResponse.json({ order });
-  } catch (e) {
-    if (isAdminUnauthorized(e)) return adminUnauthorizedResponse();
-    const message = e instanceof Error ? e.message : "Order read failed";
-    return NextResponse.json({ error: message }, { status: 400 });
+    const { id } = await context.params;
+    const result = await deleteRentalOrder(id);
+    if (result.status === "deleted") {
+      revalidateRentalDeletePaths();
+    }
+    return NextResponse.json(result);
+  } catch (error) {
+    if (isAdminUnauthorized(error)) return adminUnauthorizedResponse();
+    const message = error instanceof Error ? error.message : "Rental order delete failed";
+    const status = message === "Developer delete tools are disabled" ? 403 : 400;
+    return NextResponse.json({ error: message }, { status });
   }
 }

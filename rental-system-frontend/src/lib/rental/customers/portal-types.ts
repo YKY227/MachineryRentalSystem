@@ -1,13 +1,29 @@
 import type { RentalCreditDecision } from "@/lib/rental/credit-control/db-rental-credit-control";
 import type { RentalOrderDepositStatus } from "@/lib/rental/deposits/types";
+import type { RentalOrderExtensionStatus } from "@/lib/rental/extensions/types";
 import type { InvoicePaymentStatus } from "@/lib/rental/invoices/types";
-import type { RentalCustomerAccountStatus, RentalCustomerPaymentTerms } from "@/lib/rental/orders/types";
+import type {
+  RentalCustomerAccountStatus,
+  RentalCustomerPaymentTerms,
+  RentalOrderInspectionStatus,
+  RentalOrderReturnStatus,
+} from "@/lib/rental/orders/types";
 
 export type RentalCustomerPortalFinancialSummary = {
   totalInvoices: number;
   totalPaidCents: number;
   outstandingBalanceCents: number;
+  currentBalanceCents: number;
+  overdueBalanceCents: number;
   overdueInvoicesCount: number;
+  openInvoicesCount: number;
+};
+
+export type RentalCustomerPortalAgingSummary = {
+  currentCents: number;
+  overdue1To30Cents: number;
+  overdue31To60Cents: number;
+  overdue61PlusCents: number;
 };
 
 export type RentalCustomerPortalDepositSummary = {
@@ -30,6 +46,10 @@ export type RentalCustomerPortalRecentOrder = {
   depositRetainedCents: number;
   depositUnresolvedCents: number;
   depositStatus: RentalOrderDepositStatus;
+  returnStatus: RentalOrderReturnStatus;
+  returnedAt?: string;
+  inspectionStatus: RentalOrderInspectionStatus;
+  completedAt?: string;
   createdAt: string;
 };
 
@@ -54,6 +74,21 @@ export type RentalCustomerPortalRecentPayment = {
   invoiceId: string;
   invoiceNo?: string;
   createdAt: string;
+};
+
+export type RentalCustomerPortalExtension = {
+  id: string;
+  orderId: string;
+  equipmentSummary: string;
+  currentRentalEnd: string;
+  requestedRentalEnd: string;
+  status: RentalOrderExtensionStatus;
+  extensionChargeEstimateCents: number;
+  finalExtensionChargeCents?: number;
+  customerMessage?: string;
+  paymentRequired: boolean;
+  createdAt: string;
+  updatedAt: string;
 };
 
 export type RentalCustomerPortalProfile = {
@@ -93,9 +128,12 @@ export type RentalCustomerPortalNotice = {
 export type RentalCustomerPortalOverview = {
   profile: RentalCustomerPortalProfile;
   financialSummary: RentalCustomerPortalFinancialSummary;
+  agingSummary: RentalCustomerPortalAgingSummary;
   depositSummary: RentalCustomerPortalDepositSummary;
   creditSummary: RentalCustomerPortalCreditSummary;
+  openInvoices: RentalCustomerPortalRecentInvoice[];
   recentOrders: RentalCustomerPortalRecentOrder[];
+  recentExtensions: RentalCustomerPortalExtension[];
   recentInvoices: RentalCustomerPortalRecentInvoice[];
   recentPayments: RentalCustomerPortalRecentPayment[];
   recentNotices: RentalCustomerPortalNotice[];

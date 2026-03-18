@@ -1,6 +1,7 @@
 // src/app/api/public/rental/checkout/start-payment/route.ts
 import { NextResponse } from "next/server";
 
+import { isAdminAuthenticated } from "@/lib/auth/admin";
 import { getAuthenticatedCustomer } from "@/lib/auth/customer";
 import {
   evaluateRentalCreditCheckout,
@@ -92,6 +93,12 @@ export async function POST(req: Request) {
     const order = body?.order;
     if (!order?.id) {
       return NextResponse.json({ error: "Missing order id" }, { status: 400 });
+    }
+    if (isAdminAuthenticated(req)) {
+      return NextResponse.json(
+        { error: "Checkout is only available for customer accounts" },
+        { status: 403 }
+      );
     }
 
     const matchedCustomer = await getAuthenticatedCustomer(req);

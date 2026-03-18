@@ -20,6 +20,17 @@ import {
 import type { CreateRentalOrderInput, RentalCustomer } from "@/lib/rental/orders/types";
 
 type FulfillmentMode = "deliver" | "self_collect";
+type AvailabilitySnapshot = {
+  totalUnits: number;
+  committedQty: number;
+  heldQty: number;
+  downtimeQty: number;
+  availableQty: number;
+};
+type AuthStatusResponse = {
+  adminAuthenticated?: boolean;
+  customer?: RentalCustomer | null;
+};
 
 function formatMoney(n: number) {
   return new Intl.NumberFormat("en-SG", {
@@ -86,6 +97,8 @@ function CheckoutInner() {
   const [contactEmail, setContactEmail] = useState("");
   const [contactPhone, setContactPhone] = useState("");
   const [authCustomer, setAuthCustomer] = useState<RentalCustomer | null>(null);
+  const [adminAuthenticated, setAdminAuthenticated] = useState(false);
+  const [availabilitySnapshot, setAvailabilitySnapshot] = useState<AvailabilitySnapshot | null>(null);
 
   const deliveryFee = fulfillment === "deliver" ? 60 : 0;
   const collectionFee = fulfillment === "deliver" ? 60 : 0;
@@ -121,9 +134,10 @@ function CheckoutInner() {
           cache: "no-store",
           credentials: "include",
         });
-        const data = await res.json().catch(() => ({}));
+        const data = (await res.json().catch(() => ({}))) as AuthStatusResponse;
         if (!mounted || !res.ok) return;
-        const customer = (data?.customer ?? null) as RentalCustomer | null;
+        const customer = data.customer ?? null;
+        setAdminAuthenticated(Boolean(data.adminAuthenticated));
         setAuthCustomer(customer);
         if (!customer) return;
         setCompanyName(customer.companyName ?? "");
@@ -131,7 +145,10 @@ function CheckoutInner() {
         setContactEmail(customer.email ?? "");
         setContactPhone(customer.phone ?? "");
       } catch {
-        if (mounted) setAuthCustomer(null);
+        if (mounted) {
+          setAuthCustomer(null);
+          setAdminAuthenticated(false);
+        }
       }
     })();
 
@@ -144,6 +161,35 @@ function CheckoutInner() {
     if (!start || !end) return 0;
     return calculateRentalDaysInclusive(start, end);
   }, [end, start]);
+  const dateValid = days > 0 && !!start && !!end;
+
+  useEffect(() => {
+    if (!equipment?.id || !dateValid) {
+      setAvailabilitySnapshot(null);
+      return;
+    }
+
+    let active = true;
+    fetch(
+      `/api/public/rental/equipment/${encodeURIComponent(equipment.id)}/availability?start=${encodeURIComponent(
+        start
+      )}&end=${encodeURIComponent(end)}`,
+      { cache: "no-store" }
+    )
+      .then(async (res) => {
+        const data = await res.json().catch(() => ({}));
+        if (!active) return;
+        if (!res.ok) throw new Error(data?.error ?? "Failed to load availability");
+        setAvailabilitySnapshot((data?.snapshot ?? null) as AvailabilitySnapshot | null);
+      })
+      .catch(() => {
+        if (active) setAvailabilitySnapshot(null);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [dateValid, end, equipment?.id, start]);
 
   const repricedPreview = useMemo(() => {
     if (!equipment || !start || !end) return null;
@@ -160,8 +206,16 @@ function CheckoutInner() {
     }
   }, [end, equipment, fulfillment, qty, start]);
 
-  const minDays = equipment?.pricing?.minDays ?? 1;
-  const deposit = repricedPreview?.pricingSnapshot.deposit ?? equipment?.pricing?.deposit ?? 0;
+  const equipmentPricing = equipment?.pricing ?? {
+    minDays: 1,
+    dayRate: 0,
+    weekRate: undefined,
+    monthRate: undefined,
+    deposit: 0,
+  };
+
+  const minDays = equipmentPricing.minDays ?? 1;
+  const deposit = repricedPreview?.pricingSnapshot.deposit ?? equipmentPricing.deposit ?? 0;
   const rentalSubtotal = repricedPreview?.pricingSnapshot.rentalSubtotal ?? 0;
   const pricing = {
     gstAmount: repricedPreview?.pricingSnapshot.gstAmount ?? 0,
@@ -169,9 +223,10 @@ function CheckoutInner() {
     displayTotal: repricedPreview?.pricingSnapshot.total ?? 0,
   };
 
-  const availableUnits = equipment?.totalUnits ?? 0;
+  const availableUnits = dateValid && availabilitySnapshot ? availabilitySnapshot.availableQty : equipment?.totalUnits ?? 0;
   const valid =
     !!equipment &&
+    !adminAuthenticated &&
     !!authCustomer &&
     authCustomer.accountStatus === "active" &&
     qty >= 1 &&
@@ -243,6 +298,11 @@ function CheckoutInner() {
             data?.creditCheckoutMessage ?? data?.error ?? "Credit checkout is unavailable."
           ).trim();
           setCheckoutError(blockedMessage || "Credit checkout is unavailable.");
+          setConfirming(false);
+          return;
+        }
+        if (res.status === 403 && String(data?.error ?? "").trim()) {
+          setCheckoutError(String(data.error).trim());
           setConfirming(false);
           return;
         }
@@ -378,7 +438,7 @@ function CheckoutInner() {
                     </div>
                     <div className="mt-1 text-sm text-slate-700">Qty: {qty}</div>
                     <div className="mt-1 text-xs text-slate-500">
-                      Current catalog units: {availableUnits}
+                      {dateValid ? "Available for selected dates:" : "Current catalog units:"} {availableUnits}
                     </div>
                     {qty > availableUnits && (
                       <div className="mt-2 text-xs font-medium text-rose-600">
@@ -399,14 +459,14 @@ function CheckoutInner() {
                     </div>
                   </div>
 
-                  {(equipment.pricing.deposit ?? 0) > 0 && (
+                  {deposit > 0 && (
                     <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 sm:col-span-2">
                       <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
                         <Shield className="h-4 w-4" />
                         Deposit
                       </div>
                       <div className="mt-1 text-sm text-slate-700">
-                        {formatMoney(equipment.pricing.deposit ?? 0)} (refundable)
+                        {formatMoney(deposit)} (refundable)
                       </div>
                     </div>
                   )}
@@ -445,6 +505,18 @@ function CheckoutInner() {
                     className="font-medium text-sky-700 hover:text-sky-800"
                   >
                     Switch account
+                  </Link>
+                </div>
+              ) : adminAuthenticated ? (
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    Checkout is only available for customer accounts.
+                    <div className="mt-1 text-[11px] text-slate-500">
+                      You can keep browsing equipment, or return to the admin area.
+                    </div>
+                  </div>
+                  <Link href="/admin" className="font-medium text-sky-700 hover:text-sky-800">
+                    Go to admin
                   </Link>
                 </div>
               ) : (
@@ -570,7 +642,9 @@ function CheckoutInner() {
               {!valid && (
                 <div className="mt-4 rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs text-rose-700">
                   {!authCustomer
-                    ? "Sign in or register to continue with booking."
+                    ? adminAuthenticated
+                      ? "Checkout is only available for customer accounts."
+                      : "Sign in or register to continue with booking."
                     : authCustomer.accountStatus !== "active"
                       ? "This customer account is suspended."
                       : "Invalid checkout parameters. Please go back and reselect your dates or quantity."}
@@ -600,7 +674,11 @@ function CheckoutInner() {
                     : "cursor-not-allowed bg-slate-200 text-slate-500",
                 ].join(" ")}
               >
-                {confirming ? "Processing..." : "Continue checkout"}
+                {confirming
+                  ? "Processing..."
+                  : adminAuthenticated
+                    ? "Customer checkout only"
+                    : "Continue checkout"}
                 <ArrowRight className="ml-2 h-4 w-4" />
               </button>
 

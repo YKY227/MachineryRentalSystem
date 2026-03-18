@@ -46,7 +46,7 @@ type EditorState = {
 
 const ORDERS_LS_KEY = "cms_rental_orders_v1";
 
-function emptyEditor(): EditorState {
+function emptyEditor(defaultMaintenanceBufferDays = 7): EditorState {
   return {
     id: null,
     title: "",
@@ -56,7 +56,7 @@ function emptyEditor(): EditorState {
     model: "",
     description: "",
     totalUnits: 1,
-    maintenanceBufferDays: 7,
+    maintenanceBufferDays: defaultMaintenanceBufferDays,
     dayRate: 80,
     weekRate: "",
     monthRate: "",
@@ -121,7 +121,7 @@ function textToSpecs(value: string) {
   }, {});
 }
 
-function toEditor(item?: Equipment | null): EditorState {
+function toEditor(item?: Equipment | null, defaultMaintenanceBufferDays = 7): EditorState {
   if (!item) return emptyEditor();
   return {
     id: item.id,
@@ -132,7 +132,7 @@ function toEditor(item?: Equipment | null): EditorState {
     model: item.model ?? "",
     description: item.description ?? item.shortDesc ?? "",
     totalUnits: item.totalUnits,
-    maintenanceBufferDays: item.maintenanceBufferDays ?? 7,
+    maintenanceBufferDays: item.maintenanceBufferDays ?? defaultMaintenanceBufferDays,
     dayRate: item.pricing.dayRate ?? 0,
     weekRate: item.pricing.weekRate ?? "",
     monthRate: item.pricing.monthRate ?? "",
@@ -182,6 +182,7 @@ export default function AdminRentalInventoryPage() {
   const [tab, setTab] = useState<TabKey>("inventory");
   const [items, setItems] = useState<Equipment[]>([]);
   const [orders, setOrders] = useState<LocalRentalOrder[]>([]);
+  const [defaultMaintenanceBufferDays, setDefaultMaintenanceBufferDays] = useState(7);
   const [editor, setEditor] = useState<EditorState>(emptyEditor());
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -212,7 +213,24 @@ export default function AdminRentalInventoryPage() {
     }
   }
 
+  async function refreshSettings() {
+    const res = await fetch("/api/admin/settings", {
+      cache: "no-store",
+      credentials: "include",
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data?.error ?? "Failed to load settings");
+    const nextDefault = Math.max(0, Number(data?.operationsPolicy?.defaultMaintenanceBufferDays ?? 7));
+    setDefaultMaintenanceBufferDays(nextDefault);
+    setEditor((current) =>
+      current.id ? current : { ...current, maintenanceBufferDays: nextDefault }
+    );
+  }
+
   useEffect(() => {
+    refreshSettings().catch((nextError) => {
+      console.error("refreshSettings failed", nextError);
+    });
     refreshInventory();
     setOrders(readOrders());
   }, []);
@@ -236,7 +254,7 @@ export default function AdminRentalInventoryPage() {
       if (!res.ok) throw new Error(data?.error ?? "Failed to save equipment");
       const saved = (data?.equipment ?? null) as Equipment | null;
       await refreshInventory();
-      setEditor(toEditor(saved));
+      setEditor(toEditor(saved, defaultMaintenanceBufferDays));
       setNotice(editor.id ? "Equipment updated." : "Equipment created.");
       setTab("inventory");
     } catch (nextError) {
@@ -277,7 +295,7 @@ export default function AdminRentalInventoryPage() {
 
         <div className="flex items-center gap-2">
           <button type="button" onClick={refreshInventory} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">Refresh</button>
-          <button type="button" onClick={() => { setEditor(emptyEditor()); setTab("create"); }} className="rounded-lg bg-sky-600 px-3 py-2 text-sm font-medium text-white hover:bg-sky-700">Add equipment</button>
+          <button type="button" onClick={() => { setEditor(emptyEditor(defaultMaintenanceBufferDays)); setTab("create"); }} className="rounded-lg bg-sky-600 px-3 py-2 text-sm font-medium text-white hover:bg-sky-700">Add equipment</button>
         </div>
       </div>
 
@@ -319,7 +337,7 @@ export default function AdminRentalInventoryPage() {
                     <td className="px-4 py-3 text-slate-700">{item.totalUnits}</td>
                     <td className="px-4 py-3 text-slate-700">{formatMoney(item.pricing.dayRate)} / {item.pricing.weekRate ? formatMoney(item.pricing.weekRate) : "-"} / {item.pricing.monthRate ? formatMoney(item.pricing.monthRate) : "-"}</td>
                     <td className="px-4 py-3"><label className="inline-flex items-center gap-2"><input type="checkbox" checked={item.isPublished} onChange={(event) => togglePublish(item, event.target.checked)} /><span className="text-slate-700">{item.isPublished ? "Yes" : "No"}</span></label></td>
-                    <td className="px-4 py-3 text-right"><button type="button" onClick={() => { setEditor(toEditor(item)); setTab("create"); }} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">Edit</button></td>
+                    <td className="px-4 py-3 text-right"><button type="button" onClick={() => { setEditor(toEditor(item, defaultMaintenanceBufferDays)); setTab("create"); }} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">Edit</button></td>
                   </tr>
                 ))}
                 {items.length === 0 && <tr><td colSpan={6} className="px-4 py-6 text-sm text-slate-500">No equipment records found.</td></tr>}
@@ -378,7 +396,7 @@ export default function AdminRentalInventoryPage() {
 
             <div className="mt-5 flex flex-col gap-2 sm:flex-row">
               <button type="button" onClick={saveEquipment} disabled={saving} className="inline-flex items-center justify-center rounded-xl bg-sky-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-sky-700 disabled:cursor-not-allowed disabled:bg-slate-300">{saving ? "Saving..." : editor.id ? "Save changes" : "Create equipment"}</button>
-              <button type="button" onClick={() => setEditor(emptyEditor())} className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-900 hover:bg-slate-50">New entry</button>
+              <button type="button" onClick={() => setEditor(emptyEditor(defaultMaintenanceBufferDays))} className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-900 hover:bg-slate-50">New entry</button>
             </div>
           </div>
 

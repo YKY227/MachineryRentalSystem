@@ -7,21 +7,35 @@ import {
 } from "@/lib/auth/admin";
 import {
   dbAdminSettingsRepo,
+  DEFAULT_OPERATIONS_POLICY_SETTINGS,
   DEFAULT_REMINDER_POLICY_SETTINGS,
   type AdminSettings,
 } from "@/lib/settings/db-admin-settings-repo";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 type SettingsBody = {
   orgName?: string;
   supportEmail?: string;
   whatsappNumber?: string | null;
+  companyUen?: string | null;
+  companyGstRegNo?: string | null;
+  companyAddress?: string | null;
+  companyPhone?: string | null;
+  bankName?: string | null;
+  bankAccountName?: string | null;
+  bankAccountNumber?: string | null;
   adminNotificationEmails?: string[];
   bccTesterEnabled?: boolean;
   testerEmails?: string[];
   bookingPaidRecipients?: string[];
   overdueRecipients?: string[];
+  operationsPolicy?: {
+    defaultMaintenanceBufferDays?: number | string;
+    enableDeveloperDeleteTools?: boolean;
+  };
   reminderPolicy?: {
     remindersEnabled?: boolean;
     firstReminderDays?: number | string;
@@ -66,6 +80,7 @@ function parseInteger(value: number | string | undefined, field: string, minimum
 }
 
 function normalizeSettingsBody(body: SettingsBody): Omit<AdminSettings, "updatedAt"> {
+  const operationsPolicy = body.operationsPolicy ?? {};
   const reminderPolicy = body.reminderPolicy ?? {};
   const firstReminderDays =
     reminderPolicy.firstReminderDays === undefined
@@ -91,6 +106,13 @@ function normalizeSettingsBody(body: SettingsBody): Omit<AdminSettings, "updated
     orgName: sanitizeString(body.orgName),
     supportEmail: sanitizeString(body.supportEmail),
     whatsappNumber: sanitizeOptionalString(body.whatsappNumber),
+    companyUen: sanitizeOptionalString(body.companyUen),
+    companyGstRegNo: sanitizeOptionalString(body.companyGstRegNo),
+    companyAddress: sanitizeOptionalString(body.companyAddress),
+    companyPhone: sanitizeOptionalString(body.companyPhone),
+    bankName: sanitizeOptionalString(body.bankName),
+    bankAccountName: sanitizeOptionalString(body.bankAccountName),
+    bankAccountNumber: sanitizeOptionalString(body.bankAccountNumber),
     adminNotificationEmails: sanitizeEmailArray(
       body.adminNotificationEmails,
       "adminNotificationEmails"
@@ -102,6 +124,20 @@ function normalizeSettingsBody(body: SettingsBody): Omit<AdminSettings, "updated
       "bookingPaidRecipients"
     ),
     overdueRecipients: sanitizeEmailArray(body.overdueRecipients, "overdueRecipients"),
+    operationsPolicy: {
+      defaultMaintenanceBufferDays:
+        operationsPolicy.defaultMaintenanceBufferDays === undefined
+          ? DEFAULT_OPERATIONS_POLICY_SETTINGS.defaultMaintenanceBufferDays
+          : parseInteger(
+              operationsPolicy.defaultMaintenanceBufferDays,
+              "defaultMaintenanceBufferDays",
+              0
+            ),
+      enableDeveloperDeleteTools:
+        typeof operationsPolicy.enableDeveloperDeleteTools === "boolean"
+          ? operationsPolicy.enableDeveloperDeleteTools
+          : DEFAULT_OPERATIONS_POLICY_SETTINGS.enableDeveloperDeleteTools,
+    },
     reminderPolicy: {
       remindersEnabled:
         typeof reminderPolicy.remindersEnabled === "boolean"

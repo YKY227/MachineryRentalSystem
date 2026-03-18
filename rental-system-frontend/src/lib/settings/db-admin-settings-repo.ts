@@ -1,3 +1,4 @@
+// rental-system-frontend/src/lib/settings/db-admin-settings-repo.ts
 import "server-only";
 
 import { supabaseAdmin } from "@/lib/supabase/server";
@@ -8,6 +9,7 @@ const SYSTEM_SETTINGS_TABLE =
 const ADMIN_ORG_SETTINGS_KEY = "admin_org_settings";
 const ADMIN_NOTIFICATION_SETTINGS_KEY = "admin_notification_settings";
 const REMINDER_POLICY_SETTINGS_KEY = "rental_invoice_reminder_policy";
+const OPERATIONS_POLICY_SETTINGS_KEY = "rental_operations_policy";
 
 export type ReminderPolicySettings = {
   remindersEnabled: boolean;
@@ -22,12 +24,23 @@ export type AdminSettings = {
   orgName: string;
   supportEmail: string;
   whatsappNumber: string | null;
+  companyUen: string | null;
+  companyGstRegNo: string | null;
+  companyAddress: string | null;
+  companyPhone: string | null;
+  bankName: string | null;
+  bankAccountName: string | null;
+  bankAccountNumber: string | null;
   adminNotificationEmails: string[];
   bccTesterEnabled: boolean;
   testerEmails: string[];
   bookingPaidRecipients: string[];
   overdueRecipients: string[];
   reminderPolicy: ReminderPolicySettings;
+  operationsPolicy: {
+    defaultMaintenanceBufferDays: number;
+    enableDeveloperDeleteTools: boolean;
+  };
   updatedAt: string;
 };
 
@@ -41,6 +54,13 @@ type AdminOrgSettingsValue = {
   orgName: string;
   supportEmail: string;
   whatsappNumber: string | null;
+  companyUen: string | null;
+  companyGstRegNo: string | null;
+  companyAddress: string | null;
+  companyPhone: string | null;
+  bankName: string | null;
+  bankAccountName: string | null;
+  bankAccountNumber: string | null;
 };
 
 type AdminNotificationSettingsValue = {
@@ -55,6 +75,13 @@ const DEFAULT_ADMIN_ORG_SETTINGS: AdminOrgSettingsValue = {
   orgName: "",
   supportEmail: "",
   whatsappNumber: null,
+  companyUen: null,
+  companyGstRegNo: null,
+  companyAddress: null,
+  companyPhone: null,
+  bankName: null,
+  bankAccountName: null,
+  bankAccountNumber: null,
 };
 
 const DEFAULT_ADMIN_NOTIFICATION_SETTINGS: AdminNotificationSettingsValue = {
@@ -63,6 +90,11 @@ const DEFAULT_ADMIN_NOTIFICATION_SETTINGS: AdminNotificationSettingsValue = {
   testerEmails: [],
   bookingPaidRecipients: [],
   overdueRecipients: [],
+};
+
+export const DEFAULT_OPERATIONS_POLICY_SETTINGS = {
+  defaultMaintenanceBufferDays: 7,
+  enableDeveloperDeleteTools: false,
 };
 
 export const DEFAULT_REMINDER_POLICY_SETTINGS: ReminderPolicySettings = {
@@ -151,6 +183,34 @@ function sanitizeAdminOrgSettings(value: unknown): AdminOrgSettingsValue {
       typeof raw.whatsappNumber === "string" && raw.whatsappNumber.trim()
         ? raw.whatsappNumber.trim()
         : null,
+    companyUen:
+      typeof raw.companyUen === "string" && raw.companyUen.trim()
+        ? raw.companyUen.trim()
+        : null,
+    companyGstRegNo:
+      typeof raw.companyGstRegNo === "string" && raw.companyGstRegNo.trim()
+        ? raw.companyGstRegNo.trim()
+        : null,
+    companyAddress:
+      typeof raw.companyAddress === "string" && raw.companyAddress.trim()
+        ? raw.companyAddress.trim()
+        : null,
+    companyPhone:
+      typeof raw.companyPhone === "string" && raw.companyPhone.trim()
+        ? raw.companyPhone.trim()
+        : null,
+    bankName:
+      typeof raw.bankName === "string" && raw.bankName.trim()
+        ? raw.bankName.trim()
+        : null,
+    bankAccountName:
+      typeof raw.bankAccountName === "string" && raw.bankAccountName.trim()
+        ? raw.bankAccountName.trim()
+        : null,
+    bankAccountNumber:
+      typeof raw.bankAccountNumber === "string" && raw.bankAccountNumber.trim()
+        ? raw.bankAccountNumber.trim()
+        : null,
   };
 }
 
@@ -162,6 +222,26 @@ function sanitizeAdminNotificationSettings(value: unknown): AdminNotificationSet
     testerEmails: sanitizeStringArray(raw.testerEmails),
     bookingPaidRecipients: sanitizeStringArray(raw.bookingPaidRecipients),
     overdueRecipients: sanitizeStringArray(raw.overdueRecipients),
+  };
+}
+
+function sanitizeOperationsPolicy(value: unknown): AdminSettings["operationsPolicy"] {
+  const raw = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+  const parsed =
+    typeof raw.defaultMaintenanceBufferDays === "number"
+      ? raw.defaultMaintenanceBufferDays
+      : typeof raw.defaultMaintenanceBufferDays === "string"
+        ? Number(raw.defaultMaintenanceBufferDays.trim())
+        : Number.NaN;
+
+  return {
+    defaultMaintenanceBufferDays: Number.isFinite(parsed)
+      ? Math.max(0, Math.floor(parsed))
+      : DEFAULT_OPERATIONS_POLICY_SETTINGS.defaultMaintenanceBufferDays,
+    enableDeveloperDeleteTools:
+      typeof raw.enableDeveloperDeleteTools === "boolean"
+        ? raw.enableDeveloperDeleteTools
+        : DEFAULT_OPERATIONS_POLICY_SETTINGS.enableDeveloperDeleteTools,
   };
 }
 
@@ -200,7 +280,7 @@ async function upsertSetting<T>(key: string, value: T) {
 
 export const dbAdminSettingsRepo = {
   async get(): Promise<AdminSettings> {
-    const [orgSettings, notificationSettings, reminderPolicy] = await Promise.all([
+    const [orgSettings, notificationSettings, reminderPolicy, operationsPolicy] = await Promise.all([
       readSetting(ADMIN_ORG_SETTINGS_KEY, sanitizeAdminOrgSettings, DEFAULT_ADMIN_ORG_SETTINGS),
       readSetting(
         ADMIN_NOTIFICATION_SETTINGS_KEY,
@@ -212,9 +292,14 @@ export const dbAdminSettingsRepo = {
         sanitizeReminderPolicy,
         DEFAULT_REMINDER_POLICY_SETTINGS
       ),
+      readSetting(
+        OPERATIONS_POLICY_SETTINGS_KEY,
+        sanitizeOperationsPolicy,
+        DEFAULT_OPERATIONS_POLICY_SETTINGS
+      ),
     ]);
 
-    const updatedAt = [orgSettings.updatedAt, notificationSettings.updatedAt, reminderPolicy.updatedAt]
+    const updatedAt = [orgSettings.updatedAt, notificationSettings.updatedAt, reminderPolicy.updatedAt, operationsPolicy.updatedAt]
       .filter(Boolean)
       .sort()
       .at(-1) ?? nowIso();
@@ -223,22 +308,25 @@ export const dbAdminSettingsRepo = {
       ...orgSettings.value,
       ...notificationSettings.value,
       reminderPolicy: reminderPolicy.value,
+      operationsPolicy: operationsPolicy.value,
       updatedAt,
     };
   },
 
   async update(input: Omit<AdminSettings, "updatedAt">): Promise<AdminSettings> {
-    const [orgSettings, notificationSettings, reminderPolicy] = await Promise.all([
+    const [orgSettings, notificationSettings, reminderPolicy, operationsPolicy] = await Promise.all([
       upsertSetting(ADMIN_ORG_SETTINGS_KEY, sanitizeAdminOrgSettings(input)),
       upsertSetting(ADMIN_NOTIFICATION_SETTINGS_KEY, sanitizeAdminNotificationSettings(input)),
       upsertSetting(REMINDER_POLICY_SETTINGS_KEY, sanitizeReminderPolicy(input.reminderPolicy)),
+      upsertSetting(OPERATIONS_POLICY_SETTINGS_KEY, sanitizeOperationsPolicy(input.operationsPolicy)),
     ]);
 
     return {
       ...sanitizeAdminOrgSettings(orgSettings.value),
       ...sanitizeAdminNotificationSettings(notificationSettings.value),
       reminderPolicy: sanitizeReminderPolicy(reminderPolicy.value),
-      updatedAt: [orgSettings.updatedAt, notificationSettings.updatedAt, reminderPolicy.updatedAt]
+      operationsPolicy: sanitizeOperationsPolicy(operationsPolicy.value),
+      updatedAt: [orgSettings.updatedAt, notificationSettings.updatedAt, reminderPolicy.updatedAt, operationsPolicy.updatedAt]
         .filter(Boolean)
         .sort()
         .at(-1) ?? nowIso(),
@@ -250,6 +338,15 @@ export const dbAdminSettingsRepo = {
       REMINDER_POLICY_SETTINGS_KEY,
       sanitizeReminderPolicy,
       DEFAULT_REMINDER_POLICY_SETTINGS
+    );
+    return setting.value;
+  },
+
+  async getOperationsPolicy(): Promise<AdminSettings["operationsPolicy"]> {
+    const setting = await readSetting(
+      OPERATIONS_POLICY_SETTINGS_KEY,
+      sanitizeOperationsPolicy,
+      DEFAULT_OPERATIONS_POLICY_SETTINGS
     );
     return setting.value;
   },

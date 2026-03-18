@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { isAdminAuthenticated } from "@/lib/auth/admin";
 import { dbOrderRepo } from "@/lib/rental/orders/db-order-repo";
 import type { CreateRentalOrderInput } from "@/lib/rental/orders/types";
 
@@ -16,6 +17,12 @@ function requireOrderEnv() {
 export async function POST(req: Request) {
   try {
     requireOrderEnv();
+    if (isAdminAuthenticated(req)) {
+      return NextResponse.json(
+        { error: "Checkout is only available for customer accounts" },
+        { status: 403 }
+      );
+    }
     const body = (await req.json()) as { order?: CreateRentalOrderInput };
     const order = body?.order;
     if (!order?.id) {

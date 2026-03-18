@@ -54,6 +54,39 @@ function createProvider() {
   return { provider, from, resend };
 }
 
+export async function deliverRentalEmail(input: {
+  to: string;
+  cc?: string;
+  subject: string;
+  html: string;
+}) {
+  const { provider, from, resend } = createProvider();
+
+  let providerMessageId: string | null = null;
+  if (provider === "mock") {
+    providerMessageId = `mock_${Date.now()}`;
+  } else {
+    const result = await resend!.emails.send({
+      from,
+      to: input.to,
+      cc: input.cc ? [input.cc] : undefined,
+      subject: input.subject,
+      html: input.html,
+    });
+
+    if (result.error) {
+      throw new Error(result.error.message);
+    }
+
+    providerMessageId = result.data?.id ?? null;
+  }
+
+  return {
+    provider,
+    providerMessageId,
+  };
+}
+
 export async function deliverInvoiceEmail(input: {
   invoice: Invoice;
   to: string;

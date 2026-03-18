@@ -1,3 +1,4 @@
+//rental-system-frontend/src/lib/rental/invoices/db-invoice-repo.ts
 import type {
   Invoice,
   InvoiceBillToSnapshot,
@@ -32,6 +33,14 @@ export type DraftFromOrderInput = {
     payableTotal?: number;
     total: number;
   };
+};
+
+export type CreateCustomDraftInvoiceInput = {
+  orderId: string;
+  billTo: InvoiceBillToSnapshot;
+  description: string;
+  amountExclGstCents: number;
+  depositCents?: number;
 };
 
 export type InvoiceListFilters = {
@@ -597,5 +606,61 @@ export const dbInvoiceRepo = {
     if (fallback) return fallback;
 
     throw new Error(`Invoice create draft failed: ${error?.message ?? "unknown error"}`);
+  },
+
+  async createDraftCustom(input: CreateCustomDraftInvoiceInput): Promise<Invoice> {
+    const createdAt = nowIso();
+    const amountExclGstCents = clampCents(input.amountExclGstCents);
+    const gstRate = RENTAL_GST_RATE;
+    const gstAmountCents = clampCents(amountExclGstCents * gstRate);
+    const totalInclGstCents = clampCents(amountExclGstCents + gstAmountCents);
+    const depositCents = clampCents(input.depositCents ?? 0);
+
+    const insertPayload = {
+      status: "draft" as InvoiceStatus,
+      order_id: input.orderId,
+      invoice_no: null,
+      issue_date: null,
+      due_date: null,
+      pdf_storage: null,
+      currency: "SGD" as const,
+      prices_include_gst: false,
+      gst_rate: gstRate,
+      supplier: {
+        name: "Your Company Name (Demo)",
+        uen: "",
+        gstRegNo: "",
+        addressLines: ["Address line 1", "Singapore"],
+        email: "billing@yourcompany.com",
+      } satisfies InvoiceSupplierSnapshot,
+      bill_to: input.billTo,
+      items: [
+        {
+          description: input.description,
+          qty: 1,
+          unitPriceExclGstCents: amountExclGstCents,
+          amountExclGstCents,
+        },
+      ] satisfies InvoiceItem[],
+      subtotal_excl_gst_cents: amountExclGstCents,
+      gst_amount_cents: gstAmountCents,
+      total_incl_gst_cents: totalInclGstCents,
+      deposit_cents: depositCents > 0 ? depositCents : null,
+      email_log: [] as InvoiceEmailLogItem[],
+      void_reason: null,
+      voided_at: null,
+      created_at: createdAt,
+      updated_at: createdAt,
+    };
+
+    const supabase = supabaseAdmin();
+    const { data, error } = await supabase
+      .from(INVOICE_TABLE)
+      .insert(insertPayload)
+      .select(BASE_COLUMNS)
+      .single<InvoiceRow>();
+
+    if (error) throw new Error(`Invoice custom draft create failed: ${error.message}`);
+    return toInvoice(data);
   },
 };

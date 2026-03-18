@@ -116,6 +116,18 @@ async function readInvoiceForPayments(invoiceId: string): Promise<InvoicePayment
 }
 
 export const dbPaymentRepo = {
+  async getById(id: string): Promise<InvoicePayment | null> {
+    const supabase = supabaseAdmin();
+    const { data, error } = await supabase
+      .from(INVOICE_PAYMENTS_TABLE)
+      .select("id,invoice_id,amount_cents,paid_at,method,reference,notes,source_payment_session_id,created_at")
+      .eq("id", id)
+      .maybeSingle<PaymentRow>();
+
+    if (error) throw new Error(`Invoice payment read failed: ${error.message}`);
+    return data ? toPayment(data) : null;
+  },
+
   async listByInvoiceId(invoiceId: string): Promise<InvoicePayment[]> {
     const supabase = supabaseAdmin();
     const { data, error } = await supabase

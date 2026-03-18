@@ -1,11 +1,14 @@
 // src/lib/rental/availability.ts
 import type { Equipment, EquipmentHold } from "./types";
+import type { RentalOrderBufferOverride } from "@/lib/rental/orders/types";
 
 type OrderLike = {
   equipmentId: string;
   qty: number;
   start: string; // YYYY-MM-DD
   end: string;   // YYYY-MM-DD
+  maintenanceBufferDaysApplied?: number | null;
+  bufferOverrides?: RentalOrderBufferOverride[];
 };
 
 function dateToDay(d: string) {
@@ -47,11 +50,32 @@ export function computeReservedQtyForRange(args: {
 
   return orders
     .filter((o) => o.equipmentId === equipmentId)
-    .filter((o) => {
-      const effectiveEnd = addDaysISO(o.end, buffer);
-      return rangesOverlap(o.start, effectiveEnd, start, end);
-    })
-    .reduce((sum, o) => sum + Math.max(0, Number(o.qty ?? 0)), 0);
+    .reduce((sum, order) => {
+      const appliedBuffer = Math.max(
+        0,
+        Math.floor(Number(order.maintenanceBufferDaysApplied ?? buffer) || 0)
+      );
+      const defaultEffectiveEnd = addDaysISO(order.end, appliedBuffer);
+      const activeOverrides = new Map(
+        (order.bufferOverrides ?? [])
+          .filter((override) => override.status === "active")
+          .map((override) => [override.orderUnitIndex, override])
+      );
+
+      let reservedQty = 0;
+      for (let unitIndex = 0; unitIndex < Math.max(0, Number(order.qty ?? 0)); unitIndex += 1) {
+        const override = activeOverrides.get(unitIndex);
+        const effectiveEnd =
+          override && override.overrideBufferEndDate < defaultEffectiveEnd
+            ? override.overrideBufferEndDate
+            : defaultEffectiveEnd;
+        if (rangesOverlap(order.start, effectiveEnd, start, end)) {
+          reservedQty += 1;
+        }
+      }
+
+      return sum + reservedQty;
+    }, 0);
 }
 
 export function computeHoldQtyForRange(

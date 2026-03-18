@@ -6,19 +6,43 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import type { Equipment } from "@/lib/rental/types";
 import { useRouter } from "next/navigation";
 import { useAdminEquipments } from "@/lib/rental/hooks/useAdminEquipments";
+import {
+  AlertTriangle,
+  CalendarDays,
+  ChevronLeft,
+  ChevronRight,
+  ClipboardList,
+  Eye,
+  Factory,
+  Flag,
+  Layers3,
+  Settings2,
+  ShieldAlert,
+  ShieldCheck,
+  TimerReset,
+  Wrench,
+  XCircle,
+} from "lucide-react";
 /**
  * Timeline / Gantt lanes (per-unit capacity slots)
  * - Default 7 days, toggle 14 days
- * - Orders + maintenance buffer tails (per unit)
- * - Holds supported (schema included) but empty by default
+ * - DB-backed orders + maintenance buffer tails (per unit)
+ * - DB-backed downtime blocks
  * - Stable lane assignment persisted in localStorage
- *
- * NOTE: This page reads orders from localStorage using a few common keys.
- * If your project uses a different key, update ORDER_STORAGE_KEYS below.
  */
 
 // ---------- Types ----------
 type ISODate = string; // YYYY-MM-DD
+type BufferOverride = {
+  id: string;
+  orderId: string;
+  orderUnitIndex: number;
+  overrideBufferEndDate: ISODate;
+  status: "active" | "cancelled";
+  reason?: string;
+  notes?: string;
+};
+
 type Order = {
   id: string;
   equipmentId: string;
@@ -26,6 +50,8 @@ type Order = {
   start: ISODate;
   end: ISODate;
   qty: number;
+  maintenanceBufferDaysApplied?: number;
+  bufferOverrides?: BufferOverride[];
   fulfillment?: "deliver" | "self_collect";
   pricingSnapshot?: {
     days?: number;
@@ -36,7 +62,7 @@ type Order = {
 };
 
 
-type HoldType = "maintenance" | "repair" | "admin_hold";
+type HoldType = "maintenance" | "repair" | "inspection" | "admin_hold" | "internal_use";
 type Hold = {
   id: string;
   equipmentId: string;
@@ -44,8 +70,41 @@ type Hold = {
   startDate: ISODate;
   endDate: ISODate;
   qty: number;
+  unitAssignments: string[];
+  status: "active" | "cancelled";
   reason?: string;
+  notes?: string;
   createdAt?: string;
+};
+
+type HoldConflictPreview = {
+  hasConflicts: boolean;
+  derivedQuantityAffected: number;
+  selectedUnits: string[];
+  summaryLines: string[];
+  orders: Array<{
+    orderId: string;
+    startDate: string;
+    endDate: string;
+    quantity: number;
+    equipmentTitle: string;
+  }>;
+  downtime: Array<{
+    downtimeId: string;
+    downtimeType: HoldType;
+    startDate: string;
+    endDate: string;
+    quantityAffected: number;
+    status: "active" | "cancelled";
+    sharedUnits: string[];
+  }>;
+  extensions: Array<{
+    extensionId: string;
+    orderId: string;
+    status: string;
+    startDate: string;
+    endDate: string;
+  }>;
 };
 
 type OccKind = "order" | "buffer" | "hold";
@@ -92,6 +151,8 @@ const HOLD_STORAGE_KEYS = [
 ] as const;
 
 const ASSIGNMENTS_KEY = "rental_lane_assignments_v1";
+const BUFFER_BEHAVIOR_NOTE =
+  "Buffer is derived from the equipment maintenance buffer policy. Changing buffer days updates derived buffer blocks for existing and future orders.";
 
 // ---------- Date helpers ----------
 function pad2(n: number) {
@@ -158,14 +219,6 @@ function readJSON<T>(key: string): T | null {
   }
 }
 
-function readFirstAvailable<T>(keys: readonly string[]): { key: string | null; data: T | null } {
-  for (const k of keys) {
-    const data = readJSON<T>(k);
-    if (data != null) return { key: k, data };
-  }
-  return { key: null, data: null };
-}
-
 type PersistedAssignments = Record<
   string, // equipmentId
   Record<
@@ -176,6 +229,51 @@ type PersistedAssignments = Record<
 
 function occKey(o: Occurrence) {
   return `${o.kind}:${o.sourceId}:${o.occIndex}`;
+}
+
+function normalizeUnitAssignments(units: string[]) {
+  return [...new Set(units.map((unit) => unit.trim()).filter(Boolean))];
+}
+
+function formatUnitLabel(unitId: string) {
+  return unitId.replace(/^unit-/, "Unit ");
+}
+
+function sortHoldList(left: Hold, right: Hold, todayIso: ISODate) {
+  const leftActive = left.status === "active" ? 0 : 1;
+  const rightActive = right.status === "active" ? 0 : 1;
+  if (leftActive !== rightActive) return leftActive - rightActive;
+
+  const leftCurrent = overlaps(left.startDate, left.endDate, todayIso, todayIso) ? 0 : 1;
+  const rightCurrent = overlaps(right.startDate, right.endDate, todayIso, todayIso) ? 0 : 1;
+  if (leftCurrent !== rightCurrent) return leftCurrent - rightCurrent;
+
+  const leftFuture = left.endDate >= todayIso ? 0 : 1;
+  const rightFuture = right.endDate >= todayIso ? 0 : 1;
+  if (leftFuture !== rightFuture) return leftFuture - rightFuture;
+
+  if (leftFuture === 0 && rightFuture === 0) {
+    const byStart = diffDaysISO(todayIso, left.startDate) - diffDaysISO(todayIso, right.startDate);
+    if (byStart !== 0) return byStart;
+  }
+
+  return right.startDate.localeCompare(left.startDate);
+}
+
+function getOrderBufferEnd(order: Order, unitIndex: number, fallbackBufferDays: number) {
+  const appliedBufferDays = Math.max(
+    0,
+    Math.floor(Number(order.maintenanceBufferDaysApplied ?? fallbackBufferDays) || 0)
+  );
+  const defaultBufferEnd = addDaysISO(order.end, appliedBufferDays);
+  const activeOverride = (order.bufferOverrides ?? [])
+    .filter((override) => override.status === "active")
+    .find((override) => override.orderUnitIndex === unitIndex);
+
+  if (activeOverride && activeOverride.overrideBufferEndDate < defaultBufferEnd) {
+    return activeOverride.overrideBufferEndDate;
+  }
+  return defaultBufferEnd;
 }
 
 function readAssignments(): PersistedAssignments {
@@ -196,7 +294,8 @@ function buildOccurrencesForEquipment(opts: {
 }): Occurrence[] {
   const { equipment, orders, holds, showBuffer, windowStart, windowEnd } = opts;
 
-  const bufferDays = equipment.maintenanceBufferDays ?? 7;
+  const fallbackBufferDays = equipment.maintenanceBufferDays ?? 7;
+  const bufferDays = fallbackBufferDays;
 
   const occs: Occurrence[] = [];
 
@@ -208,6 +307,10 @@ function buildOccurrencesForEquipment(opts: {
     // We need orders that could affect window either by booking range or by buffer spillover
     const orderStart = order.start;
 const orderEnd = order.end;
+    const bufferDays = Math.max(
+      0,
+      Math.floor(Number(order.maintenanceBufferDaysApplied ?? fallbackBufferDays) || 0)
+    );
 
 
     const bufferStart = addDaysISO(orderEnd, 1);
@@ -223,6 +326,12 @@ const orderEnd = order.end;
 
 
     for (let i = 0; i < (order.qty ?? 0); i++) {
+      const bufferDaysApplied = Math.max(
+        0,
+        Math.floor(Number(order.maintenanceBufferDaysApplied ?? fallbackBufferDays) || 0)
+      );
+      const unitBufferStart = addDaysISO(orderEnd, 1);
+      const unitBufferEnd = getOrderBufferEnd(order, i, fallbackBufferDays);
       occs.push({
         kind: "order",
         sourceId: order.id,
@@ -234,16 +343,27 @@ const orderEnd = order.end;
         meta: { order },
       });
 
-      if (showBuffer && bufferDays > 0) {
+      if (
+        showBuffer &&
+        bufferDaysApplied > 0 &&
+        unitBufferEnd >= unitBufferStart &&
+        overlaps(unitBufferStart, unitBufferEnd, windowStart, windowEnd)
+      ) {
         occs.push({
           kind: "buffer",
           sourceId: order.id,
           occIndex: i,
           equipmentId: equipment.id,
-          start: bufferStart,
-          end: bufferEnd,
+          start: unitBufferStart,
+          end: unitBufferEnd,
           label: `Buffer for ${baseLabel}`,
-          meta: { order, bufferDays },
+          meta: {
+            order,
+            bufferDays: bufferDaysApplied,
+            bufferOverride: (order.bufferOverrides ?? []).find(
+              (override) => override.status === "active" && override.orderUnitIndex === i
+            ),
+          },
         });
       }
     }
@@ -252,9 +372,31 @@ const orderEnd = order.end;
   // Holds -> per-unit occurrences
   for (const hold of holds) {
     if (hold.equipmentId !== equipment.id) continue;
+    if (hold.status !== "active") continue;
     if (!overlaps(hold.startDate, hold.endDate, windowStart, windowEnd)) continue;
 
-    const label = `Hold (${hold.type})`;
+    const assignedUnits = normalizeUnitAssignments(hold.unitAssignments ?? []);
+    const label =
+      assignedUnits.length > 0
+        ? `Downtime (${hold.type})`
+        : `Downtime (${hold.type})`;
+
+    if (assignedUnits.length > 0) {
+      assignedUnits.forEach((unitAssignment, index) => {
+        occs.push({
+          kind: "hold",
+          sourceId: hold.id,
+          occIndex: index,
+          equipmentId: equipment.id,
+          start: hold.startDate,
+          end: hold.endDate,
+          label: `${label} · ${formatUnitLabel(unitAssignment)}`,
+          meta: { hold, preferredLaneId: unitAssignment, unitAssignment },
+        });
+      });
+      continue;
+    }
+
     for (let i = 0; i < (hold.qty ?? 0); i++) {
       occs.push({
         kind: "hold",
@@ -333,6 +475,16 @@ function allocateToLanes(opts: {
   }
 
   for (const occ of sorted) {
+    const hardPreferredLane = occ.meta?.preferredLaneId as LaneId | undefined;
+    if (hardPreferredLane) {
+      if (placed[hardPreferredLane] && laneCanFit(hardPreferredLane, occ)) {
+        place(hardPreferredLane, occ);
+      } else {
+        unassigned.push(occ);
+      }
+      continue;
+    }
+
     // First try persisted lane (stability)
     const k = occKey(occ);
     const preferred = persistedLaneByOccKey[k];
@@ -401,7 +553,7 @@ function kindBadge(kind: OccKind) {
     case "buffer":
       return "Buffer";
     case "hold":
-      return "Hold";
+      return "Downtime";
   }
 }
 
@@ -420,6 +572,27 @@ return `${block.label}\n${o?.start} → ${o?.end}\nUnit occ: ${block.occIndex + 
   return `${block.label}\n${h?.startDate} → ${h?.endDate}\nUnit occ: ${block.occIndex + 1} of ${h?.qty ?? "?"}`;
 }
 
+function getOccurrenceTitle(block: Occurrence) {
+  if (block.kind === "hold") {
+    const hold = block.meta?.hold as Hold | undefined;
+    const unitAssignment = block.meta?.unitAssignment as string | undefined;
+    const unitsText =
+      hold?.unitAssignments?.length
+        ? hold.unitAssignments.map(formatUnitLabel).join(", ")
+        : `${hold?.qty ?? "?"} unit(s)`;
+    return `${block.label}\n${hold?.startDate} → ${hold?.endDate}\nUnits: ${unitAssignment ? formatUnitLabel(unitAssignment) : unitsText}`;
+  }
+
+  if (block.kind === "buffer") {
+    const order = block.meta?.order as Order | undefined;
+    const bufferDays = block.meta?.bufferDays as number | undefined;
+    return `${block.label}\n${block.start} → ${block.end}\nBuffer days: ${bufferDays ?? "?"}\nUnit occ: ${block.occIndex + 1} of ${order?.qty ?? "?"}`;
+  }
+
+  const order = block.meta?.order as Order | undefined;
+  return `${block.label}\n${order?.start} → ${order?.end}\nUnit occ: ${block.occIndex + 1} of ${order?.qty ?? "?"}`;
+}
+
 function getEquipmentSku(equipment: Equipment | null): string | null {
   // Keep TS happy even if Equipment doesn't type sku yet.
   const sku = (equipment as any)?.sku;
@@ -435,10 +608,14 @@ function buildOrdersHref(opts: { equipmentId: string; date: ISODate }) {
   )}&date=${encodeURIComponent(date)}`;
 }
 
+function togglePillClass(active: boolean) {
+  return active
+    ? "border-[#F2C7C2] bg-[#FCE9E7] text-[#B9382E] shadow-sm"
+    : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50";
+}
+
 export default function AdminRentalCalendarPage() {
-    const router = useRouter();
-//   const [equipments, setEquipments] = useState<Equipment[]>([]);
-//   const [selectedEquipmentId, setSelectedEquipmentId] = useState<string>("");
+  const router = useRouter();
   const [orders, setOrders] = useState<Order[]>([]);
   const [holds, setHolds] = useState<Hold[]>([]);
 
@@ -446,50 +623,354 @@ export default function AdminRentalCalendarPage() {
   const [anchorDate, setAnchorDate] = useState<Date>(() => startOfDay(new Date()));
 
   const [showBuffer, setShowBuffer] = useState(true);
+  const [showOrders, setShowOrders] = useState(true);
   const [showHolds, setShowHolds] = useState(true);
+  const [holdTypeFilter, setHoldTypeFilter] = useState<HoldType | "all">("all");
+  const [includeCancelledHolds, setIncludeCancelledHolds] = useState(false);
+  const [holdType, setHoldType] = useState<HoldType>("maintenance");
+  const [holdStartDate, setHoldStartDate] = useState("");
+  const [holdEndDate, setHoldEndDate] = useState("");
+  const [holdQty, setHoldQty] = useState("1");
+  const [holdUnitAssignments, setHoldUnitAssignments] = useState<string[]>([]);
+  const [holdReason, setHoldReason] = useState("");
+  const [holdNotes, setHoldNotes] = useState("");
+  const [holdSaving, setHoldSaving] = useState(false);
+  const [holdPreviewLoading, setHoldPreviewLoading] = useState(false);
+  const [holdError, setHoldError] = useState<string | null>(null);
+  const [holdBanner, setHoldBanner] = useState<string | null>(null);
+  const [holdPreview, setHoldPreview] = useState<HoldConflictPreview | null>(null);
+  const [holdNeedsConflictConfirmation, setHoldNeedsConflictConfirmation] = useState(false);
+  const [bufferOverrideEndDate, setBufferOverrideEndDate] = useState("");
+  const [bufferOverrideReason, setBufferOverrideReason] = useState("");
+  const [bufferOverrideNotes, setBufferOverrideNotes] = useState("");
+  const [bufferOverrideSaving, setBufferOverrideSaving] = useState(false);
+  const [bufferOverrideError, setBufferOverrideError] = useState<string | null>(null);
+  const [bufferOverrideBanner, setBufferOverrideBanner] = useState<string | null>(null);
 
   const [selectedBlock, setSelectedBlock] = useState<Occurrence | null>(null);
 
   // Load equipment + data
-
-    const {
+  const {
   equipments,
   selectedEquipmentId,
   setSelectedEquipmentId,
   selectedEquipment,
 } = useAdminEquipments({ persistKey: "rental_calendar_selected_equipment" });
 
+  async function refreshOrders() {
+    const res = await fetch("/api/admin/rental/orders", {
+      cache: "no-store",
+      credentials: "include",
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data?.error ?? "Failed to load orders");
+    const raw = Array.isArray(data?.orders) ? data.orders : [];
+    const bufferOverridesByOrderId =
+      data?.bufferOverridesByOrderId && typeof data.bufferOverridesByOrderId === "object"
+        ? (data.bufferOverridesByOrderId as Record<string, BufferOverride[]>)
+        : {};
+    setOrders(
+      raw
+        .map((x: any) => ({
+          id: String(x.id ?? "").trim(),
+          equipmentId: String(x.equipmentId ?? "").trim(),
+          equipmentTitle: x.equipmentTitle,
+          start: String(x.start ?? "").slice(0, 10).trim(),
+          end: String(x.end ?? "").slice(0, 10).trim(),
+          qty: Number(x.qty ?? 0),
+          maintenanceBufferDaysApplied:
+            typeof x.maintenanceBufferDaysApplied === "number"
+              ? Math.max(0, Math.floor(x.maintenanceBufferDaysApplied))
+              : undefined,
+          bufferOverrides: Array.isArray(bufferOverridesByOrderId[String(x.id ?? "").trim()])
+            ? bufferOverridesByOrderId[String(x.id ?? "").trim()]
+            : [],
+          fulfillment: x.fulfillment,
+          pricingSnapshot: x.pricingSnapshot,
+          createdAt: x.createdAt,
+        }))
+        .filter((o: Order) => o.id && o.equipmentId && o.start && o.end && o.qty > 0)
+    );
+  }
 
+  async function refreshHolds(equipmentId: string) {
+    const res = await fetch(
+      `/api/admin/rental/downtime?equipmentId=${encodeURIComponent(equipmentId)}`,
+      {
+        cache: "no-store",
+        credentials: "include",
+      }
+    );
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data?.error ?? "Failed to load downtime");
+    const raw = Array.isArray(data?.downtime) ? data.downtime : [];
+    setHolds(
+      raw.map((item: any) => ({
+        id: String(item.id ?? "").trim(),
+        equipmentId: String(item.equipmentId ?? "").trim(),
+        type: item.downtimeType as HoldType,
+        startDate: String(item.startDate ?? "").slice(0, 10),
+        endDate: String(item.endDate ?? "").slice(0, 10),
+        qty: Math.max(0, Number(item.quantityAffected ?? 0)),
+        unitAssignments: normalizeUnitAssignments(
+          Array.isArray(item.unitAssignments) ? item.unitAssignments.map((value: unknown) => String(value ?? "")) : []
+        ),
+        status: (item.status ?? "active") as "active" | "cancelled",
+        reason: item.reason ?? undefined,
+        notes: item.notes ?? undefined,
+        createdAt: item.createdAt,
+      }))
+    );
+  }
 
   useEffect(() => {
-    // Orders: read from localStorage (adjust key if needed)
-    const { data: orderData } = readFirstAvailable<any[]>(ORDER_STORAGE_KEYS);
-const raw = Array.isArray(orderData) ? orderData : [];
-
-const normalized: Order[] = raw
-  .map((x) => ({
-    id: String(x.id ?? x.orderId ?? "").trim(),
-    equipmentId: String(x.equipmentId ?? x.equipmentID ?? x.equipment?.id ?? "").trim(),
-    equipmentTitle: (x.equipmentTitle ?? x.title ?? x.equipment?.title ?? undefined) as string | undefined,
-    start: String(x.start ?? x.startDate ?? "").slice(0, 10).trim(),
-    end: String(x.end ?? x.endDate ?? "").slice(0, 10).trim(),
-    qty: Number(x.qty ?? x.quantity ?? 0),
-    fulfillment: x.fulfillment,
-    pricingSnapshot: x.pricingSnapshot,
-    createdAt: x.createdAt,
-  }))
-  .filter((o) => o.id && o.equipmentId && o.start && o.end && o.qty > 0);
-
-setOrders(normalized);
-
-
-    const { data: holdData } = readFirstAvailable<Hold[]>(HOLD_STORAGE_KEYS);
-    setHolds(Array.isArray(holdData) ? holdData : []);
+    refreshOrders().catch((error) => {
+      console.error("calendar orders load failed", error);
+      setOrders([]);
+    });
   }, []);
-
 
   const windowStartISO = useMemo(() => toISODate(anchorDate), [anchorDate]);
   const windowEndISO = useMemo(() => toISODate(addDaysDate(anchorDate, daySpan - 1)), [anchorDate, daySpan]);
+  const unitOptions = useMemo(
+    () =>
+      Array.from({ length: selectedEquipment?.totalUnits ?? 0 }, (_, index) => {
+        const unitId = `unit-${index + 1}`;
+        return { id: unitId, label: formatUnitLabel(unitId) };
+      }),
+    [selectedEquipment?.totalUnits]
+  );
+  const effectiveHoldQty = holdUnitAssignments.length > 0 ? String(holdUnitAssignments.length) : holdQty;
+  const todayISO = useMemo(() => toISODate(startOfDay(new Date())), []);
+
+  const filteredHoldList = useMemo(() => {
+    return [...holds]
+      .filter((hold) => includeCancelledHolds || hold.status === "active")
+      .filter((hold) => holdTypeFilter === "all" || hold.type === holdTypeFilter)
+      .sort((left, right) => sortHoldList(left, right, todayISO));
+  }, [holds, holdTypeFilter, includeCancelledHolds, todayISO]);
+
+  function buildHoldPayload(confirmConflicts = false) {
+    return {
+      equipmentId: selectedEquipment?.id,
+      downtimeType: holdType,
+      startDate: holdStartDate,
+      endDate: holdEndDate,
+      quantityAffected: effectiveHoldQty,
+      unitAssignments: holdUnitAssignments,
+      reason: holdReason,
+      notes: holdNotes,
+      confirmConflicts,
+    };
+  }
+
+  function resetHoldPreviewState() {
+    setHoldPreview(null);
+    setHoldNeedsConflictConfirmation(false);
+  }
+
+  function openHoldInDrawer(hold: Hold) {
+    const unitAssignment = hold.unitAssignments[0];
+    setSelectedBlock({
+      kind: "hold",
+      sourceId: hold.id,
+      occIndex: 0,
+      equipmentId: hold.equipmentId,
+      start: hold.startDate,
+      end: hold.endDate,
+      label:
+        hold.unitAssignments.length > 0
+          ? `Downtime (${hold.type}) · ${formatUnitLabel(unitAssignment)}`
+          : `Downtime (${hold.type})`,
+      meta: {
+        hold,
+        unitAssignment,
+        preferredLaneId: unitAssignment,
+      },
+    });
+  }
+
+  useEffect(() => {
+    if (!selectedEquipment?.id) {
+      setHolds([]);
+      resetHoldPreviewState();
+      setHoldUnitAssignments([]);
+      return;
+    }
+
+    setHoldError(null);
+    setHoldBanner(null);
+    setHoldStartDate((current) => current || windowStartISO);
+    setHoldEndDate((current) => current || windowStartISO);
+    refreshHolds(selectedEquipment.id).catch((error) => {
+      console.error("calendar downtime load failed", error);
+      setHolds([]);
+      setHoldError(error instanceof Error ? error.message : "Failed to load downtime");
+    });
+  }, [selectedEquipment?.id, windowStartISO]);
+
+  useEffect(() => {
+    resetHoldPreviewState();
+  }, [holdType, holdStartDate, holdEndDate, holdQty, holdReason, holdNotes, holdUnitAssignments]);
+
+  useEffect(() => {
+    setHoldUnitAssignments((current) =>
+      current.filter((unitId) => unitOptions.some((option) => option.id === unitId))
+    );
+  }, [unitOptions]);
+
+  useEffect(() => {
+    const drawerOrder =
+      selectedBlock?.kind === "order" || selectedBlock?.kind === "buffer"
+        ? ((selectedBlock.meta?.order as Order | undefined) ?? undefined)
+        : undefined;
+    const drawerBufferOverride =
+      selectedBlock?.kind === "buffer"
+        ? ((selectedBlock.meta?.bufferOverride as BufferOverride | undefined) ?? undefined)
+        : undefined;
+
+    if (selectedBlock?.kind === "buffer") {
+      setBufferOverrideEndDate(
+        drawerBufferOverride?.overrideBufferEndDate ?? drawerOrder?.end ?? selectedBlock.end
+      );
+      setBufferOverrideReason(drawerBufferOverride?.reason ?? "");
+      setBufferOverrideNotes(drawerBufferOverride?.notes ?? "");
+      setBufferOverrideError(null);
+      setBufferOverrideBanner(null);
+      return;
+    }
+
+    setBufferOverrideEndDate("");
+    setBufferOverrideReason("");
+    setBufferOverrideNotes("");
+    setBufferOverrideError(null);
+    setBufferOverrideBanner(null);
+  }, [selectedBlock]);
+
+  async function previewHoldConflicts() {
+    if (!selectedEquipment?.id || holdSaving || holdPreviewLoading) return;
+    try {
+      setHoldPreviewLoading(true);
+      setHoldError(null);
+      setHoldBanner(null);
+      const res = await fetch("/api/admin/rental/downtime", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...buildHoldPayload(false),
+          previewOnly: true,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error ?? "Failed to preview downtime conflicts");
+      setHoldPreview((data?.conflicts ?? null) as HoldConflictPreview | null);
+      setHoldNeedsConflictConfirmation(Boolean(data?.conflicts?.hasConflicts));
+      setHoldBanner(
+        data?.conflicts?.hasConflicts
+          ? "Operational conflicts found. Review the warning summary before saving."
+          : "No active booking, downtime, or extension conflicts were found for this block."
+      );
+    } catch (error) {
+      setHoldError(error instanceof Error ? error.message : "Failed to preview downtime conflicts");
+    } finally {
+      setHoldPreviewLoading(false);
+    }
+  }
+
+  async function createHold() {
+    if (!selectedEquipment?.id || holdSaving) return;
+    try {
+      setHoldSaving(true);
+      setHoldError(null);
+      setHoldBanner(null);
+      const res = await fetch("/api/admin/rental/downtime", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(buildHoldPayload(holdNeedsConflictConfirmation)),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.status === 409 && data?.requiresConfirmation) {
+        setHoldPreview((data?.conflicts ?? null) as HoldConflictPreview | null);
+        setHoldNeedsConflictConfirmation(true);
+        setHoldError("Downtime overlaps existing operational activity. Review the warning summary and save again to confirm.");
+        return;
+      }
+      if (!res.ok) throw new Error(data?.error ?? "Failed to create downtime");
+      await refreshHolds(selectedEquipment.id);
+      setHoldBanner("Downtime block created.");
+      setHoldPreview((data?.conflicts ?? null) as HoldConflictPreview | null);
+      setHoldNeedsConflictConfirmation(false);
+      setHoldReason("");
+      setHoldNotes("");
+      setHoldUnitAssignments([]);
+      setHoldQty("1");
+    } catch (error) {
+      setHoldError(error instanceof Error ? error.message : "Failed to create downtime");
+    } finally {
+      setHoldSaving(false);
+    }
+  }
+
+  async function cancelHold(holdId: string) {
+    if (!selectedEquipment?.id || holdSaving) return;
+    try {
+      setHoldSaving(true);
+      setHoldError(null);
+      setHoldBanner(null);
+      const res = await fetch(`/api/admin/rental/downtime/${encodeURIComponent(holdId)}`, {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "cancelled" }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error ?? "Failed to cancel downtime");
+      await refreshHolds(selectedEquipment.id);
+      setHoldBanner("Downtime block cancelled.");
+      if (selectedBlock?.sourceId === holdId) {
+        setSelectedBlock(null);
+      }
+    } catch (error) {
+      setHoldError(error instanceof Error ? error.message : "Failed to cancel downtime");
+    } finally {
+      setHoldSaving(false);
+    }
+  }
+
+  async function releaseBufferEarly() {
+    if (selectedBlock?.kind !== "buffer" || !selectedOrder || bufferOverrideSaving) return;
+
+    try {
+      setBufferOverrideSaving(true);
+      setBufferOverrideError(null);
+      setBufferOverrideBanner(null);
+      const res = await fetch(
+        `/api/admin/rental/orders/${encodeURIComponent(selectedOrder.id)}/buffer-release`,
+        {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            orderUnitIndex: selectedBlock.occIndex,
+            overrideBufferEndDate: bufferOverrideEndDate,
+            reason: bufferOverrideReason,
+            notes: bufferOverrideNotes,
+          }),
+        }
+      );
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error ?? "Failed to release buffer early");
+
+      await refreshOrders();
+      setBufferOverrideBanner("Buffer release saved.");
+    } catch (error) {
+      setBufferOverrideError(error instanceof Error ? error.message : "Failed to release buffer early");
+    } finally {
+      setBufferOverrideSaving(false);
+    }
+  }
 
   const days = useMemo(() => {
     const out: { iso: ISODate; date: Date }[] = [];
@@ -513,11 +994,14 @@ setOrders(normalized);
       return { assigned: [] as AssignedBlock[], unassigned: [] as Occurrence[], overbookDays: new Set<ISODate>() };
     }
 
-    const visibleHolds = showHolds ? holds : [];
+    const visibleOrders = showOrders ? orders : [];
+    const visibleHolds = showHolds
+      ? holds.filter((hold) => hold.status === "active" && (holdTypeFilter === "all" || hold.type === holdTypeFilter))
+      : [];
 
     const occs = buildOccurrencesForEquipment({
       equipment: selectedEquipment,
-      orders,
+      orders: visibleOrders,
       holds: visibleHolds,
       showBuffer,
       windowStart: windowStartISO,
@@ -552,7 +1036,9 @@ setOrders(normalized);
     selectedEquipment,
     holds,
     orders,
+    showOrders,
     showHolds,
+    holdTypeFilter,
     showBuffer,
     windowStartISO,
     windowEndISO,
@@ -589,23 +1075,44 @@ setOrders(normalized);
   }
 
   const contentW = daySpan * CELL_W;
+  const selectedHold = selectedBlock?.kind === "hold" ? ((selectedBlock.meta?.hold as Hold | undefined) ?? undefined) : undefined;
+  const selectedOrder =
+    selectedBlock?.kind === "order" || selectedBlock?.kind === "buffer"
+      ? ((selectedBlock.meta?.order as Order | undefined) ?? undefined)
+      : undefined;
+  const selectedBufferDays =
+    selectedBlock?.kind === "buffer" ? ((selectedBlock.meta?.bufferDays as number | undefined) ?? undefined) : undefined;
+  const selectedBufferOverride =
+    selectedBlock?.kind === "buffer"
+      ? ((selectedBlock.meta?.bufferOverride as BufferOverride | undefined) ?? undefined)
+      : undefined;
 
   return (
-    <div className="p-6 space-y-4">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold">Rental Calendar</h1>
-          <p className="text-sm text-slate-600">
+    <div className="space-y-3 bg-slate-50 p-5">
+      <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+        <div className="min-w-0">
+          <div className="inline-flex items-center gap-2 rounded-full border border-[#F2C7C2] bg-[#FCE9E7] px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-[#B9382E]">
+            <CalendarDays className="h-4 w-4" />
+            Rental planning workspace
+          </div>
+          <div className="mt-3 flex flex-wrap items-end gap-x-4 gap-y-1">
+            <h1 className="text-xl font-semibold text-[#2A2A2A]">Rental Calendar</h1>
+            <p className="text-sm text-slate-600">Timeline view with per-unit lanes.</p>
+          </div>
+          <p className="mt-1 text-sm text-slate-500">
             Timeline view with per-unit lanes (capacity slots). Window: <span className="font-medium">{windowStartISO}</span> →{" "}
             <span className="font-medium">{windowEndISO}</span>
           </p>
         </div>
 
-        <div className="flex flex-col items-end gap-2">
-          <div className="flex items-center gap-2">
-            <label className="text-sm text-slate-600">Equipment</label>
+        <div className="grid gap-2 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm xl:min-w-[720px] xl:grid-cols-[minmax(240px,1fr)_auto]">
+          <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5">
+            <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+              <Factory className="h-4 w-4 text-[#D24338]" />
+              Equipment
+            </div>
             <select
-              className="border rounded-md px-2 py-1 text-sm"
+              className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-900"
               value={selectedEquipmentId}
               onChange={(e) => {
                 setSelectedBlock(null);
@@ -621,65 +1128,83 @@ setOrders(normalized);
             </select>
           </div>
 
-          <div className="flex items-center gap-2">
-            <button className="border rounded-md px-3 py-1 text-sm hover:bg-slate-50" onClick={() => shiftWindow(-daySpan)}>
+          <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5">
+            <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+              <Settings2 className="h-4 w-4 text-[#D24338]" />
+              Calendar scope
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+            <button className="inline-flex items-center rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50" onClick={() => shiftWindow(-daySpan)}>
+              <ChevronLeft className="mr-1 h-4 w-4" />
               Prev
             </button>
-            <button className="border rounded-md px-3 py-1 text-sm hover:bg-slate-50" onClick={resetToday}>
+            <button className="inline-flex items-center rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50" onClick={resetToday}>
+              <TimerReset className="mr-1 h-4 w-4" />
               Today
             </button>
-            <button className="border rounded-md px-3 py-1 text-sm hover:bg-slate-50" onClick={() => shiftWindow(daySpan)}>
+            <button className="inline-flex items-center rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50" onClick={() => shiftWindow(daySpan)}>
               Next
+              <ChevronRight className="ml-1 h-4 w-4" />
             </button>
 
-            <div className="ml-2 flex items-center gap-1 border rounded-md p-1">
+            <div className="ml-2 flex items-center gap-1 rounded-lg border border-slate-200 bg-white p-1">
               <button
-                className={`px-2 py-1 text-sm rounded ${daySpan === 7 ? "bg-slate-900 text-white" : "hover:bg-slate-100"}`}
+                className={`rounded-md px-3 py-1.5 text-sm font-medium ${daySpan === 7 ? "bg-[#D24338] text-white hover:bg-[#B9382E]" : "text-slate-600 hover:bg-slate-100"}`}
                 onClick={() => setDaySpan(7)}
               >
                 7 days
               </button>
               <button
-                className={`px-2 py-1 text-sm rounded ${daySpan === 14 ? "bg-slate-900 text-white" : "hover:bg-slate-100"}`}
+                className={`rounded-md px-3 py-1.5 text-sm font-medium ${daySpan === 14 ? "bg-[#D24338] text-white hover:bg-[#B9382E]" : "text-slate-600 hover:bg-slate-100"}`}
                 onClick={() => setDaySpan(14)}
               >
                 14 days
               </button>
             </div>
           </div>
+          </div>
 
-          <div className="flex items-center gap-3">
-            <label className="flex items-center gap-2 text-sm">
-              <input type="checkbox" checked={showBuffer} onChange={(e) => setShowBuffer(e.target.checked)} />
-              Show buffer
-            </label>
-            <label className="flex items-center gap-2 text-sm">
-              <input type="checkbox" checked={showHolds} onChange={(e) => setShowHolds(e.target.checked)} />
-              Show holds
-            </label>
+          <div className="xl:col-span-2 flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-600">
+            {selectedEquipment ? (
+              <>
+                <span className="inline-flex items-center gap-2 rounded-full border border-[#F2C7C2] bg-[#FCE9E7] px-3 py-1 text-xs font-semibold uppercase tracking-wide text-[#B9382E]">
+                  <Factory className="h-3.5 w-3.5" />
+                  Selected equipment
+                </span>
+                <span className="font-medium text-slate-900">{selectedEquipment.title}</span>
+                <span>{selectedEquipment.totalUnits} lanes</span>
+                <span>buffer {selectedEquipment.maintenanceBufferDays ?? 7} days</span>
+              </>
+            ) : (
+              <span>No equipment yet.</span>
+            )}
           </div>
         </div>
       </div>
 
-      {/* Legend + quick stats */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-2 text-sm">
-          <span className="text-slate-600">Legend:</span>
-          <span className="inline-flex items-center gap-2">
+      <div className="flex flex-col gap-4">
+      {/* Legend + secondary display controls */}
+      <div className="order-2 flex flex-wrap items-start justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm shadow-sm">
+          <span className="mr-2 inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+            <Layers3 className="h-4 w-4 text-[#D24338]" />
+            Legend
+          </span>
+          <span className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1">
             <span className="h-3 w-3 rounded bg-blue-600/90" /> Order
           </span>
-          <span className="inline-flex items-center gap-2">
+          <span className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1">
             <span className="h-3 w-3 rounded bg-blue-200 border border-blue-300" /> Buffer
           </span>
-          <span className="inline-flex items-center gap-2">
-            <span className="h-3 w-3 rounded bg-amber-500/90" /> Hold
+          <span className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1">
+            <span className="h-3 w-3 rounded bg-amber-500/90" /> Downtime
           </span>
-          <span className="inline-flex items-center gap-2">
+          <span className="inline-flex items-center gap-2 rounded-full border border-red-200 bg-red-50 px-3 py-1 text-red-700">
             <span className="h-3 w-3 rounded bg-red-600" /> Overbooked/unassigned
           </span>
         </div>
 
-        <div className="text-sm text-slate-600">
+        <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600 shadow-sm">
           {selectedEquipment ? (
             <>
               <span className="font-medium">{selectedEquipment.title}</span>
@@ -691,12 +1216,269 @@ setOrders(normalized);
           )}
         </div>
       </div>
+      {selectedEquipment && (
+        <div className="order-2 rounded-2xl border border-[#F2C7C2] bg-[#FCE9E7] px-4 py-2.5 text-xs text-slate-700 shadow-sm">
+          {BUFFER_BEHAVIOR_NOTE}
+        </div>
+      )}
+
+      <div className="order-3 grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
+        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+            <Wrench className="h-4 w-4 text-[#D24338]" />
+            Downtime workflow
+          </div>
+          <div className="mt-1 text-xs text-slate-500">
+            DB-backed operational blocks for maintenance, repairs, inspections, admin holds, or internal use.
+          </div>
+          {holdBanner && (
+            <div className="mt-3 flex items-start gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+              <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0" />
+              {holdBanner}
+            </div>
+          )}
+          {holdError && (
+            <div className="mt-3 flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              {holdError}
+            </div>
+          )}
+          {selectedEquipment ? (
+            <>
+              <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <div className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  <ClipboardList className="h-4 w-4 text-[#D24338]" />
+                  Create and setup
+                </div>
+                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+                <select
+                  value={holdType}
+                  onChange={(e) => setHoldType(e.target.value as HoldType)}
+                  className="rounded-md border border-slate-200 px-3 py-2 text-sm"
+                >
+                  <option value="maintenance">Maintenance</option>
+                  <option value="repair">Repair</option>
+                  <option value="inspection">Inspection</option>
+                  <option value="admin_hold">Admin hold</option>
+                  <option value="internal_use">Internal use</option>
+                </select>
+                <input
+                  type="date"
+                  value={holdStartDate}
+                  onChange={(e) => setHoldStartDate(e.target.value)}
+                  className="rounded-md border border-slate-200 px-3 py-2 text-sm"
+                />
+                <input
+                  type="date"
+                  value={holdEndDate}
+                  onChange={(e) => setHoldEndDate(e.target.value)}
+                  className="rounded-md border border-slate-200 px-3 py-2 text-sm"
+                />
+                <input
+                  type="number"
+                  min={1}
+                  max={selectedEquipment.totalUnits ?? 1}
+                  value={effectiveHoldQty}
+                  onChange={(e) => setHoldQty(e.target.value)}
+                  disabled={holdUnitAssignments.length > 0}
+                  className="rounded-md border border-slate-200 px-3 py-2 text-sm"
+                />
+                <button
+                  type="button"
+                  onClick={previewHoldConflicts}
+                  disabled={holdSaving || holdPreviewLoading}
+                  className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:bg-slate-100 disabled:text-slate-400"
+                >
+                  {holdPreviewLoading ? "Checking..." : "Check conflicts"}
+                </button>
+              </div>
+              <div className="mt-3 grid gap-3 md:grid-cols-2">
+                <input
+                  type="text"
+                  value={holdReason}
+                  onChange={(e) => setHoldReason(e.target.value)}
+                  placeholder="Reason"
+                  className="rounded-md border border-slate-200 px-3 py-2 text-sm"
+                />
+                <input
+                  type="text"
+                  value={holdNotes}
+                  onChange={(e) => setHoldNotes(e.target.value)}
+                  placeholder="Optional notes"
+                  className="rounded-md border border-slate-200 px-3 py-2 text-sm"
+                />
+              </div>
+              </div>
+              <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className="flex items-center gap-2 text-sm font-medium text-slate-900">
+                      <Layers3 className="h-4 w-4 text-[#D24338]" />
+                      Target units
+                    </div>
+                    <div className="mt-1 text-xs text-slate-500">
+                      Select specific units when downtime should target known lanes. Leave empty to use the legacy quantity fallback.
+                    </div>
+                  </div>
+                  <div className="text-xs text-slate-500">
+                    Quantity affected: <span className="font-medium text-slate-700">{effectiveHoldQty}</span>
+                  </div>
+                </div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {unitOptions.map((unit) => {
+                    const checked = holdUnitAssignments.includes(unit.id);
+                    return (
+                      <label
+                        key={unit.id}
+                        className={`inline-flex items-center gap-2 rounded-md border px-3 py-2 text-sm ${
+                          checked ? "border-slate-900 bg-slate-900 text-white" : "border-slate-200 bg-white text-slate-700"
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={(e) => {
+                            setHoldUnitAssignments((current) => {
+                              const next = e.target.checked
+                                ? [...current, unit.id]
+                                : current.filter((item) => item !== unit.id);
+                              return normalizeUnitAssignments(next);
+                            });
+                          }}
+                          className="sr-only"
+                        />
+                        {unit.label}
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+              {holdPreview && (
+                <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3">
+                  <div className="flex items-center gap-2 text-sm font-medium text-amber-900">
+                    <ShieldAlert className="h-4 w-4" />
+                    Conflict summary
+                  </div>
+                  <div className="mt-1 text-xs text-amber-800">
+                    Server-side check against active bookings, existing downtime, and pending or approved extensions.
+                  </div>
+                  {holdPreview.summaryLines.length > 0 ? (
+                    <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-amber-900">
+                      {holdPreview.summaryLines.map((line) => (
+                        <li key={line}>{line}</li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <div className="mt-3 text-sm text-emerald-800">No operational conflicts found for the selected dates.</div>
+                  )}
+                </div>
+              )}
+              <div className="mt-3 flex flex-wrap gap-3">
+                <button
+                  type="button"
+                  onClick={createHold}
+                  disabled={holdSaving}
+                  className="rounded-lg bg-[#D24338] px-4 py-2 text-sm font-medium text-white hover:bg-[#B9382E] disabled:bg-slate-300"
+                >
+                  {holdSaving ? "Saving..." : holdNeedsConflictConfirmation ? "Add downtime anyway" : "Add downtime"}
+                </button>
+                {holdUnitAssignments.length === 0 && (
+                  <div className="self-center text-xs text-slate-500">
+                    No units selected: this uses the legacy quantity-based fallback.
+                  </div>
+                )}
+              </div>
+            </>
+          ) : (
+            <div className="mt-3 text-sm text-slate-600">Select equipment to manage downtime.</div>
+          )}
+        </div>
+
+        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+            <Flag className="h-4 w-4 text-[#D24338]" />
+            Current equipment downtime
+          </div>
+          <div className="mt-1 text-xs text-slate-500">
+            Showing DB-backed downtime entries for the selected equipment.
+          </div>
+          <div className="mt-3 flex items-center justify-between gap-3">
+            <label className="flex items-center gap-2 text-xs text-slate-600">
+              <input
+                type="checkbox"
+                checked={includeCancelledHolds}
+                onChange={(e) => setIncludeCancelledHolds(e.target.checked)}
+              />
+              Include cancelled
+            </label>
+            <div className="text-xs text-slate-500">{filteredHoldList.length} visible block(s)</div>
+          </div>
+          <div className="mt-3 max-h-[420px] space-y-2 overflow-y-auto pr-1">
+            {filteredHoldList.length ? (
+              filteredHoldList.map((hold) => (
+                <div
+                  key={hold.id}
+                  onClick={() => openHoldInDrawer(hold)}
+                  className="block w-full rounded-xl border border-slate-200 p-3 text-left text-sm hover:border-slate-300 hover:bg-slate-50"
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      openHoldInDrawer(hold);
+                    }
+                  }}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <div className="font-medium text-slate-900">
+                        {hold.type} · {hold.qty} unit(s)
+                      </div>
+                      <div className="mt-1 text-xs text-slate-500">
+                        {hold.startDate} → {hold.endDate}
+                      </div>
+                      {hold.reason && <div className="mt-2 text-xs text-slate-600">{hold.reason}</div>}
+                      {hold.unitAssignments.length > 0 && (
+                        <div className="mt-1 text-xs text-slate-500">
+                          Units: {hold.unitAssignments.map(formatUnitLabel).join(", ")}
+                        </div>
+                      )}
+                      {hold.notes && <div className="mt-1 text-xs text-slate-500">{hold.notes}</div>}
+                    </div>
+                    <div className="flex flex-col items-end gap-2">
+                      <span className={`rounded-full px-2 py-1 text-[11px] font-semibold ${hold.status === "active" ? "bg-[#FCE9E7] text-[#B9382E]" : "bg-slate-100 text-slate-700"}`}>
+                        {hold.status}
+                      </span>
+                      {hold.status === "active" && (
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            void cancelHold(hold.id);
+                          }}
+                          disabled={holdSaving}
+                          className="rounded-md border border-rose-200 bg-rose-50 px-2 py-1 text-xs font-medium text-rose-700 hover:bg-rose-100 disabled:text-slate-400"
+                        >
+                          Cancel
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))
+            ) : (
+              <div className="text-sm text-slate-600">No downtime blocks recorded for this equipment.</div>
+            )}
+          </div>
+        </div>
+      </div>
 
       {/* Unassigned queue */}
       {timeline.unassigned.length > 0 && (
-        <div className="border border-red-200 bg-red-50 rounded-lg p-3">
+        <div className="order-1 rounded-2xl border border-red-200 bg-red-50 p-4 shadow-sm">
           <div className="flex items-center justify-between gap-3">
-            <div className="font-medium text-red-800">
+            <div className="inline-flex items-center gap-2 font-medium text-red-800">
+              <XCircle className="h-4 w-4" />
               Unassigned / Overbooked ({timeline.unassigned.length})
             </div>
             <div className="text-xs text-red-700">
@@ -710,7 +1492,7 @@ setOrders(normalized);
                 key={`${u.kind}:${u.sourceId}:${u.occIndex}`}
                 className="text-xs border border-red-200 bg-white hover:bg-red-50 rounded-md px-2 py-1"
                 onClick={() => setSelectedBlock(u)}
-                title={getBlockTitle(u)}
+                title={getOccurrenceTitle(u)}
               >
                 <span className="font-medium">{kindBadge(u.kind)}</span> · {u.label} · {u.start}→{u.end} · occ{" "}
                 {u.occIndex + 1}
@@ -747,10 +1529,10 @@ setOrders(normalized);
 
 
       {/* Timeline grid */}
-      <div className="border rounded-xl overflow-hidden">
+      <div className="order-1 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
         {/* Header row: dates */}
-        <div className="flex bg-slate-50 border-b">
-          <div className="w-44 shrink-0 px-3 py-2 text-sm font-medium text-slate-700 border-r">
+        <div className="flex border-b bg-slate-50">
+          <div className="w-44 shrink-0 border-r px-3 py-3 text-sm font-medium text-slate-700">
             Lanes
           </div>
           <div className="flex-1 overflow-x-auto" ref={scrollRef}>
@@ -764,7 +1546,7 @@ setOrders(normalized);
                 {days.map((d) => {
                   const isOver = timeline.overbookDays.has(d.iso);
                   return (
-                    <div key={d.iso} className="border-r last:border-r-0 px-2 py-2">
+                    <div key={d.iso} className={`border-r last:border-r-0 px-2 py-3 ${d.iso === toISODate(startOfDay(new Date())) ? "bg-[#FCE9E7]/70" : ""}`}>
                       <div className="flex items-center justify-between">
                         <div className="text-xs text-slate-600">{weekdayShort(d.date)}</div>
                         {isOver && <span className="inline-block h-2 w-2 rounded-full bg-red-600" title="Overbooked/unassigned on this day" />}
@@ -783,7 +1565,7 @@ setOrders(normalized);
         <div className="flex">
           {/* Lane labels */}
 {/* Lane labels */}
-<div className="w-44 shrink-0 border-r bg-white">
+          <div className="w-44 shrink-0 border-r bg-slate-50/70">
   {lanes.length === 0 ? (
     <div className="p-4 text-sm text-slate-600">No units (totalUnits=0).</div>
   ) : (
@@ -855,7 +1637,7 @@ setOrders(normalized);
                           ? "rounded-md"
                           : "rounded-md shadow-sm";
 
-                      const outline = isSelected ? "ring-2 ring-slate-900" : "hover:ring-2 hover:ring-slate-400";
+                      const outline = isSelected ? "ring-2 ring-[#D24338]" : "hover:ring-2 hover:ring-slate-400";
 
                       // Buffer tail should look attached; slightly shorter height
                       const heightCls = b.kind === "buffer" ? "h-6 top-2" : "h-7 top-1";
@@ -886,7 +1668,7 @@ const dateFromMeta =
   setSelectedBlock(b);
 }}
 
-                          title={getBlockTitle(b)}
+                          title={getOccurrenceTitle(b)}
                         >
                           <span className="text-[11px] font-semibold whitespace-nowrap">
                             {kindBadge(b.kind)}
@@ -910,28 +1692,68 @@ const dateFromMeta =
         </div>
       </div>
 
+      <div className="order-2 flex flex-wrap items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600 shadow-sm">
+        <span className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+          <Eye className="h-4 w-4 text-[#D24338]" />
+          Display controls
+        </span>
+        <label className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-sm ${togglePillClass(showOrders)}`}>
+          <input type="checkbox" checked={showOrders} onChange={(e) => setShowOrders(e.target.checked)} />
+          Show orders
+        </label>
+        <label className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-sm ${togglePillClass(showBuffer)}`}>
+          <input type="checkbox" checked={showBuffer} onChange={(e) => setShowBuffer(e.target.checked)} />
+          Show buffer
+        </label>
+        <label className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-sm ${togglePillClass(showHolds)}`}>
+          <input type="checkbox" checked={showHolds} onChange={(e) => setShowHolds(e.target.checked)} />
+          Show downtime
+        </label>
+        <select
+          value={holdTypeFilter}
+          onChange={(e) => setHoldTypeFilter(e.target.value as HoldType | "all")}
+          className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
+        >
+          <option value="all">All downtime types</option>
+          <option value="maintenance">Maintenance</option>
+          <option value="repair">Repair</option>
+          <option value="inspection">Inspection</option>
+          <option value="admin_hold">Admin hold</option>
+          <option value="internal_use">Internal use</option>
+        </select>
+      </div>
+      </div>
+
       {/* Right drawer */}
       {selectedBlock && (
-        <div className="fixed top-0 right-0 h-full w-[420px] bg-white border-l shadow-xl z-50">
-          <div className="p-4 border-b flex items-start justify-between gap-3">
+        <div className="fixed top-0 right-0 z-50 flex h-full w-[420px] flex-col border-l border-slate-200 bg-white shadow-xl">
+          <div className="shrink-0 border-b border-slate-200 bg-slate-50 p-4">
+          <div className="flex items-start justify-between gap-3">
             <div>
-              <div className="text-sm text-slate-600">{kindBadge(selectedBlock.kind)}</div>
-              <div className="text-lg font-semibold">{selectedBlock.label}</div>
+              <div className="inline-flex rounded-full border border-[#F2C7C2] bg-[#FCE9E7] px-3 py-1 text-xs font-semibold uppercase tracking-wide text-[#B9382E]">
+                {kindBadge(selectedBlock.kind)}
+              </div>
+              <div className="mt-3 text-lg font-semibold text-[#2A2A2A]">{selectedBlock.label}</div>
               <div className="text-sm text-slate-600">
                 {selectedBlock.start} → {selectedBlock.end} · occ {selectedBlock.occIndex + 1}
               </div>
             </div>
             <button
-              className="border rounded-md px-2 py-1 text-sm hover:bg-slate-50"
+              className="rounded-md border border-slate-200 px-2 py-1 text-sm hover:bg-white"
               onClick={() => setSelectedBlock(null)}
             >
               Close
             </button>
           </div>
+          </div>
 
-          <div className="p-4 space-y-4">
-            <div className="rounded-lg border p-3">
-              <div className="text-sm font-medium mb-2">Details</div>
+          <div className="min-h-0 flex-1 overflow-y-auto p-4">
+          <div className="space-y-4 pb-8">
+            <div className="rounded-xl border border-slate-200 p-4">
+              <div className="mb-2 flex items-center gap-2 text-sm font-medium text-slate-900">
+                <ClipboardList className="h-4 w-4 text-[#D24338]" />
+                Summary
+              </div>
               <div className="text-sm text-slate-700 space-y-1">
                 <div>
                   <span className="text-slate-500">Kind:</span> {kindBadge(selectedBlock.kind)}
@@ -951,8 +1773,124 @@ const dateFromMeta =
               </div>
             </div>
 
-            <div className="rounded-lg border p-3">
-              <div className="text-sm font-medium mb-2">Actions</div>
+            {(selectedHold || selectedBlock.kind === "buffer") && (
+              <div className="rounded-xl border border-slate-200 p-4">
+                <div className="mb-2 flex items-center gap-2 text-sm font-medium text-slate-900">
+                  <Wrench className="h-4 w-4 text-[#D24338]" />
+                  Operational details
+                </div>
+                <div className="space-y-2 text-sm text-slate-700">
+                  {selectedBlock.kind === "buffer" && (
+                    <>
+                      <div>
+                        <span className="text-slate-500">Buffer days:</span> {selectedBufferDays ?? "—"}
+                      </div>
+                      <div className="text-xs text-slate-500">{BUFFER_BEHAVIOR_NOTE}</div>
+                    </>
+                  )}
+                  {selectedHold && (
+                    <>
+                      <div>
+                        <span className="text-slate-500">Downtime type:</span> {selectedHold.type}
+                      </div>
+                      <div>
+                        <span className="text-slate-500">Status:</span> {selectedHold.status}
+                      </div>
+                      <div>
+                        <span className="text-slate-500">Date range:</span> {selectedHold.startDate} → {selectedHold.endDate}
+                      </div>
+                      <div>
+                        <span className="text-slate-500">Affected units:</span>{" "}
+                        {selectedHold.unitAssignments.length > 0
+                          ? selectedHold.unitAssignments.map(formatUnitLabel).join(", ")
+                          : `${selectedHold.qty} unit(s)`}
+                      </div>
+                      {selectedHold.reason && (
+                        <div>
+                          <span className="text-slate-500">Reason:</span> {selectedHold.reason}
+                        </div>
+                      )}
+                      {selectedHold.notes && (
+                        <div>
+                          <span className="text-slate-500">Notes:</span> {selectedHold.notes}
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {selectedBlock.kind === "buffer" && selectedOrder && (
+              <div className="rounded-xl border border-slate-200 p-4">
+                <div className="mb-2 flex items-center gap-2 text-sm font-medium text-slate-900">
+                  <TimerReset className="h-4 w-4 text-[#D24338]" />
+                  Early Buffer Release
+                </div>
+                <div className="text-xs text-slate-500">
+                  DB-backed override for this order unit. Use after return when the unit is ready earlier than the original applied buffer.
+                </div>
+                {bufferOverrideBanner && (
+                  <div className="mt-3 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+                    {bufferOverrideBanner}
+                  </div>
+                )}
+                {bufferOverrideError && (
+                  <div className="mt-3 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+                    {bufferOverrideError}
+                  </div>
+                )}
+                <div className="mt-3 grid gap-3">
+                  <div className="text-xs text-slate-600">
+                    Order unit: <span className="font-medium text-slate-800">occ {selectedBlock.occIndex + 1}</span>
+                    {" · "}
+                    Rental end: <span className="font-medium text-slate-800">{selectedOrder.end}</span>
+                  </div>
+                  <label className="grid gap-1 text-sm">
+                    <span className="text-slate-700">Effective buffer end</span>
+                    <input
+                      type="date"
+                      value={bufferOverrideEndDate}
+                      onChange={(event) => setBufferOverrideEndDate(event.target.value)}
+                      className="rounded-md border border-slate-200 px-3 py-2 text-sm"
+                    />
+                  </label>
+                  <label className="grid gap-1 text-sm">
+                    <span className="text-slate-700">Reason</span>
+                    <input
+                      type="text"
+                      value={bufferOverrideReason}
+                      onChange={(event) => setBufferOverrideReason(event.target.value)}
+                      className="rounded-md border border-slate-200 px-3 py-2 text-sm"
+                      placeholder="Maintenance completed, cleaned, ready for redeploy..."
+                    />
+                  </label>
+                  <label className="grid gap-1 text-sm">
+                    <span className="text-slate-700">Notes</span>
+                    <textarea
+                      value={bufferOverrideNotes}
+                      onChange={(event) => setBufferOverrideNotes(event.target.value)}
+                      className="min-h-24 rounded-md border border-slate-200 px-3 py-2 text-sm"
+                      placeholder="Optional operational notes"
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    onClick={releaseBufferEarly}
+                    disabled={bufferOverrideSaving}
+                    className="rounded-lg bg-[#D24338] px-3 py-2 text-sm font-medium text-white hover:bg-[#B9382E] disabled:bg-slate-300"
+                  >
+                    {bufferOverrideSaving ? "Saving..." : "Save Early Release"}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            <div className="rounded-xl border border-slate-200 p-4">
+              <div className="mb-2 flex items-center gap-2 text-sm font-medium text-slate-900">
+                <Flag className="h-4 w-4 text-[#D24338]" />
+                Actions
+              </div>
               <div className="flex flex-col gap-2">
                 <button
   className="border rounded-md px-3 py-2 text-sm hover:bg-slate-50 text-left"
@@ -972,19 +1910,17 @@ const dateFromMeta =
 </button>
 
 
-                {(selectedBlock.kind === "buffer" || selectedBlock.kind === "hold") && (
+                {selectedBlock.kind === "hold" && (
                   <button
-                    className="border rounded-md px-3 py-2 text-sm hover:bg-slate-50 text-left"
-                    onClick={() => {
-                      alert("Stub: Release early action not implemented yet.");
-                    }}
+                    className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-left text-sm font-medium text-rose-700 hover:bg-rose-100"
+                    onClick={() => cancelHold(selectedBlock.sourceId)}
                   >
-                    Release early (stub)
+                    Cancel downtime block
                   </button>
                 )}
 
                 <button
-                  className="border rounded-md px-3 py-2 text-sm hover:bg-slate-50 text-left"
+                  className="rounded-md border border-slate-200 px-3 py-2 text-left text-sm text-slate-500 hover:bg-slate-50"
                   onClick={() => {
                     // Remove persisted assignment for this occurrence to allow reshuffle next render
                     if (!selectedEquipment) return;
@@ -1001,21 +1937,21 @@ const dateFromMeta =
               </div>
             </div>
 
-            <div className="rounded-lg border p-3">
-              <div className="text-sm font-medium mb-2">Notes</div>
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+              <div className="mb-2 flex items-center gap-2 text-sm font-medium text-slate-900">
+                <ShieldAlert className="h-4 w-4 text-amber-600" />
+                Operator notes
+              </div>
               <ul className="text-sm text-slate-700 list-disc pl-5 space-y-1">
-                <li>
-                  If orders aren’t appearing, update <code className="text-xs bg-slate-100 px-1 rounded">ORDER_STORAGE_KEYS</code>{" "}
-                  to match your localStorage key.
-                </li>
                 <li>
                   Unassigned items indicate overbooking or lane conflicts within the window.
                 </li>
                 <li>
-                  When you later add real unit IDs, you can replace lane labels while keeping the same allocation/persistence model.
+                  Lane assignment persistence is local UI state only; orders and downtime are now loaded from DB-backed admin routes.
                 </li>
               </ul>
             </div>
+          </div>
           </div>
         </div>
       )}

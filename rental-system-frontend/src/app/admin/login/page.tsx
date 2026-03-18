@@ -1,9 +1,19 @@
-// app/admin/login/page.tsx
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import {
+  AlertTriangle,
+  KeyRound,
+  LayoutDashboard,
+  LockKeyhole,
+  Mail,
+  ShieldCheck,
+} from "lucide-react";
+
 import { loginAdmin } from "@/lib/admin-auth";
+import { AuthShell } from "@/components/auth/AuthShell";
 
 export default function AdminLoginPage() {
   const router = useRouter();
@@ -41,68 +51,84 @@ export default function AdminLoginPage() {
   };
 
   return (
-    <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-lg">
-      <h1 className="text-lg font-semibold text-slate-900">
-        Admin Login
-      </h1>
-      <p className="mt-1 text-xs text-slate-500">
-        Sign in to access the Courier Ops Admin Console.
-      </p>
+    <AuthShell
+      badgeIcon={LayoutDashboard}
+      badgeLabel="Operations access"
+      title="Sign in to the Teesin admin operations area."
+      description="Access operational tools for equipment, scheduling, invoices, reminders, downtime, and customer account review."
+      panelTitle="Admin access context"
+      panelDescription="This page is intentionally more restrained than the customer auth flow. Public browsing remains customer-first, while admin access stays operational."
+      panelItems={[
+        {
+          icon: ShieldCheck,
+          title: "Operational controls",
+          detail: "Admin access is used for scheduling, order review, invoicing, equipment management, and maintenance operations.",
+        },
+        {
+          icon: LockKeyhole,
+          title: "Separate from customer checkout",
+          detail: "Admin sessions can browse public equipment, but customer checkout remains restricted to customer accounts.",
+        },
+      ]}
+      variant="admin"
+    >
+      <div>
+        <h2 className="text-xl font-semibold text-[#2A2A2A]">Admin login</h2>
+        <p className="mt-2 text-sm text-slate-600">
+          Sign in to access Teesin operational tools. Existing admin auth behavior and redirect flow remain unchanged.
+        </p>
 
-      <form onSubmit={handleSubmit} className="mt-5 space-y-4">
-        <div>
-          <label
-            htmlFor="email"
-            className="text-xs font-medium text-slate-700"
-          >
-            Email
+        <form onSubmit={handleSubmit} className="mt-6 space-y-4">
+          <label className="grid gap-1.5 text-sm">
+            <span className="inline-flex items-center gap-2 font-medium text-slate-700">
+              <Mail className="h-4 w-4 text-[#D24338]" />
+              Email
+            </span>
+            <input
+              type="email"
+              autoComplete="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none placeholder:text-slate-400 focus:border-[#D24338] focus:ring-1 focus:ring-[#F2C7C2]"
+              placeholder="ops@example.com"
+            />
           </label>
-          <input
-            id="email"
-            type="email"
-            autoComplete="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none placeholder:text-slate-400 focus:border-sky-500 focus:ring-1 focus:ring-sky-500"
-            placeholder="ops@courier.com"
-          />
-        </div>
 
-        <div>
-          <label
-            htmlFor="password"
-            className="text-xs font-medium text-slate-700"
-          >
-            Password
+          <label className="grid gap-1.5 text-sm">
+            <span className="inline-flex items-center gap-2 font-medium text-slate-700">
+              <KeyRound className="h-4 w-4 text-[#D24338]" />
+              Password
+            </span>
+            <input
+              type="password"
+              autoComplete="current-password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none placeholder:text-slate-400 focus:border-[#D24338] focus:ring-1 focus:ring-[#F2C7C2]"
+              placeholder="demo1234"
+            />
           </label>
-          <input
-            id="password"
-            type="password"
-            autoComplete="current-password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none placeholder:text-slate-400 focus:border-sky-500 focus:ring-1 focus:ring-sky-500"
-            placeholder="demo1234"
-          />
-          <p className="mt-1 text-[10px] text-slate-500">
+
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
             Demo credentials: <code>ops@example.com</code> / <code>demo1234</code>.
-          </p>
-        </div>
+          </div>
 
-        {error && (
-          <p className="text-[11px] text-red-500">
-            {error}
-          </p>
-        )}
+          {error && (
+            <div className="flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              <div>{error}</div>
+            </div>
+          )}
 
-        <button
-          type="submit"
-          disabled={submitting}
-          className="mt-2 inline-flex w-full items-center justify-center rounded-lg bg-sky-600 px-3 py-2 text-sm font-medium text-white hover:bg-sky-700 disabled:cursor-not-allowed disabled:bg-slate-400"
-        >
-          {submitting ? "Signing in…" : "Sign in"}
-        </button>
-      </form>
-    </div>
+          <button
+            type="submit"
+            disabled={submitting}
+            className="mt-2 inline-flex w-full items-center justify-center rounded-xl bg-[#2A2A2A] px-3 py-3 text-sm font-medium text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-400"
+          >
+            {submitting ? "Signing in..." : "Sign in"}
+          </button>
+        </form>
+      </div>
+    </AuthShell>
   );
 }

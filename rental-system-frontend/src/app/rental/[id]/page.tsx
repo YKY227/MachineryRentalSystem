@@ -20,8 +20,20 @@ import {
   calculateAuthoritativeRentalPricing,
   calculateRentalDaysInclusive,
 } from "@/lib/rental/orders/pricing";
+import type { RentalCustomer } from "@/lib/rental/orders/types";
 
 type FulfillmentMode = "deliver" | "self_collect";
+type AvailabilitySnapshot = {
+  totalUnits: number;
+  committedQty: number;
+  heldQty: number;
+  downtimeQty: number;
+  availableQty: number;
+};
+type AuthStatusResponse = {
+  adminAuthenticated?: boolean;
+  customer?: RentalCustomer | null;
+};
 
 function formatMoney(n: number) {
   return new Intl.NumberFormat("en-SG", {
@@ -49,6 +61,9 @@ export default function RentalDetailPage() {
   });
   const [fulfillment, setFulfillment] = useState<FulfillmentMode>("deliver");
   const [deliveryAddress, setDeliveryAddress] = useState("");
+  const [availabilitySnapshot, setAvailabilitySnapshot] = useState<AvailabilitySnapshot | null>(null);
+  const [availabilityLoading, setAvailabilityLoading] = useState(false);
+  const [adminAuthenticated, setAdminAuthenticated] = useState(false);
 
   const deliveryFee = fulfillment === "deliver" ? 60 : 0;
   const collectionFee = fulfillment === "deliver" ? 60 : 0;
@@ -77,6 +92,27 @@ export default function RentalDetailPage() {
   }, [equipmentId]);
 
   useEffect(() => {
+    let active = true;
+
+    fetch("/api/public/rental/auth/me", {
+      cache: "no-store",
+      credentials: "include",
+    })
+      .then(async (res) => {
+        const data = (await res.json().catch(() => ({}))) as AuthStatusResponse;
+        if (!active || !res.ok) return;
+        setAdminAuthenticated(Boolean(data.adminAuthenticated));
+      })
+      .catch(() => {
+        if (active) setAdminAuthenticated(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
     if (fulfillment === "self_collect" && deliveryAddress) {
       setDeliveryAddress("");
     }
@@ -84,11 +120,45 @@ export default function RentalDetailPage() {
 
   const days = useMemo(() => calculateRentalDaysInclusive(startDate, endDate), [startDate, endDate]);
   const minDays = equipment?.pricing?.minDays ?? 1;
-  const availableUnitsForRange = equipment?.totalUnits ?? 0;
+  const dateValid = days > 0 && days >= minDays;
+  const availableUnitsForRange =
+    dateValid && availabilitySnapshot ? availabilitySnapshot.availableQty : equipment?.totalUnits ?? 0;
 
   useEffect(() => {
     setQty((prev) => Math.max(1, Math.min(prev, Math.max(1, availableUnitsForRange))));
   }, [availableUnitsForRange]);
+
+  useEffect(() => {
+    if (!equipment?.id || !dateValid) {
+      setAvailabilitySnapshot(null);
+      return;
+    }
+
+    let active = true;
+    setAvailabilityLoading(true);
+    fetch(
+      `/api/public/rental/equipment/${encodeURIComponent(equipment.id)}/availability?start=${encodeURIComponent(
+        startDate
+      )}&end=${encodeURIComponent(endDate)}`,
+      { cache: "no-store" }
+    )
+      .then(async (res) => {
+        const data = await res.json().catch(() => ({}));
+        if (!active) return;
+        if (!res.ok) throw new Error(data?.error ?? "Failed to load availability");
+        setAvailabilitySnapshot((data?.snapshot ?? null) as AvailabilitySnapshot | null);
+      })
+      .catch(() => {
+        if (active) setAvailabilitySnapshot(null);
+      })
+      .finally(() => {
+        if (active) setAvailabilityLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [dateValid, endDate, equipment?.id, startDate]);
 
   const repricedPreview = useMemo(() => {
     if (!equipment) return null;
@@ -112,12 +182,11 @@ export default function RentalDetailPage() {
   }, [collectionFee, deliveryFee, deposit, rentalSubtotal]);
 
   const inStock = availableUnitsForRange > 0;
-  const dateValid = days > 0 && days >= minDays;
   const qtyValid = qty >= 1 && qty <= availableUnitsForRange;
   const addressRequired = fulfillment === "deliver";
   const addressValid = !addressRequired || deliveryAddress.trim().length >= 8;
 
-  const canProceed = !!equipment && inStock && dateValid && qtyValid && addressValid;
+  const canProceed = !!equipment && !adminAuthenticated && inStock && dateValid && qtyValid && addressValid;
 
   function handleProceed() {
     if (!equipment || !canProceed) return;
@@ -248,7 +317,11 @@ export default function RentalDetailPage() {
               <div className="mt-4 space-y-2 text-xs text-slate-600">
                 <div className="flex items-center gap-2">
                   <CheckCircle2 className="h-4 w-4 text-emerald-600" />
-                  {inStock ? `${availableUnitsForRange} unit(s) in catalog inventory` : "Out of stock"}
+                  {inStock
+                    ? dateValid
+                      ? `${availableUnitsForRange} unit(s) available for ${startDate} to ${endDate}`
+                      : `${availableUnitsForRange} unit(s) in catalog inventory`
+                    : "Out of stock"}
                 </div>
                 <div className="flex items-center gap-2">
                   <CalendarDays className="h-4 w-4 text-slate-500" />
@@ -464,9 +537,12 @@ export default function RentalDetailPage() {
                   className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-slate-400"
                 />
                 <div className="mt-1 text-xs text-slate-500">
-                  Current catalog units:{" "}
+                  {dateValid ? "Available for selected dates:" : "Current catalog units:"}{" "}
                   <span className="font-semibold text-slate-700">{availableUnitsForRange}</span>
                 </div>
+                {availabilityLoading && (
+                  <div className="mt-1 text-xs text-slate-500">Checking server availability...</div>
+                )}
                 {!qtyValid && (
                   <p className="mt-1 text-xs text-rose-600">
                     Quantity exceeds available inventory.
@@ -592,9 +668,15 @@ export default function RentalDetailPage() {
                   : "cursor-not-allowed bg-slate-200 text-slate-500",
               ].join(" ")}
             >
-              Proceed to checkout
+              {adminAuthenticated ? "Customer checkout only" : "Proceed to checkout"}
               <ArrowRight className="ml-2 h-4 w-4" />
             </button>
+
+            {adminAuthenticated && (
+              <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+                Checkout is only available for customer accounts. Admin sessions may browse public equipment but cannot continue through customer checkout.
+              </div>
+            )}
 
             {!inStock && (
               <p className="mt-2 text-xs text-rose-600">

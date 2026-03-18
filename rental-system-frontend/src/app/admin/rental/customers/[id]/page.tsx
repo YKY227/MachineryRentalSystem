@@ -2,6 +2,23 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
+import {
+  ArrowLeft,
+  BadgeDollarSign,
+  Building2,
+  CircleDollarSign,
+  CreditCard,
+  FileText,
+  Mail,
+  MailCheck,
+  NotebookText,
+  ReceiptText,
+  ShieldAlert,
+  ShieldCheck,
+  UserCircle2,
+  UserCog,
+  Wallet,
+} from "lucide-react";
 
 import type { InvoicePaymentStatus } from "@/lib/rental/invoices/types";
 import type {
@@ -317,7 +334,10 @@ export default function AdminRentalCustomerDetailPage() {
         totalInvoices: 0,
         totalPaidCents: 0,
         outstandingBalanceCents: 0,
+        currentBalanceCents: 0,
+        overdueBalanceCents: 0,
         overdueInvoicesCount: 0,
+        openInvoicesCount: 0,
       },
     [overview]
   );
@@ -352,8 +372,9 @@ export default function AdminRentalCustomerDetailPage() {
 
   if (loading) {
     return (
-      <div className="mx-auto max-w-7xl p-4">
-        <div className="rounded-xl border border-slate-200 bg-white p-6 text-sm text-slate-600">
+      <div className="mx-auto max-w-7xl bg-slate-50 p-4">
+        <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white p-6 text-sm text-slate-600">
+          <UserCircle2 className="h-4 w-4 text-slate-400" />
           Loading customer overview...
         </div>
       </div>
@@ -362,8 +383,9 @@ export default function AdminRentalCustomerDetailPage() {
 
   if (!customer) {
     return (
-      <div className="mx-auto max-w-7xl p-4">
-        <div className="rounded-xl border border-slate-200 bg-white p-6 text-sm text-slate-600">
+      <div className="mx-auto max-w-7xl bg-slate-50 p-4">
+        <div className="flex items-center gap-2 rounded-xl border border-rose-200 bg-white p-6 text-sm text-slate-600">
+          <ShieldAlert className="h-4 w-4 text-rose-500" />
           {loadError ?? "Customer not found."}
         </div>
       </div>
@@ -371,36 +393,71 @@ export default function AdminRentalCustomerDetailPage() {
   }
 
   return (
-    <div className="mx-auto max-w-7xl p-4">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold text-slate-900">{customer.companyName}</h1>
-          <p className="mt-1 text-sm text-slate-600">
-            {customer.contactName} · {customer.email}
-          </p>
-        </div>
+    <div className="mx-auto max-w-7xl space-y-6 bg-slate-50 p-4">
+      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
+          <div className="space-y-4">
+            <div className="inline-flex items-center gap-2 rounded-full border border-[#F2C7C2] bg-[#FCE9E7] px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.22em] text-[#B9382E]">
+              <UserCog className="h-3.5 w-3.5" />
+              Customer account workspace
+            </div>
+            <div>
+              <h1 className="text-3xl font-semibold tracking-tight text-[#2A2A2A]">
+                {customer.companyName}
+              </h1>
+              <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
+                Review account standing, recent rental activity, and credit posture from one
+                customer-centric workspace.
+              </p>
+            </div>
+          </div>
 
         <div className="flex items-center gap-2">
           <button
             type="button"
             onClick={() => router.push("/admin/rental/customers")}
-            className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+            className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 transition hover:border-[#F2C7C2] hover:bg-[#FCE9E7]"
           >
+            <ArrowLeft className="h-4 w-4" />
             Back to Customers
           </button>
         </div>
       </div>
 
-      <div className="mt-3 flex flex-wrap gap-2">
+      <div className="mt-4 flex flex-wrap gap-2">
         {[customer.vettingStatus, customer.paymentTerms, customer.accountStatus].map((value) => (
           <span
             key={value}
-            className={["rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-wide", badgeTone(value)].join(" ")}
+            className={[
+              "rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-wide",
+              badgeTone(value),
+            ].join(" ")}
           >
             {value.replace("_", " ")}
           </span>
         ))}
       </div>
+
+        <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+          <HeaderMetaCard
+            icon={UserCircle2}
+            label="Primary Contact"
+            primary={customer.contactName}
+            secondary={customer.authUserId ?? "Auth user not linked"}
+          />
+          <HeaderMetaCard
+            icon={Mail}
+            label="Contact Channels"
+            primary={customer.email}
+            secondary={customer.phone ?? "Phone not recorded"}
+          />
+          <HeaderMetaCard
+            icon={Building2}
+            label="Company Profile"
+            primary={customer.uen ?? "UEN not recorded"}
+            secondary={customer.address ?? "Address not recorded"}
+          />
+        </div>
 
       {accountBanner && (
         <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-700">
@@ -417,7 +474,11 @@ export default function AdminRentalCustomerDetailPage() {
       <div className="mt-6 grid gap-6 lg:grid-cols-[1.3fr_0.9fr]">
         <div className="space-y-6">
           <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <h2 className="text-lg font-semibold text-slate-900">Customer Account Info</h2>
+            <SectionTitle
+              icon={Building2}
+              title="Customer Account Info"
+              subtitle="Core customer identity and linked account reference."
+            />
             <div className="mt-4 grid gap-3 sm:grid-cols-2">
               <div>
                 <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Company</div>
@@ -452,27 +513,55 @@ export default function AdminRentalCustomerDetailPage() {
 
           <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
             <div className="flex items-center justify-between gap-3">
-              <h2 className="text-lg font-semibold text-slate-900">Financial Summary</h2>
-              <span className="text-xs text-slate-500">DB-derived</span>
+              <SectionTitle
+                icon={BadgeDollarSign}
+                title="Financial Summary"
+                subtitle="DB-derived billing, receivables, and deposit context."
+              />
+              <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-medium text-slate-500">
+                DB-derived
+              </span>
             </div>
-            <div className="mt-4 grid gap-3 sm:grid-cols-4 xl:grid-cols-8">
-              <SummaryCard label="Total Invoices" value={String(financialSummary.totalInvoices)} />
-              <SummaryCard label="Total Paid" value={moneyFromCents(financialSummary.totalPaidCents)} />
-              <SummaryCard
-                label="Outstanding"
-                value={moneyFromCents(financialSummary.outstandingBalanceCents)}
-              />
-              <SummaryCard label="Overdue Count" value={String(financialSummary.overdueInvoicesCount)} />
-              <SummaryCard label="Deposit Required" value={moneyFromCents(depositSummary.totalRequiredCents)} />
-              <SummaryCard label="Deposit Held" value={moneyFromCents(depositSummary.totalHeldCents)} />
-              <SummaryCard
-                label="Deposit Outstanding"
-                value={moneyFromCents(depositSummary.totalOutstandingCents)}
-              />
-              <SummaryCard
-                label="Deposit Orders"
-                value={`${depositSummary.heldCount} held / ${depositSummary.pendingCount} pending`}
-              />
+            <div className="mt-4 grid gap-4 xl:grid-cols-[1.35fr_1fr]">
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+                  <CircleDollarSign className="h-4 w-4 text-[#B9382E]" />
+                  Invoice and receivables
+                </div>
+                <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                  <SummaryCard label="Total Invoices" value={String(financialSummary.totalInvoices)} />
+                  <SummaryCard label="Total Paid" value={moneyFromCents(financialSummary.totalPaidCents)} />
+                  <SummaryCard
+                    label="Outstanding"
+                    value={moneyFromCents(financialSummary.outstandingBalanceCents)}
+                    tone="accent"
+                  />
+                  <SummaryCard
+                    label="Overdue Count"
+                    value={String(financialSummary.overdueInvoicesCount)}
+                    tone={financialSummary.overdueInvoicesCount > 0 ? "warning" : "default"}
+                  />
+                </div>
+              </div>
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+                  <Wallet className="h-4 w-4 text-[#B9382E]" />
+                  Deposit position
+                </div>
+                <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                  <SummaryCard label="Deposit Required" value={moneyFromCents(depositSummary.totalRequiredCents)} />
+                  <SummaryCard label="Deposit Held" value={moneyFromCents(depositSummary.totalHeldCents)} />
+                  <SummaryCard
+                    label="Deposit Outstanding"
+                    value={moneyFromCents(depositSummary.totalOutstandingCents)}
+                    tone={depositSummary.totalOutstandingCents > 0 ? "warning" : "default"}
+                  />
+                  <SummaryCard
+                    label="Deposit Orders"
+                    value={`${depositSummary.heldCount} held / ${depositSummary.pendingCount} pending`}
+                  />
+                </div>
+              </div>
             </div>
           </section>
 
@@ -483,9 +572,14 @@ export default function AdminRentalCustomerDetailPage() {
         </div>
 
         <div className="space-y-6">
-          <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="rounded-[28px] border border-[#F2C7C2] bg-gradient-to-b from-[#FCE9E7] via-white to-white p-1 shadow-sm">
+          <section className="rounded-[24px] border border-slate-200 bg-white p-5">
             <div className="flex items-center justify-between gap-3">
-              <h2 className="text-lg font-semibold text-slate-900">Credit Policy</h2>
+              <SectionTitle
+                icon={CreditCard}
+                title="Credit Policy"
+                subtitle="Account-level controls for exposure, manual hold, and credit allowance."
+              />
               <span className="text-xs text-slate-500">Account-level settings</span>
             </div>
 
@@ -519,7 +613,7 @@ export default function AdminRentalCustomerDetailPage() {
                   value={creditLimitInput}
                   onChange={(e) => setCreditLimitInput(e.target.value)}
                   placeholder="Leave blank for not set"
-                  className="rounded-xl border border-slate-200 px-3 py-2 text-slate-900 outline-none focus:border-sky-400"
+                  className="rounded-xl border border-slate-200 px-3 py-2 text-slate-900 outline-none focus:border-[#D24338]"
                 />
                 <span className="text-xs text-slate-500">Leave blank to keep the credit limit unset.</span>
               </label>
@@ -529,7 +623,7 @@ export default function AdminRentalCustomerDetailPage() {
                 <select
                   value={creditControlEnabled ? "enabled" : "disabled"}
                   onChange={(e) => setCreditControlEnabled(e.target.value === "enabled")}
-                  className="rounded-xl border border-slate-200 px-3 py-2 text-slate-900 outline-none focus:border-sky-400"
+                  className="rounded-xl border border-slate-200 px-3 py-2 text-slate-900 outline-none focus:border-[#D24338]"
                 >
                   <option value="enabled">Enabled</option>
                   <option value="disabled">Disabled</option>
@@ -541,7 +635,7 @@ export default function AdminRentalCustomerDetailPage() {
                 <textarea
                   value={creditHoldReason}
                   onChange={(e) => setCreditHoldReason(e.target.value)}
-                  className="min-h-28 rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 outline-none focus:border-sky-400"
+                  className="min-h-28 rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 outline-none focus:border-[#D24338]"
                   placeholder="Optional manual hold note for credit control..."
                 />
               </label>
@@ -550,16 +644,20 @@ export default function AdminRentalCustomerDetailPage() {
                 type="button"
                 onClick={onSaveCreditPolicy}
                 disabled={creditPolicySaving}
-                className="w-full rounded-xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white hover:bg-slate-800 disabled:bg-slate-300"
+                className="w-full rounded-xl bg-[#D24338] px-4 py-3 text-sm font-semibold text-white hover:bg-[#B9382E] disabled:bg-slate-300"
               >
                 {creditPolicySaving ? "Saving..." : "Save Credit Policy"}
               </button>
             </div>
           </section>
 
-          <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <section className="rounded-[24px] border border-slate-200 bg-white p-5">
             <div className="flex items-center justify-between gap-3">
-              <h2 className="text-lg font-semibold text-slate-900">Credit Exposure</h2>
+              <SectionTitle
+                icon={ShieldCheck}
+                title="Credit Exposure"
+                subtitle="Current credit use, overdue exposure, and recommended decision."
+              />
               <span
                 className={[
                   "rounded-full px-2 py-1 text-xs font-semibold uppercase",
@@ -614,9 +712,14 @@ export default function AdminRentalCustomerDetailPage() {
               </div>
             </div>
           </section>
+          </div>
 
           <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <h2 className="text-lg font-semibold text-slate-900">Account Settings</h2>
+            <SectionTitle
+              icon={UserCog}
+              title="Account Settings"
+              subtitle="Update operational account controls without leaving the customer workspace."
+            />
             {accountError && (
               <div className="mt-4 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">
                 {accountError}
@@ -628,7 +731,7 @@ export default function AdminRentalCustomerDetailPage() {
                 <select
                   value={vettingStatus}
                   onChange={(e) => setVettingStatus(e.target.value as RentalCustomerVettingStatus)}
-                  className="rounded-xl border border-slate-200 px-3 py-2 text-slate-900 outline-none focus:border-sky-400"
+                  className="rounded-xl border border-slate-200 px-3 py-2 text-slate-900 outline-none focus:border-[#D24338]"
                 >
                   {VETTING_OPTIONS.map((option) => (
                     <option key={option} value={option}>
@@ -643,7 +746,7 @@ export default function AdminRentalCustomerDetailPage() {
                 <select
                   value={paymentTerms}
                   onChange={(e) => setPaymentTerms(e.target.value as RentalCustomerPaymentTerms)}
-                  className="rounded-xl border border-slate-200 px-3 py-2 text-slate-900 outline-none focus:border-sky-400"
+                  className="rounded-xl border border-slate-200 px-3 py-2 text-slate-900 outline-none focus:border-[#D24338]"
                 >
                   {PAYMENT_TERMS_OPTIONS.map((option) => (
                     <option key={option} value={option}>
@@ -658,7 +761,7 @@ export default function AdminRentalCustomerDetailPage() {
                 <select
                   value={accountStatus}
                   onChange={(e) => setAccountStatus(e.target.value as RentalCustomerAccountStatus)}
-                  className="rounded-xl border border-slate-200 px-3 py-2 text-slate-900 outline-none focus:border-sky-400"
+                  className="rounded-xl border border-slate-200 px-3 py-2 text-slate-900 outline-none focus:border-[#D24338]"
                 >
                   {ACCOUNT_STATUS_OPTIONS.map((option) => (
                     <option key={option} value={option}>
@@ -672,7 +775,7 @@ export default function AdminRentalCustomerDetailPage() {
                 type="button"
                 onClick={onSaveAccount}
                 disabled={accountSaving}
-                className="w-full rounded-xl bg-sky-600 px-4 py-3 text-sm font-semibold text-white hover:bg-sky-700 disabled:bg-slate-300"
+                className="w-full rounded-xl bg-[#D24338] px-4 py-3 text-sm font-semibold text-white hover:bg-[#B9382E] disabled:bg-slate-300"
               >
                 {accountSaving ? "Saving..." : "Save Account Settings"}
               </button>
@@ -680,11 +783,15 @@ export default function AdminRentalCustomerDetailPage() {
           </section>
 
           <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <h2 className="text-lg font-semibold text-slate-900">Internal Notes</h2>
+            <SectionTitle
+              icon={NotebookText}
+              title="Internal Notes"
+              subtitle="Capture service history, account context, and operational guidance for the team."
+            />
             <textarea
               value={internalNotes}
               onChange={(e) => setInternalNotes(e.target.value)}
-              className="mt-4 min-h-48 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 outline-none focus:border-sky-400"
+              className="mt-4 min-h-48 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 outline-none focus:border-[#D24338]"
               placeholder="Reliable payer, returned equipment late, approved for credit..."
             />
             <button
@@ -699,12 +806,82 @@ export default function AdminRentalCustomerDetailPage() {
         </div>
       </div>
     </div>
+    </div>
   );
 }
 
-function SummaryCard({ label, value }: { label: string; value: string }) {
+function SectionTitle({
+  icon: Icon,
+  title,
+  subtitle,
+}: {
+  icon: typeof Building2;
+  title: string;
+  subtitle?: string;
+}) {
   return (
-    <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+    <div className="min-w-0">
+      <div className="flex items-center gap-2">
+        <div className="flex h-9 w-9 items-center justify-center rounded-xl border border-[#F2C7C2] bg-[#FCE9E7]">
+          <Icon className="h-4 w-4 text-[#B9382E]" />
+        </div>
+        <div>
+          <h2 className="text-lg font-semibold text-slate-900">{title}</h2>
+          {subtitle ? <p className="text-xs text-slate-500">{subtitle}</p> : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function HeaderMetaCard({
+  icon: Icon,
+  label,
+  primary,
+  secondary,
+}: {
+  icon: typeof Building2;
+  label: string;
+  primary: string;
+  secondary?: string;
+}) {
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+      <div className="flex items-start gap-3">
+        <div className="mt-0.5 flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white">
+          <Icon className="h-4 w-4 text-[#B9382E]" />
+        </div>
+        <div className="min-w-0">
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+            {label}
+          </div>
+          <div className="mt-1 break-words text-sm font-semibold text-slate-900">{primary}</div>
+          {secondary ? (
+            <div className="mt-1 break-words text-xs leading-5 text-slate-500">{secondary}</div>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SummaryCard({
+  label,
+  value,
+  tone = "default",
+}: {
+  label: string;
+  value: string;
+  tone?: "default" | "accent" | "warning";
+}) {
+  const toneClasses =
+    tone === "accent"
+      ? "border-[#F2C7C2] bg-[#FCE9E7]"
+      : tone === "warning"
+        ? "border-amber-200 bg-amber-50"
+        : "border-slate-200 bg-slate-50";
+  return (
+    <div className={["rounded-xl border p-4", toneClasses].join(" ")}>
       <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{label}</div>
       <div className="mt-1 text-lg font-semibold text-slate-900">{value}</div>
     </div>
@@ -721,7 +898,11 @@ function OrdersSection({
   return (
     <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
       <div className="flex items-center justify-between gap-3">
-        <h2 className="text-lg font-semibold text-slate-900">Recent Orders</h2>
+        <SectionTitle
+          icon={FileText}
+          title="Recent Orders"
+          subtitle="Latest rental activity and deposit position for this customer."
+        />
         <span className="text-xs text-slate-500">{orders.length} shown</span>
       </div>
       {orders.length === 0 ? (
@@ -793,7 +974,11 @@ function InvoicesSection({
   return (
     <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
       <div className="flex items-center justify-between gap-3">
-        <h2 className="text-lg font-semibold text-slate-900">Recent Invoices</h2>
+        <SectionTitle
+          icon={ReceiptText}
+          title="Recent Invoices"
+          subtitle="Invoice lifecycle and payment standing linked to this account."
+        />
         <span className="text-xs text-slate-500">{invoices.length} shown</span>
       </div>
       {invoices.length === 0 ? (
@@ -860,7 +1045,11 @@ function PaymentsSection({
   return (
     <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
       <div className="flex items-center justify-between gap-3">
-        <h2 className="text-lg font-semibold text-slate-900">Recent Payments</h2>
+        <SectionTitle
+          icon={Wallet}
+          title="Recent Payments"
+          subtitle="Most recent cash application and invoice settlement activity."
+        />
         <span className="text-xs text-slate-500">{payments.length} shown</span>
       </div>
       {payments.length === 0 ? (
@@ -888,7 +1077,7 @@ function PaymentsSection({
                     <button
                       type="button"
                       onClick={() => router.push(`/admin/rental/invoices/${encodeURIComponent(payment.invoiceId)}`)}
-                      className="text-left text-sky-700 hover:underline"
+                      className="text-left font-medium text-[#B9382E] hover:underline"
                     >
                       {payment.invoiceNo ?? payment.invoiceId}
                     </button>
@@ -907,7 +1096,11 @@ function EmailsSection({ emailEvents }: { emailEvents: RentalCustomerEmailEvent[
   return (
     <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
       <div className="flex items-center justify-between gap-3">
-        <h2 className="text-lg font-semibold text-slate-900">Recent Email Activity</h2>
+        <SectionTitle
+          icon={MailCheck}
+          title="Recent Email Activity"
+          subtitle="Customer communications captured from rental and invoice workflows."
+        />
         <span className="text-xs text-slate-500">{emailEvents.length} shown</span>
       </div>
       {emailEvents.length === 0 ? (
