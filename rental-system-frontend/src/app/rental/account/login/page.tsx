@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, Suspense, useMemo, useState } from "react";
 import {
   AlertTriangle,
   Building2,
@@ -15,6 +15,14 @@ import {
 import { AuthShell } from "@/components/auth/AuthShell";
 
 export default function RentalCustomerLoginPage() {
+  return (
+    <Suspense fallback={<RentalCustomerLoginFallback />}>
+      <RentalCustomerLoginPageInner />
+    </Suspense>
+  );
+}
+
+function RentalCustomerLoginPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const nextUrl = useMemo(() => searchParams?.get("next") || "/rental/checkout", [searchParams]);
@@ -139,6 +147,35 @@ export default function RentalCustomerLoginPage() {
             </Link>
           </p>
         </div>
+      </div>
+    </AuthShell>
+  );
+}
+function RentalCustomerLoginFallback() {
+  return (
+    <AuthShell
+      badgeIcon={LogIn}
+      badgeLabel="Customer portal access"
+      title="Sign in to your rental customer account."
+      description="Access bookings, invoices, payments, deposit status, and extension requests through the Teesin customer portal."
+      panelTitle="Customer account entry"
+      panelDescription="Sign in with the customer account linked to your rental activity. Existing checkout and redirect behavior stays unchanged."
+      panelItems={[
+        {
+          icon: ShieldCheck,
+          title: "Portal-linked rentals",
+          detail: "Bookings, invoices, payments, and notices remain tied to your customer account records.",
+        },
+        {
+          icon: Building2,
+          title: "Company-aware access",
+          detail: "Use the account associated with your company profile so operational and billing history stay in one place.",
+        },
+      ]}
+    >
+      <div>
+        <h2 className="text-xl font-semibold text-[#2A2A2A]">Customer sign-in</h2>
+        <p className="mt-2 text-sm text-slate-600">Loading sign-in...</p>
       </div>
     </AuthShell>
   );

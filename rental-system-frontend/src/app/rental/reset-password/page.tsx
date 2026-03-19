@@ -2,9 +2,17 @@
 
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, Suspense, useEffect, useMemo, useState } from "react";
 
 export default function RentalResetPasswordPage() {
+  return (
+    <Suspense fallback={<RentalResetPasswordFallback />}>
+      <RentalResetPasswordPageInner />
+    </Suspense>
+  );
+}
+
+function RentalResetPasswordPageInner() {
   const searchParams = useSearchParams();
   const token = useMemo(() => searchParams?.get("token")?.trim() ?? "", [searchParams]);
 
@@ -153,6 +161,16 @@ export default function RentalResetPasswordPage() {
             </Link>
           </>
         )}
+      </div>
+    </div>
+  );
+}
+function RentalResetPasswordFallback() {
+  return (
+    <div className="mx-auto max-w-md p-4">
+      <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+        <h1 className="text-2xl font-semibold text-slate-900">Reset password</h1>
+        <p className="mt-4 text-sm text-slate-600">Validating reset link...</p>
       </div>
     </div>
   );

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, Suspense, useMemo, useState } from "react";
 import {
   AlertTriangle,
   Building2,
@@ -19,6 +19,14 @@ import {
 import { AuthShell } from "@/components/auth/AuthShell";
 
 export default function RentalCustomerRegisterPage() {
+  return (
+    <Suspense fallback={<RentalCustomerRegisterFallback />}>
+      <RentalCustomerRegisterPageInner />
+    </Suspense>
+  );
+}
+
+function RentalCustomerRegisterPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const nextUrl = useMemo(() => searchParams?.get("next") || "/rental/checkout", [searchParams]);
@@ -215,6 +223,35 @@ export default function RentalCustomerRegisterPage() {
             Sign in
           </Link>
         </p>
+      </div>
+    </AuthShell>
+  );
+}
+function RentalCustomerRegisterFallback() {
+  return (
+    <AuthShell
+      badgeIcon={UserPlus}
+      badgeLabel="Customer account setup"
+      title="Create your Teesin rental customer account."
+      description="Set up your company and contact access once, then use the same customer portal for rentals, invoices, deposits, and payments."
+      panelTitle="Before you continue"
+      panelDescription="New customer accounts default to upfront payment until admin vetting is completed. Your registration flow and redirects remain unchanged."
+      panelItems={[
+        {
+          icon: Users,
+          title: "Company + contact ready",
+          detail: "Provide the main company and contact details used for portal access, billing, and rental communication.",
+        },
+        {
+          icon: CreditCard,
+          title: "Upfront by default",
+          detail: "New accounts begin on upfront terms and can move through the existing vetting workflow later.",
+        },
+      ]}
+    >
+      <div>
+        <h2 className="text-xl font-semibold text-[#2A2A2A]">Customer registration</h2>
+        <p className="mt-2 text-sm text-slate-600">Loading registration...</p>
       </div>
     </AuthShell>
   );

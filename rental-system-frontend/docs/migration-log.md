@@ -1889,3 +1889,25 @@ API / Page changes:
 
 Risks / follow-up notes:
 - Test data coverage still depends on the environment having suitable records for extension review, planning warnings, and invoice payment states.
+## 2026-03-20 | Scope: rental account/auth prerender suspense fix
+Summary:
+- Fixed the rental customer account, login, register, and reset-password App Router pages so `useSearchParams()` is consumed inside `Suspense`-wrapped inner client components, matching the existing checkout pattern and unblocking Vercel prerender validation.
+- Preserved the existing customer auth/account flow, redirects, and server-authoritative behavior without changing routes, APIs, or validation rules.
+
+Files changed:
+- `src/app/rental/account/page.tsx`
+- `src/app/rental/account/login/page.tsx`
+- `src/app/rental/account/register/page.tsx`
+- `src/app/rental/reset-password/page.tsx`
+- `docs/migration-log.md`
+
+DB / Infra changes:
+- No migration added.
+
+API / Page changes:
+- No API contract changes.
+- Added minimal `Suspense` boundaries around the route-level client subtrees that read URL search params.
+
+Risks / follow-up notes:
+- This fix is intentionally narrow to the reported prerender blocker; other rental pages using `useSearchParams()` should continue following the same wrapped-inner-component pattern to avoid future App Router build regressions.
+
