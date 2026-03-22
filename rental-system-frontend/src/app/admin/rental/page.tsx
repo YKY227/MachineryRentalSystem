@@ -190,6 +190,30 @@ function buildPayload(editor: EditorState) {
   };
 }
 
+function SectionHeader(props: { title: string; description: string }) {
+  return (
+    <div className="mb-4 border-b border-slate-200 pb-3">
+      <div className="text-sm font-semibold text-slate-900">{props.title}</div>
+      <div className="mt-1 text-xs text-slate-500">{props.description}</div>
+    </div>
+  );
+}
+
+function FieldBlock(props: {
+  label: string;
+  hint?: string;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <label className={["grid gap-1.5", props.className ?? ""].join(" ").trim()}>
+      <span className="text-sm font-medium text-slate-700">{props.label}</span>
+      {props.hint ? <span className="text-xs text-slate-500">{props.hint}</span> : null}
+      {props.children}
+    </label>
+  );
+}
+
 export default function AdminRentalInventoryPage() {
   const [tab, setTab] = useState<TabKey>("inventory");
   const [items, setItems] = useState<Equipment[]>([]);
@@ -429,72 +453,170 @@ export default function AdminRentalInventoryPage() {
                 <h2 className="text-lg font-semibold text-slate-900">{editor.id ? "Edit equipment" : "Add equipment"}</h2>
                 <p className="mt-1 text-sm text-slate-600">This form writes directly to the DB-backed rental catalog.</p>
               </div>
-              <label className="inline-flex items-center gap-2 text-sm"><input type="checkbox" checked={editor.isPublished} onChange={(e) => setEditor((prev) => ({ ...prev, isPublished: e.target.checked }))} /><span className="text-slate-700">Published</span></label>
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                <label className="inline-flex items-start gap-2 text-sm">
+                  <input type="checkbox" checked={editor.isPublished} onChange={(e) => setEditor((prev) => ({ ...prev, isPublished: e.target.checked }))} />
+                  <span>
+                    <span className="block font-medium text-slate-700">Published</span>
+                    <span className="block text-xs text-slate-500">
+                      Published items appear in the customer-facing catalog. Leave unchecked to keep this equipment in draft.
+                    </span>
+                  </span>
+                </label>
+              </div>
             </div>
 
-            <div className="mt-5 grid gap-4 sm:grid-cols-2">
-              <input value={editor.title} onChange={(e) => setEditor((prev) => ({ ...prev, title: e.target.value }))} placeholder="Title" className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
-              <input value={editor.slug} onChange={(e) => setEditor((prev) => ({ ...prev, slug: e.target.value }))} placeholder="Slug (optional)" className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
-              <select value={editor.category} onChange={(e) => setEditor((prev) => ({ ...prev, category: e.target.value }))} className="rounded-xl border border-slate-200 px-3 py-2 text-sm"><option value="earthmoving">Earthmoving</option><option value="lifting">Lifting</option><option value="power">Power</option><option value="concreting">Concreting</option><option value="compaction">Compaction</option><option value="cleaning">Cleaning</option></select>
-              <input type="number" min={0} value={editor.displayOrder} onChange={(e) => setEditor((prev) => ({ ...prev, displayOrder: Math.max(0, Number(e.target.value || 0)) }))} placeholder="Display order" className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
-              <input value={editor.brand} onChange={(e) => setEditor((prev) => ({ ...prev, brand: e.target.value }))} placeholder="Brand" className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
-              <input value={editor.model} onChange={(e) => setEditor((prev) => ({ ...prev, model: e.target.value }))} placeholder="Model" className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
-              <textarea value={editor.description} onChange={(e) => setEditor((prev) => ({ ...prev, description: e.target.value }))} rows={3} placeholder="Description" className="sm:col-span-2 rounded-xl border border-slate-200 px-3 py-2 text-sm" />
-              <div className="rounded-xl border border-slate-200 p-3 sm:col-span-2">
-                <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] sm:items-start">
-                  <div>
-                    <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Total Units</div>
-                    <input
-                      type="number"
-                      min={0}
-                      value={editor.totalUnits}
-                      onChange={(e) => setEditor((prev) => ({ ...prev, totalUnits: Math.max(0, Number(e.target.value || 0)) }))}
-                      placeholder="Total units"
-                      className={["mt-2 w-full rounded-xl border px-3 py-2 text-sm", totalUnitsBelowFloor ? "border-rose-300 bg-rose-50" : "border-slate-200"].join(" ")}
-                    />
-                    {totalUnitsBelowFloor && (
-                      <div className="mt-2 text-xs text-rose-700">
-                        This value is below the current protected minimum of {inventoryProtection?.protectedMinimum ?? 0} unit(s). The backend will reject this reduction.
-                      </div>
-                    )}
-                  </div>
-                  <div className="rounded-xl bg-slate-50 p-3 text-xs text-slate-600">
-                    <div className="font-semibold text-slate-900">Operational floor</div>
-                    {editor.id ? (
-                      inventoryProtectionLoading ? (
-                        <div className="mt-2">Loading current allocation summary...</div>
-                      ) : inventoryProtection ? (
-                        <div className="mt-2 space-y-1">
-                          <div>Current total: {inventoryProtection.currentTotalUnits}</div>
-                          <div>Protected minimum: {inventoryProtection.protectedMinimum}</div>
-                          <div>Currently committed: {inventoryProtection.currentCommittedQty}</div>
-                          <div>Active holds: {inventoryProtection.currentHeldQty}</div>
-                          <div>Active downtime: {inventoryProtection.currentDowntimeQty}</div>
-                          <div>Currently unavailable: {inventoryProtection.currentUnavailableQty}</div>
-                        </div>
-                      ) : (
-                        <div className="mt-2">Inventory protection details are unavailable right now.</div>
-                      )
-                    ) : (
-                      <div className="mt-2">New equipment starts with no operational floor until it has committed allocations.</div>
-                    )}
-                  </div>
+            <div className="mt-6 space-y-8">
+              <section>
+                <SectionHeader
+                  title="Basic Information"
+                  description="Core identifying details used across admin, customer browsing, and links."
+                />
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <FieldBlock label="Title" hint="Customer-facing equipment title used in listings and orders.">
+                    <input value={editor.title} onChange={(e) => setEditor((prev) => ({ ...prev, title: e.target.value }))} placeholder="e.g. 19ft Electric Scissor Lift" className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
+                  </FieldBlock>
+                  <FieldBlock label="Slug" hint="Optional URL slug. Leave blank to derive it from the title.">
+                    <input value={editor.slug} onChange={(e) => setEditor((prev) => ({ ...prev, slug: e.target.value }))} placeholder="e.g. 19ft-electric-scissor-lift" className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
+                  </FieldBlock>
+                  <FieldBlock label="Category" hint="Used for grouping and filtering in the rental catalog.">
+                    <select value={editor.category} onChange={(e) => setEditor((prev) => ({ ...prev, category: e.target.value }))} className="rounded-xl border border-slate-200 px-3 py-2 text-sm"><option value="earthmoving">Earthmoving</option><option value="lifting">Lifting</option><option value="power">Power</option><option value="concreting">Concreting</option><option value="compaction">Compaction</option><option value="cleaning">Cleaning</option></select>
+                  </FieldBlock>
+                  <FieldBlock label="Display order" hint="Lower numbers appear earlier in admin and public equipment lists.">
+                    <input type="number" min={0} value={editor.displayOrder} onChange={(e) => setEditor((prev) => ({ ...prev, displayOrder: Math.max(0, Number(e.target.value || 0)) }))} placeholder="0" className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
+                  </FieldBlock>
+                  <FieldBlock label="Brand">
+                    <input value={editor.brand} onChange={(e) => setEditor((prev) => ({ ...prev, brand: e.target.value }))} placeholder="e.g. Genie" className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
+                  </FieldBlock>
+                  <FieldBlock label="Model">
+                    <input value={editor.model} onChange={(e) => setEditor((prev) => ({ ...prev, model: e.target.value }))} placeholder="e.g. GS-1930" className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
+                  </FieldBlock>
+                  <FieldBlock label="Description" hint="Short, readable description shown with the equipment record." className="sm:col-span-2">
+                    <textarea value={editor.description} onChange={(e) => setEditor((prev) => ({ ...prev, description: e.target.value }))} rows={4} placeholder="Brief overview, typical use cases, and any customer-facing notes." className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
+                  </FieldBlock>
                 </div>
-              </div>
-              <input type="number" min={0} value={editor.maintenanceBufferDays} onChange={(e) => setEditor((prev) => ({ ...prev, maintenanceBufferDays: Math.max(0, Number(e.target.value || 0)) }))} placeholder="Maintenance buffer days" className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
-              <input type="number" min={0} value={editor.dayRate} onChange={(e) => setEditor((prev) => ({ ...prev, dayRate: Math.max(0, Number(e.target.value || 0)) }))} placeholder="Day rate" className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
-              <input type="number" min={0} value={editor.depositAmount} onChange={(e) => setEditor((prev) => ({ ...prev, depositAmount: Math.max(0, Number(e.target.value || 0)) }))} placeholder="Deposit amount" className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
-              <input type="number" min={0} value={editor.weekRate} onChange={(e) => setEditor((prev) => ({ ...prev, weekRate: e.target.value === "" ? "" : Math.max(0, Number(e.target.value)) }))} placeholder="Week rate" className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
-              <input type="number" min={0} value={editor.monthRate} onChange={(e) => setEditor((prev) => ({ ...prev, monthRate: e.target.value === "" ? "" : Math.max(0, Number(e.target.value)) }))} placeholder="Month rate" className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
-              <input type="number" min={1} value={editor.minDays} onChange={(e) => setEditor((prev) => ({ ...prev, minDays: Math.max(1, Number(e.target.value || 1)) }))} placeholder="Min days" className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
-              <input value={editor.image1} onChange={(e) => setEditor((prev) => ({ ...prev, image1: e.target.value }))} placeholder="Image URL #1" className="sm:col-span-2 rounded-xl border border-slate-200 px-3 py-2 text-sm" />
-              <input value={editor.image2} onChange={(e) => setEditor((prev) => ({ ...prev, image2: e.target.value }))} placeholder="Image URL #2" className="sm:col-span-2 rounded-xl border border-slate-200 px-3 py-2 text-sm" />
-              <input value={editor.image3} onChange={(e) => setEditor((prev) => ({ ...prev, image3: e.target.value }))} placeholder="Image URL #3" className="sm:col-span-2 rounded-xl border border-slate-200 px-3 py-2 text-sm" />
-              <input value={editor.catalogueUrl} onChange={(e) => setEditor((prev) => ({ ...prev, catalogueUrl: e.target.value }))} placeholder="Catalogue URL" className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
-              <input value={editor.trainingVideoUrl} onChange={(e) => setEditor((prev) => ({ ...prev, trainingVideoUrl: e.target.value }))} placeholder="Training video URL" className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
-              <textarea value={editor.keyFeaturesText} onChange={(e) => setEditor((prev) => ({ ...prev, keyFeaturesText: e.target.value }))} rows={5} placeholder="Key features (one per line)" className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
-              <textarea value={editor.applicationsText} onChange={(e) => setEditor((prev) => ({ ...prev, applicationsText: e.target.value }))} rows={5} placeholder="Applications (one per line)" className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
-              <textarea value={editor.specsText} onChange={(e) => setEditor((prev) => ({ ...prev, specsText: e.target.value }))} rows={6} placeholder={"Specifications\nFormat: Key: Value"} className="sm:col-span-2 rounded-xl border border-slate-200 px-3 py-2 text-sm" />
+              </section>
+
+              <section>
+                <SectionHeader
+                  title="Inventory and Operations"
+                  description="Operational controls that affect availability and safe equipment allocation."
+                />
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="rounded-xl border border-slate-200 p-3 sm:col-span-2">
+                    <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] sm:items-start">
+                      <FieldBlock label="Total units" hint="Total rentable units. Reductions below the operational floor are blocked server-side.">
+                        <input
+                          type="number"
+                          min={0}
+                          value={editor.totalUnits}
+                          onChange={(e) => setEditor((prev) => ({ ...prev, totalUnits: Math.max(0, Number(e.target.value || 0)) }))}
+                          placeholder="e.g. 4"
+                          className={["rounded-xl border px-3 py-2 text-sm", totalUnitsBelowFloor ? "border-rose-300 bg-rose-50" : "border-slate-200"].join(" ")}
+                        />
+                        {totalUnitsBelowFloor && (
+                          <div className="text-xs text-rose-700">
+                            This value is below the current protected minimum of {inventoryProtection?.protectedMinimum ?? 0} unit(s). The backend will reject this reduction.
+                          </div>
+                        )}
+                      </FieldBlock>
+                      <div className="rounded-xl bg-slate-50 p-3 text-xs text-slate-600">
+                        <div className="font-semibold text-slate-900">Operational floor</div>
+                        <div className="mt-1 text-slate-500">
+                          Based on committed orders, active holds, and active downtime already tracked in the system.
+                        </div>
+                        {editor.id ? (
+                          inventoryProtectionLoading ? (
+                            <div className="mt-2">Loading current allocation summary...</div>
+                          ) : inventoryProtection ? (
+                            <div className="mt-2 space-y-1">
+                              <div>Current total: {inventoryProtection.currentTotalUnits}</div>
+                              <div>Protected minimum: {inventoryProtection.protectedMinimum}</div>
+                              <div>Currently committed: {inventoryProtection.currentCommittedQty}</div>
+                              <div>Active holds: {inventoryProtection.currentHeldQty}</div>
+                              <div>Active downtime: {inventoryProtection.currentDowntimeQty}</div>
+                              <div>Currently unavailable: {inventoryProtection.currentUnavailableQty}</div>
+                            </div>
+                          ) : (
+                            <div className="mt-2">Inventory protection details are unavailable right now.</div>
+                          )
+                        ) : (
+                          <div className="mt-2">New equipment starts with no operational floor until it has committed allocations.</div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                  <FieldBlock label="Maintenance buffer days" hint="Days kept unavailable after rental return before units are reusable.">
+                    <input type="number" min={0} value={editor.maintenanceBufferDays} onChange={(e) => setEditor((prev) => ({ ...prev, maintenanceBufferDays: Math.max(0, Number(e.target.value || 0)) }))} placeholder="e.g. 7" className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
+                  </FieldBlock>
+                </div>
+              </section>
+
+              <section>
+                <SectionHeader
+                  title="Pricing"
+                  description="Commercial values used for rental pricing, minimum term rules, and deposit guidance."
+                />
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <FieldBlock label="Day rate">
+                    <input type="number" min={0} value={editor.dayRate} onChange={(e) => setEditor((prev) => ({ ...prev, dayRate: Math.max(0, Number(e.target.value || 0)) }))} placeholder="e.g. 80" className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
+                  </FieldBlock>
+                  <FieldBlock label="Deposit amount" hint="Operational deposit amount shown in pricing and checkout flows.">
+                    <input type="number" min={0} value={editor.depositAmount} onChange={(e) => setEditor((prev) => ({ ...prev, depositAmount: Math.max(0, Number(e.target.value || 0)) }))} placeholder="e.g. 500" className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
+                  </FieldBlock>
+                  <FieldBlock label="Week rate">
+                    <input type="number" min={0} value={editor.weekRate} onChange={(e) => setEditor((prev) => ({ ...prev, weekRate: e.target.value === "" ? "" : Math.max(0, Number(e.target.value)) }))} placeholder="Optional" className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
+                  </FieldBlock>
+                  <FieldBlock label="Month rate">
+                    <input type="number" min={0} value={editor.monthRate} onChange={(e) => setEditor((prev) => ({ ...prev, monthRate: e.target.value === "" ? "" : Math.max(0, Number(e.target.value)) }))} placeholder="Optional" className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
+                  </FieldBlock>
+                  <FieldBlock label="Minimum rental days">
+                    <input type="number" min={1} value={editor.minDays} onChange={(e) => setEditor((prev) => ({ ...prev, minDays: Math.max(1, Number(e.target.value || 1)) }))} placeholder="e.g. 1" className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
+                  </FieldBlock>
+                </div>
+              </section>
+
+              <section>
+                <SectionHeader
+                  title="Media and Documents"
+                  description="Optional assets and reference links used in customer browsing and internal review."
+                />
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <FieldBlock label="Primary image URL" className="sm:col-span-2">
+                    <input value={editor.image1} onChange={(e) => setEditor((prev) => ({ ...prev, image1: e.target.value }))} placeholder="https://..." className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
+                  </FieldBlock>
+                  <FieldBlock label="Secondary image URL" className="sm:col-span-2">
+                    <input value={editor.image2} onChange={(e) => setEditor((prev) => ({ ...prev, image2: e.target.value }))} placeholder="https://..." className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
+                  </FieldBlock>
+                  <FieldBlock label="Additional image URL" className="sm:col-span-2">
+                    <input value={editor.image3} onChange={(e) => setEditor((prev) => ({ ...prev, image3: e.target.value }))} placeholder="https://..." className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
+                  </FieldBlock>
+                  <FieldBlock label="Catalogue URL">
+                    <input value={editor.catalogueUrl} onChange={(e) => setEditor((prev) => ({ ...prev, catalogueUrl: e.target.value }))} placeholder="https://..." className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
+                  </FieldBlock>
+                  <FieldBlock label="Training video URL">
+                    <input value={editor.trainingVideoUrl} onChange={(e) => setEditor((prev) => ({ ...prev, trainingVideoUrl: e.target.value }))} placeholder="https://..." className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
+                  </FieldBlock>
+                </div>
+              </section>
+
+              <section>
+                <SectionHeader
+                  title="Content and Merchandising"
+                  description="Structured customer-facing supporting content for sales and browsing pages."
+                />
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <FieldBlock label="Key features" hint="One feature per line.">
+                    <textarea value={editor.keyFeaturesText} onChange={(e) => setEditor((prev) => ({ ...prev, keyFeaturesText: e.target.value }))} rows={5} placeholder="Low-emission electric drive" className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
+                  </FieldBlock>
+                  <FieldBlock label="Applications" hint="One application or use case per line.">
+                    <textarea value={editor.applicationsText} onChange={(e) => setEditor((prev) => ({ ...prev, applicationsText: e.target.value }))} rows={5} placeholder="Indoor maintenance" className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
+                  </FieldBlock>
+                  <FieldBlock label="Specifications" hint="Use one line per value in the format Key: Value." className="sm:col-span-2">
+                    <textarea value={editor.specsText} onChange={(e) => setEditor((prev) => ({ ...prev, specsText: e.target.value }))} rows={6} placeholder={"Working height: 7.8m\nPlatform capacity: 227kg"} className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
+                  </FieldBlock>
+                </div>
+              </section>
             </div>
 
             <div className="mt-5 flex flex-col gap-2 sm:flex-row">

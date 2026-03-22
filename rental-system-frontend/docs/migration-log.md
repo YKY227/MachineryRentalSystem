@@ -2150,3 +2150,24 @@ API / Page changes:
 Risks / follow-up notes:
 - The protection intentionally excludes operational states that are not yet modeled as authoritative unit-level allocations; returned/inspection notes alone do not create separate protected units outside the existing order/buffer/downtime model.
 - A later pass could expose richer allocation timelines or per-date inventory summaries in admin, but the current change keeps the UI small and the server authoritative.
+
+## 2026-03-23 | Scope: admin equipment form UX labeling and grouping
+Summary:
+- Improved the admin equipment add/edit form so all important fields now have persistent labels instead of relying on placeholder text alone.
+- Added concise helper text and section grouping for basic information, inventory and operations, pricing, media and documents, and content and merchandising without changing the existing save payload or workflow.
+
+Files changed:
+- `src/app/admin/rental/page.tsx`
+- `docs/migration-log.md`
+
+DB / Infra changes:
+- No schema or backend contract changes were required.
+- The update preserves the current DB-backed equipment save flow and existing server-authoritative validation.
+
+API / Page changes:
+- Admin rental inventory form now shows visible labels and helper text for title, slug, category, display order, brand, model, description, total units, maintenance buffer, pricing, deposit, media links, and merchandising content fields.
+- The form layout is now grouped into clearer sections to make long records easier to scan and review after values have been entered.
+
+Risks / follow-up notes:
+- This pass intentionally focuses on clarity, not behavior changes; inline validation, autosave, and richer preview affordances can be added later without reworking the current sections.
+- The content and merchandising section is still relatively dense and could be further simplified later if image management or product content grows more complex.
