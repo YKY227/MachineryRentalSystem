@@ -13,9 +13,11 @@ export default function ContactPage() {
   const [phone, setPhone] = useState("");
   const [subject, setSubject] = useState("");
   const [message, setMessage] = useState("");
+  const [website, setWebsite] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [submitState, setSubmitState] = useState<SubmitState>("idle");
   const [error, setError] = useState<string | null>(null);
+  const [formStartedAt] = useState(() => Date.now());
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -35,6 +37,8 @@ export default function ContactPage() {
           phone,
           subject,
           message,
+          website,
+          formStartedAt,
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -47,6 +51,7 @@ export default function ContactPage() {
       setPhone("");
       setSubject("");
       setMessage("");
+      setWebsite("");
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : "Failed to submit enquiry");
     } finally {
@@ -104,7 +109,7 @@ export default function ContactPage() {
           <div className="rounded-[28px] border border-slate-200 bg-white/92 p-6 shadow-[0_20px_60px_rgba(15,23,42,0.08)] backdrop-blur">
             <div className="text-xl font-semibold text-[#2A2A2A]">Website enquiry form</div>
             <p className="mt-2 text-sm leading-6 text-slate-600">
-              Required fields are kept short and practical for v1. A team member can follow up for anything else.
+              Required fields are kept short and practical. Short abuse protection checks run server-side before the enquiry is recorded.
             </p>
 
             {submitState === "success" && (
@@ -119,6 +124,18 @@ export default function ContactPage() {
             )}
 
             <form onSubmit={handleSubmit} className="mt-6 grid gap-4 sm:grid-cols-2">
+              <div className="absolute left-[-10000px] top-auto h-px w-px overflow-hidden" aria-hidden="true">
+                <label className="grid gap-1 text-sm">
+                  <span>Leave this field empty</span>
+                  <input
+                    tabIndex={-1}
+                    autoComplete="off"
+                    value={website}
+                    onChange={(event) => setWebsite(event.target.value)}
+                    name="website"
+                  />
+                </label>
+              </div>
               <label className="grid gap-1 text-sm">
                 <span className="font-medium text-slate-700">Name</span>
                 <input value={name} onChange={(event) => setName(event.target.value)} className="rounded-xl border border-slate-200 px-4 py-3 text-sm" required />
@@ -148,7 +165,7 @@ export default function ContactPage() {
                   <Send className="mr-2 h-4 w-4" />
                   {submitting ? "Submitting..." : "Send enquiry"}
                 </button>
-                <span className="text-xs text-slate-500">No account is required. Rate limiting and spam controls will be added separately.</span>
+                <span className="text-xs text-slate-500">If you submit repeatedly in a short window, the form will ask you to try again later.</span>
               </div>
             </form>
           </div>

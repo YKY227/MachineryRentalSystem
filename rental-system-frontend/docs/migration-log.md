@@ -2100,3 +2100,29 @@ API / Page changes:
 Risks / follow-up notes:
 - Rate limiting, spam controls, and captcha are still intentionally deferred and should be the next safety enhancement before wider exposure.
 - A later phase can add an admin enquiry list or delivery log view without changing the DB-first storage and email-routing model added here.
+
+## 2026-03-23 | Scope: public contact form spam protection and rate limiting
+Summary:
+- Added server-side abuse protection to the public contact submission route using a durable DB-backed attempt log, per-identity rate limiting, and low-friction spam checks before enquiry rows are created.
+- Kept the existing DB-first enquiry flow unchanged for valid requests while blocking rate-limited or spam-like submissions before persistence or email delivery.
+
+Files changed:
+- `docs/sql/rental_contact_submission_attempts_v1.sql`
+- `src/lib/public/contact/db-contact-submission-attempt-repo.ts`
+- `src/lib/public/contact/contact-submission-guard.ts`
+- `src/app/api/public/contact/route.ts`
+- `src/app/(public-pages)/contact/page.tsx`
+- `docs/migration-log.md`
+
+DB / Infra changes:
+- Added append-only `rental_contact_submission_attempts` for durable contact-endpoint abuse tracking keyed by a hashed request identity.
+- Rate limiting now counts recent attempts within the configured contact-form window without changing the existing enquiry table or notification routing model.
+
+API / Page changes:
+- Public contact POST now applies rate limiting plus spam checks for a hidden honeypot field and minimum form-completion age before any enquiry row is inserted.
+- Public contact page now submits a hidden honeypot value and form start timestamp, while showing safe user-facing retry messages for blocked requests.
+
+Risks / follow-up notes:
+- The current limiter is intentionally narrow and only protects the contact endpoint; broader public-endpoint protections or shared middleware can be considered later if exposure expands.
+- Stronger controls such as captcha, reputation scoring, or IP intelligence may still be needed later if abuse volume increases beyond what the v1 guard layer can absorb.
+

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { guardContactSubmission } from "@/lib/public/contact/contact-submission-guard";
 import { submitRentalContactEnquiry } from "@/lib/rental/contact-enquiries/contact-enquiry-service";
 
 export const runtime = "nodejs";
@@ -11,6 +12,8 @@ type ContactBody = {
   phone?: string | null;
   subject?: string;
   message?: string;
+  website?: string | null;
+  formStartedAt?: string | number | null;
 };
 
 function sanitizeString(value: unknown) {
@@ -29,6 +32,15 @@ function isValidEmail(value: string) {
 export async function POST(req: Request) {
   try {
     const body = (await req.json()) as ContactBody;
+    const guard = await guardContactSubmission({
+      req,
+      honeypot: body.website,
+      formStartedAt: body.formStartedAt,
+    });
+
+    if (!guard.allowed) {
+      return NextResponse.json({ error: guard.publicMessage }, { status: guard.status });
+    }
 
     const name = sanitizeString(body.name);
     const email = sanitizeString(body.email).toLowerCase();
