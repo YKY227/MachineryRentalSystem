@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+﻿import { NextResponse } from "next/server";
 
 import {
   adminUnauthorizedResponse,
@@ -32,6 +32,7 @@ type SettingsBody = {
   testerEmails?: string[];
   bookingPaidRecipients?: string[];
   overdueRecipients?: string[];
+  newOrderRecipients?: string[];
   operationsPolicy?: {
     defaultMaintenanceBufferDays?: number | string;
     enableDeveloperDeleteTools?: boolean;
@@ -124,6 +125,7 @@ function normalizeSettingsBody(body: SettingsBody): Omit<AdminSettings, "updated
       "bookingPaidRecipients"
     ),
     overdueRecipients: sanitizeEmailArray(body.overdueRecipients, "overdueRecipients"),
+    newOrderRecipients: sanitizeEmailArray(body.newOrderRecipients, "newOrderRecipients"),
     operationsPolicy: {
       defaultMaintenanceBufferDays:
         operationsPolicy.defaultMaintenanceBufferDays === undefined
@@ -186,3 +188,4 @@ export async function PUT(req: Request) {
     return NextResponse.json({ error: message }, { status: 400 });
   }
 }
+

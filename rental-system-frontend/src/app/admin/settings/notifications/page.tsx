@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { Bell, FlaskConical } from "lucide-react";
 
@@ -79,6 +79,23 @@ export default function AdminSettingsNotificationsPage() {
               placeholder="ops@company.com"
             />
           </label>
+
+          <label className="flex flex-col gap-1">
+            <span className="text-sm font-medium text-slate-700">
+              New order recipients (CSV)
+            </span>
+            <input
+              type="text"
+              value={settings.newOrderRecipientsCsv}
+              onChange={(e) => settings.setNewOrderRecipientsCsv(e.target.value)}
+              disabled={settings.loading}
+              className={settingsInputClass}
+              placeholder="ops@company.com, rentals@company.com"
+            />
+            <span className="text-xs text-slate-500">
+              Event-specific override for newly received rental orders.
+            </span>
+          </label>
         </div>
       </SettingsCard>
 
@@ -138,3 +155,4 @@ export default function AdminSettingsNotificationsPage() {
     </div>
   );
 }
+

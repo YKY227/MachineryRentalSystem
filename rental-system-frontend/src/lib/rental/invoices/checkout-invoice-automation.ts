@@ -1,4 +1,4 @@
-import "server-only";
+﻿import "server-only";
 
 import { dbInvoiceRepo } from "@/lib/rental/invoices/db-invoice-repo";
 import { dbPaymentRepo } from "@/lib/rental/invoices/db-payment-repo";
@@ -6,6 +6,7 @@ import { deliverInvoiceEmail } from "@/lib/rental/invoices/email-delivery";
 import { dbRentalDepositRepo } from "@/lib/rental/deposits/db-rental-deposit-repo";
 import { markAvailabilityHoldConsumed } from "@/lib/rental/holds/db-rental-availability-service";
 import { dbOrderRepo } from "@/lib/rental/orders/db-order-repo";
+import { sendNewOrderNotificationIfNeeded } from "@/lib/rental/orders/new-order-notification-service";
 import { dbOrderPaymentSessionRepo } from "@/lib/rental/orders/db-order-payment-session-repo";
 
 type CheckoutInvoiceAutomationResult = {
@@ -204,6 +205,16 @@ export async function processPaidCheckoutSession(
       error
     );
     throw stageError("idempotency_marker_update_after_payment", error);
+  }
+
+  try {
+    await sendNewOrderNotificationIfNeeded(order.id);
+  } catch (error) {
+    console.error("[checkout-invoice-automation] new order notification failed", {
+      paymentSessionId,
+      orderId: order.id,
+      error: error instanceof Error ? error.message : "unknown error",
+    });
   }
 
   if (session.invoiceEmailSentAt) {
@@ -412,3 +423,5 @@ export async function processPaidCheckoutSession(
     invoiceEmailSent: true,
   };
 }
+
+

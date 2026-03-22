@@ -29,6 +29,8 @@ type RentalOrderRow = {
   inspection_status: RentalOrderInspectionStatus | null;
   inspection_notes: string | null;
   completed_at: string | null;
+  new_order_notified_at: string | null;
+  new_order_acknowledged_at: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -51,6 +53,8 @@ const ORDER_COLUMNS = [
   "inspection_status",
   "inspection_notes",
   "completed_at",
+  "new_order_notified_at",
+  "new_order_acknowledged_at",
   "created_at",
   "updated_at",
 ].join(",");
@@ -90,6 +94,8 @@ function toOrder(row: RentalOrderRow): RentalOrder {
     inspectionStatus: row.inspection_status ?? "not_started",
     inspectionNotes: row.inspection_notes ?? undefined,
     completedAt: row.completed_at ?? undefined,
+    newOrderNotifiedAt: row.new_order_notified_at ?? undefined,
+    newOrderAcknowledgedAt: row.new_order_acknowledged_at ?? undefined,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -115,6 +121,8 @@ function toInsert(input: CreateRentalOrderInput, maintenanceBufferDaysApplied: n
     inspection_status: input.inspectionStatus ?? "not_started",
     inspection_notes: input.inspectionNotes?.trim() || null,
     completed_at: input.completedAt ?? null,
+    new_order_notified_at: null,
+    new_order_acknowledged_at: null,
     created_at: now,
     updated_at: now,
   };
@@ -185,6 +193,11 @@ export type UpdateRentalOrderOperationalInput = {
 
 export type UpdateRentalOrderPeriodInput = {
   end?: string;
+};
+
+export type UpdateRentalOrderNotificationInput = {
+  newOrderNotifiedAt?: string | null;
+  newOrderAcknowledgedAt?: string | null;
 };
 
 export const dbOrderRepo = {
@@ -301,6 +314,57 @@ export const dbOrderRepo = {
     return toOrder(data);
   },
 
+  async updateNotificationState(id: string, input: UpdateRentalOrderNotificationInput): Promise<RentalOrder> {
+    const payload: Record<string, unknown> = {
+      updated_at: nowIso(),
+    };
+
+    if (input.newOrderNotifiedAt !== undefined) payload.new_order_notified_at = input.newOrderNotifiedAt;
+    if (input.newOrderAcknowledgedAt !== undefined) payload.new_order_acknowledged_at = input.newOrderAcknowledgedAt;
+
+    const supabase = supabaseAdmin();
+    const { data, error } = await supabase
+      .from(ORDERS_TABLE)
+      .update(payload)
+      .eq("id", id)
+      .select(ORDER_COLUMNS)
+      .single<RentalOrderRow>();
+
+    if (error) throw new Error(`Order notification update failed: ${error.message}`);
+    return toOrder(data);
+  },
+
+  async markNewOrderNotifiedIfUnset(id: string, notifiedAt: string): Promise<boolean> {
+    const supabase = supabaseAdmin();
+    const { data, error } = await supabase
+      .from(ORDERS_TABLE)
+      .update({
+        new_order_notified_at: notifiedAt,
+        updated_at: nowIso(),
+      })
+      .eq("id", id)
+      .is("new_order_notified_at", null)
+      .select("id")
+      .maybeSingle<{ id: string }>();
+
+    if (error) throw new Error(`Order notification claim failed: ${error.message}`);
+    return Boolean(data?.id);
+  },
+
+  async clearNewOrderNotifiedIfMatches(id: string, notifiedAt: string): Promise<void> {
+    const supabase = supabaseAdmin();
+    const { error } = await supabase
+      .from(ORDERS_TABLE)
+      .update({
+        new_order_notified_at: null,
+        updated_at: nowIso(),
+      })
+      .eq("id", id)
+      .eq("new_order_notified_at", notifiedAt);
+
+    if (error) throw new Error(`Order notification clear failed: ${error.message}`);
+  },
+
   async clearAll(): Promise<number> {
     const supabase = supabaseAdmin();
     const { data, error } = await supabase
@@ -313,3 +377,5 @@ export const dbOrderRepo = {
     return (data ?? []).length;
   },
 };
+
+

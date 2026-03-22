@@ -1,4 +1,4 @@
-// src/app/admin/rental/orders/page.tsx
+﻿// src/app/admin/rental/orders/page.tsx
 "use client";
 
 import { Fragment, useEffect, useMemo, useState } from "react";
@@ -902,6 +902,26 @@ export default function AdminRentalOrdersPage() {
     }
   }
 
+  async function acknowledgeOrder(orderId: string) {
+    const current = orders.find((order) => order.id === orderId);
+    if (!current || current.newOrderAcknowledgedAt) return;
+
+    try {
+      const res = await fetch(`/api/admin/rental/orders/${encodeURIComponent(orderId)}/acknowledge`, {
+        method: "POST",
+        credentials: "include",
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error ?? "Failed to acknowledge order");
+      const updated = data?.order as RentalOrder | undefined;
+      if (updated?.id) {
+        setOrders((existing) => existing.map((order) => (order.id === updated.id ? updated : order)));
+      }
+    } catch (error) {
+      console.error("acknowledgeOrder failed", error);
+    }
+  }
+
   function openOperationsPanel(order: RentalOrder) {
     setActiveOpsOrderId(order.id);
     setOpsBanner(null);
@@ -1020,6 +1040,7 @@ export default function AdminRentalOrdersPage() {
 
   function openOrderWorkspace(order: RentalOrder, view: OrderDetailView = "operations") {
     setDetailDrawer({ orderId: order.id, view });
+    void acknowledgeOrder(order.id);
     if (view === "operations") {
       setActiveDepositOrderId(null);
       setActiveExtensionOrderId(null);
@@ -1397,10 +1418,11 @@ export default function AdminRentalOrdersPage() {
                   hasAssessmentDraft,
                   needsAttention,
                 } = row;
+                const isNewOrder = !o.newOrderAcknowledgedAt;
 
                 return (
                   <Fragment key={o.id}>
-                  <tr className={`border-t border-slate-100 ${needsAttention ? "bg-rose-50/20" : "bg-white"}`}>
+                  <tr className={`border-t ${isNewOrder ? "border-emerald-100 bg-emerald-50/40" : "border-slate-100"} ${!isNewOrder && needsAttention ? "bg-rose-50/20" : !isNewOrder ? "bg-white" : ""}`}>
                     {developerDeleteEnabled && (
                       <td className="px-4 py-3 align-top">
                         <input
@@ -1412,27 +1434,34 @@ export default function AdminRentalOrdersPage() {
                       </td>
                     )}
                     <td className="px-4 py-4 align-top">
-                      <div className="font-semibold text-slate-900">{o.id}</div>
+                      <div className="flex items-center gap-2">
+                        <div className="font-semibold text-slate-900">{o.id}</div>
+                        {isNewOrder && (
+                          <span className="rounded-full border border-emerald-200 bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-800">
+                            NEW
+                          </span>
+                        )}
+                      </div>
                       <div className="mt-1 text-sm text-slate-700">
                         {o.customerSnapshot?.companyName ?? "Walk-in / direct customer"}
                       </div>
                       <div className="mt-1 text-xs text-slate-500">
-                        {o.customerSnapshot?.contactName ?? "No contact"} · {formatDateTime(o.createdAt)}
+                        {o.customerSnapshot?.contactName ?? "No contact"} Â· {formatDateTime(o.createdAt)}
                       </div>
                     </td>
 
                     <td className="px-4 py-4 align-top">
                       <div className="font-semibold text-slate-900">{o.equipmentTitle}</div>
                       <div className="mt-1 text-xs text-slate-500">
-                        {o.equipmentId} · Qty {o.qty} · {o.fulfillment === "deliver" ? "Deliver & collect" : "Self-collect"}
+                        {o.equipmentId} Â· Qty {o.qty} Â· {o.fulfillment === "deliver" ? "Deliver & collect" : "Self-collect"}
                       </div>
                       <div className="mt-2 inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs text-slate-700">
                         <CalendarClock className="h-3.5 w-3.5 text-[#D24338]" />
-                        {o.start} → {o.end}
+                        {o.start} â†’ {o.end}
                       </div>
                       <div className="mt-2 text-xs text-slate-500">
                         Reserved until <span className="font-medium text-slate-700">{reservedUntil}</span>
-                        {buffer > 0 ? ` · buffer ${buffer}d` : ""}
+                        {buffer > 0 ? ` Â· buffer ${buffer}d` : ""}
                       </div>
                     </td>
 
@@ -1475,7 +1504,7 @@ export default function AdminRentalOrdersPage() {
                         {formatMoney(deposit.requiredAmountCents / 100)}
                       </div>
                       <div className="mt-1 text-xs text-slate-500">
-                        Held {formatMoney(deposit.heldAmountCents / 100)} · Unresolved {formatMoney(deposit.unresolvedAmountCents / 100)}
+                        Held {formatMoney(deposit.heldAmountCents / 100)} Â· Unresolved {formatMoney(deposit.unresolvedAmountCents / 100)}
                       </div>
                       <div className="mt-2">
                         <span
@@ -1763,9 +1792,9 @@ export default function AdminRentalOrdersPage() {
                             <div>
                               <div className="text-sm font-semibold text-slate-900">Deposit Resolution</div>
                               <div className="text-xs text-slate-500">
-                                Held: {formatMoney(deposit.heldAmountCents / 100)} · Released:{" "}
-                                {formatMoney(deposit.releasedAmountCents / 100)} · Retained:{" "}
-                                {formatMoney(deposit.retainedAmountCents / 100)} · Unresolved:{" "}
+                                Held: {formatMoney(deposit.heldAmountCents / 100)} Â· Released:{" "}
+                                {formatMoney(deposit.releasedAmountCents / 100)} Â· Retained:{" "}
+                                {formatMoney(deposit.retainedAmountCents / 100)} Â· Unresolved:{" "}
                                 {formatMoney(deposit.unresolvedAmountCents / 100)}
                               </div>
                             </div>
@@ -1781,8 +1810,8 @@ export default function AdminRentalOrdersPage() {
 
                           {deposit.lastResolutionNote && (
                             <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
-                              Latest resolution: {deposit.lastResolutionType ?? "-"} · {deposit.lastResolutionNote}
-                              {deposit.resolvedAt ? ` · ${formatDateTime(deposit.resolvedAt)}` : ""}
+                              Latest resolution: {deposit.lastResolutionType ?? "-"} Â· {deposit.lastResolutionNote}
+                              {deposit.resolvedAt ? ` Â· ${formatDateTime(deposit.resolvedAt)}` : ""}
                             </div>
                           )}
 
@@ -2033,7 +2062,7 @@ export default function AdminRentalOrdersPage() {
           </table>
 
           <div className="border-t border-slate-100 bg-slate-50 p-3 text-xs text-slate-500">
-            Orders source: <span className="font-mono">Supabase Postgres</span> • Invoices source:{" "}
+            Orders source: <span className="font-mono">Supabase Postgres</span> â€¢ Invoices source:{" "}
             <span className="font-mono">Supabase Postgres</span>.
           </div>
         </div>
@@ -2051,7 +2080,7 @@ export default function AdminRentalOrdersPage() {
                   </div>
                   <div className="mt-3 text-lg font-semibold text-[#2A2A2A]">{detailOrder.id}</div>
                   <div className="mt-1 text-sm text-slate-600">
-                    {detailOrder.customerSnapshot?.companyName ?? "Direct customer"} · {detailOrder.equipmentTitle}
+                    {detailOrder.customerSnapshot?.companyName ?? "Direct customer"} Â· {detailOrder.equipmentTitle}
                   </div>
                 </div>
                 <button
@@ -2274,7 +2303,7 @@ export default function AdminRentalOrdersPage() {
                               <option value="">None</option>
                               {depositResolutionTransactions.map((transaction) => (
                                 <option key={transaction.id} value={transaction.id}>
-                                  {depositTransactionLabel(transaction.transactionType)} · {formatMoney(transaction.amountCents / 100)} · {transaction.id}
+                                  {depositTransactionLabel(transaction.transactionType)} Â· {formatMoney(transaction.amountCents / 100)} Â· {transaction.id}
                                 </option>
                               ))}
                             </select>
@@ -2327,7 +2356,7 @@ export default function AdminRentalOrdersPage() {
                               <div className="flex flex-wrap items-start justify-between gap-3">
                                 <div>
                                   <div className="font-semibold text-slate-900">Through {extension.requestedRentalEnd}</div>
-                                  <div className="mt-1 text-xs text-slate-500">Current end {extension.currentRentalEnd} · Requested {formatDateTime(extension.createdAt)}</div>
+                                  <div className="mt-1 text-xs text-slate-500">Current end {extension.currentRentalEnd} Â· Requested {formatDateTime(extension.createdAt)}</div>
                                 </div>
                                 <span className={["rounded-full px-2 py-1 text-[11px] font-semibold uppercase", extensionBadgeTone(extension.status)].join(" ")}>
                                   {extensionStatusLabel(extension.status)}
@@ -2470,3 +2499,4 @@ export default function AdminRentalOrdersPage() {
     </div>
   );
 }
+

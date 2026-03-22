@@ -1,4 +1,4 @@
-// rental-system-frontend/src/lib/admin-settings/use-admin-settings.ts
+﻿// rental-system-frontend/src/lib/admin-settings/use-admin-settings.ts
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -22,6 +22,7 @@ export type OrgSettingsDto = {
   testerEmails: string[];
   bookingPaidRecipients: string[];
   overdueRecipients: string[];
+  newOrderRecipients: string[];
   operationsPolicy: {
     defaultMaintenanceBufferDays: number;
     enableDeveloperDeleteTools: boolean;
@@ -70,6 +71,7 @@ export function useAdminSettings() {
   const [adminNotificationEmailsCsv, setAdminNotificationEmailsCsv] = useState("");
   const [bookingPaidRecipientsCsv, setBookingPaidRecipientsCsv] = useState("");
   const [overdueRecipientsCsv, setOverdueRecipientsCsv] = useState("");
+  const [newOrderRecipientsCsv, setNewOrderRecipientsCsv] = useState("");
   const [bccTesterEnabled, setBccTesterEnabled] = useState(false);
   const [testerEmailsCsv, setTesterEmailsCsv] = useState("");
   const [defaultMaintenanceBufferDays, setDefaultMaintenanceBufferDays] = useState("7");
@@ -119,6 +121,7 @@ export function useAdminSettings() {
       setAdminNotificationEmailsCsv(toCsv(data.adminNotificationEmails));
       setBookingPaidRecipientsCsv(toCsv(data.bookingPaidRecipients));
       setOverdueRecipientsCsv(toCsv(data.overdueRecipients));
+      setNewOrderRecipientsCsv(toCsv(data.newOrderRecipients));
       setBccTesterEnabled(Boolean(data.bccTesterEnabled));
       setTesterEmailsCsv(toCsv(data.testerEmails));
       setDefaultMaintenanceBufferDays(
@@ -165,6 +168,7 @@ export function useAdminSettings() {
         adminNotificationEmails: parseEmailsCsv(adminNotificationEmailsCsv),
         bookingPaidRecipients: parseEmailsCsv(bookingPaidRecipientsCsv),
         overdueRecipients: parseEmailsCsv(overdueRecipientsCsv),
+        newOrderRecipients: parseEmailsCsv(newOrderRecipientsCsv),
         bccTesterEnabled,
         testerEmails: parseEmailsCsv(testerEmailsCsv),
         operationsPolicy: {
@@ -219,6 +223,7 @@ export function useAdminSettings() {
     load,
     orgName,
     overdueRecipientsCsv,
+    newOrderRecipientsCsv,
     reminderBatchLimit,
     reminderGuardWindowHours,
     remindersEnabled,
@@ -291,6 +296,8 @@ export function useAdminSettings() {
     setBookingPaidRecipientsCsv,
     overdueRecipientsCsv,
     setOverdueRecipientsCsv,
+    newOrderRecipientsCsv,
+    setNewOrderRecipientsCsv,
     bccTesterEnabled,
     setBccTesterEnabled,
     testerEmailsCsv,
@@ -313,3 +320,4 @@ export function useAdminSettings() {
     setReminderBatchLimit,
   };
 }
+

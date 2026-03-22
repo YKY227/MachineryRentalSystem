@@ -1,4 +1,4 @@
-// rental-system-frontend/src/lib/settings/db-admin-settings-repo.ts
+﻿// rental-system-frontend/src/lib/settings/db-admin-settings-repo.ts
 import "server-only";
 
 import { supabaseAdmin } from "@/lib/supabase/server";
@@ -36,6 +36,7 @@ export type AdminSettings = {
   testerEmails: string[];
   bookingPaidRecipients: string[];
   overdueRecipients: string[];
+  newOrderRecipients: string[];
   reminderPolicy: ReminderPolicySettings;
   operationsPolicy: {
     defaultMaintenanceBufferDays: number;
@@ -69,6 +70,7 @@ type AdminNotificationSettingsValue = {
   testerEmails: string[];
   bookingPaidRecipients: string[];
   overdueRecipients: string[];
+  newOrderRecipients: string[];
 };
 
 const DEFAULT_ADMIN_ORG_SETTINGS: AdminOrgSettingsValue = {
@@ -90,6 +92,7 @@ const DEFAULT_ADMIN_NOTIFICATION_SETTINGS: AdminNotificationSettingsValue = {
   testerEmails: [],
   bookingPaidRecipients: [],
   overdueRecipients: [],
+  newOrderRecipients: [],
 };
 
 export const DEFAULT_OPERATIONS_POLICY_SETTINGS = {
@@ -222,6 +225,7 @@ function sanitizeAdminNotificationSettings(value: unknown): AdminNotificationSet
     testerEmails: sanitizeStringArray(raw.testerEmails),
     bookingPaidRecipients: sanitizeStringArray(raw.bookingPaidRecipients),
     overdueRecipients: sanitizeStringArray(raw.overdueRecipients),
+    newOrderRecipients: sanitizeStringArray(raw.newOrderRecipients),
   };
 }
 
@@ -351,3 +355,4 @@ export const dbAdminSettingsRepo = {
     return setting.value;
   },
 };
+

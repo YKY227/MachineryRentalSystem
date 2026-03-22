@@ -1,4 +1,4 @@
-export type FulfillmentMode = "deliver" | "self_collect";
+﻿export type FulfillmentMode = "deliver" | "self_collect";
 export type RentalCustomerPaymentTerms = "upfront" | "credit";
 export type RentalCustomerVettingStatus = "new" | "under_review" | "pre_vetted" | "rejected";
 export type RentalCustomerAccountStatus = "active" | "suspended";
@@ -48,6 +48,8 @@ export type RentalOrder = {
   inspectionStatus: RentalOrderInspectionStatus;
   inspectionNotes?: string;
   completedAt?: string;
+  newOrderNotifiedAt?: string;
+  newOrderAcknowledgedAt?: string;
   createdAt: string;
   updatedAt: string;
 };
@@ -134,3 +136,4 @@ export type RentalOrderPaymentSession = {
   createdAt: string;
   updatedAt: string;
 };
+
