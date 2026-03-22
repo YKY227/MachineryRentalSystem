@@ -234,6 +234,9 @@ export default function AdminRentalInventoryPage() {
   const totalUnitsBelowFloor = Boolean(
     editor.id && inventoryProtection && editor.totalUnits < inventoryProtection.protectedMinimum
   );
+  const availableUnits = inventoryProtection
+    ? Math.max(0, inventoryProtection.currentTotalUnits - inventoryProtection.currentUnavailableQty)
+    : null;
 
   async function refreshInventory() {
     setLoading(true);
@@ -522,20 +525,77 @@ export default function AdminRentalInventoryPage() {
                       </FieldBlock>
                       <div className="rounded-xl bg-slate-50 p-3 text-xs text-slate-600">
                         <div className="font-semibold text-slate-900">Operational floor</div>
-                        <div className="mt-1 text-slate-500">
-                          Based on committed orders, active holds, and active downtime already tracked in the system.
-                        </div>
+                        <div className="mt-1 text-slate-500">Based on current operational commitments</div>
                         {editor.id ? (
                           inventoryProtectionLoading ? (
                             <div className="mt-2">Loading current allocation summary...</div>
                           ) : inventoryProtection ? (
-                            <div className="mt-2 space-y-1">
-                              <div>Current total: {inventoryProtection.currentTotalUnits}</div>
-                              <div>Protected minimum: {inventoryProtection.protectedMinimum}</div>
-                              <div>Currently committed: {inventoryProtection.currentCommittedQty}</div>
-                              <div>Active holds: {inventoryProtection.currentHeldQty}</div>
-                              <div>Active downtime: {inventoryProtection.currentDowntimeQty}</div>
-                              <div>Currently unavailable: {inventoryProtection.currentUnavailableQty}</div>
+                            <div className="mt-3 space-y-3">
+                              <div className="grid gap-2 sm:grid-cols-3">
+                                <div className="rounded-lg border border-slate-200 bg-white p-3">
+                                  <div className="text-2xl font-semibold text-slate-900">
+                                    {inventoryProtection.currentTotalUnits}
+                                  </div>
+                                  <div className="mt-1 text-[11px] font-medium uppercase tracking-wide text-slate-500">
+                                    Total Units
+                                  </div>
+                                </div>
+                                <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3">
+                                  <div className="text-2xl font-semibold text-emerald-900">
+                                    {availableUnits ?? 0}
+                                  </div>
+                                  <div className="mt-1 text-[11px] font-medium uppercase tracking-wide text-emerald-700">
+                                    Available Units
+                                  </div>
+                                </div>
+                                <div className="rounded-lg border border-slate-200 bg-white p-3">
+                                  <div className="text-2xl font-semibold text-slate-900">
+                                    {inventoryProtection.currentUnavailableQty}
+                                  </div>
+                                  <div className="mt-1 text-[11px] font-medium uppercase tracking-wide text-slate-500">
+                                    Unavailable Units
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
+                                <div className="text-[11px] font-medium uppercase tracking-wide text-amber-700">
+                                  Protected Minimum
+                                </div>
+                                <div className="mt-1 text-2xl font-semibold text-amber-900">
+                                  {inventoryProtection.protectedMinimum}
+                                </div>
+                                <div className="mt-1 text-xs text-amber-800">
+                                  Total units cannot be reduced below this value.
+                                </div>
+                              </div>
+
+                              <div className="grid gap-2 sm:grid-cols-3">
+                                <div className="rounded-lg bg-slate-100 p-2.5">
+                                  <div className="text-lg font-semibold text-slate-900">
+                                    {inventoryProtection.currentHeldQty}
+                                  </div>
+                                  <div className="mt-0.5 text-[11px] font-medium uppercase tracking-wide text-slate-500">
+                                    Holds
+                                  </div>
+                                </div>
+                                <div className="rounded-lg bg-slate-100 p-2.5">
+                                  <div className="text-lg font-semibold text-slate-900">
+                                    {inventoryProtection.currentDowntimeQty}
+                                  </div>
+                                  <div className="mt-0.5 text-[11px] font-medium uppercase tracking-wide text-slate-500">
+                                    Downtime
+                                  </div>
+                                </div>
+                                <div className="rounded-lg bg-slate-100 p-2.5">
+                                  <div className="text-lg font-semibold text-slate-900">
+                                    {inventoryProtection.currentCommittedQty}
+                                  </div>
+                                  <div className="mt-0.5 text-[11px] font-medium uppercase tracking-wide text-slate-500">
+                                    Committed
+                                  </div>
+                                </div>
+                              </div>
                             </div>
                           ) : (
                             <div className="mt-2">Inventory protection details are unavailable right now.</div>
@@ -647,4 +707,6 @@ export default function AdminRentalInventoryPage() {
     </div>
   );
 }
+
+
 

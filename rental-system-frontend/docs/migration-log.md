@@ -2171,3 +2171,26 @@ API / Page changes:
 Risks / follow-up notes:
 - This pass intentionally focuses on clarity, not behavior changes; inline validation, autosave, and richer preview affordances can be added later without reworking the current sections.
 - The content and merchandising section is still relatively dense and could be further simplified later if image management or product content grows more complex.
+
+## 2026-03-23 | Scope: admin equipment inventory metric summary panel
+Summary:
+- Reworked the inventory protection panel in the admin equipment edit form into a compact metric-style summary so key inventory numbers are readable at a glance.
+- Preserved the existing server-authoritative protection logic and reused the current inventory context data, adding only a frontend-derived available-units metric.
+
+Files changed:
+- src/app/admin/rental/page.tsx
+- docs/migration-log.md
+
+DB / Infra changes:
+- No schema or backend logic changes were required.
+- The panel continues to use the existing inventory-protection payload returned by the equipment edit route.
+
+API / Page changes:
+- Admin equipment edit UI now shows total units, available units, and unavailable units as primary metric cards, with protected minimum highlighted separately and hold/downtime/committed counts de-emphasized as secondary breakdown metrics.
+- Replaced the previous text-heavy explanatory block with a shorter helper line while keeping existing invalid total-units warnings and save behavior unchanged.
+
+Risks / follow-up notes:
+- This is a presentation-only improvement; richer time-based allocation previews or low-availability indicators can be added later without changing the current backend contract.
+- If the inventory model grows more granular later, the secondary breakdown section may need to expand into a richer per-status summary.
+
+
