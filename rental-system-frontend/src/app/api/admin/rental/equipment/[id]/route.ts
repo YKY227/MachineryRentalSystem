@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+﻿import { NextResponse } from "next/server";
 
 import {
   adminUnauthorizedResponse,
@@ -6,6 +6,7 @@ import {
   isAdminUnauthorized,
 } from "@/lib/auth/admin";
 import { dbRentalEquipmentRepo } from "@/lib/rental/equipment/db-rental-equipment-repo";
+import { getRentalEquipmentInventoryProtection } from "@/lib/rental/equipment/equipment-inventory-protection-service";
 import type { UpdateRentalEquipmentInput } from "@/lib/rental/equipment/types";
 
 export const runtime = "nodejs";
@@ -133,7 +134,8 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
     if (!equipment) {
       return NextResponse.json({ error: "Equipment not found" }, { status: 404 });
     }
-    return NextResponse.json({ equipment });
+    const inventoryProtection = await getRentalEquipmentInventoryProtection(params.id);
+    return NextResponse.json({ equipment, inventoryProtection });
   } catch (error) {
     if (isAdminUnauthorized(error)) return adminUnauthorizedResponse();
     const message = error instanceof Error ? error.message : "Equipment read failed";
@@ -150,11 +152,29 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
     }
 
     const body = (await req.json()) as EquipmentPatchBody;
-    const equipment = await dbRentalEquipmentRepo.update(params.id, normalizePatchBody(body));
-    return NextResponse.json({ equipment });
+    const patch = normalizePatchBody(body);
+    const inventoryProtection = await getRentalEquipmentInventoryProtection(params.id);
+
+    if (
+      patch.totalUnits !== undefined &&
+      patch.totalUnits < inventoryProtection.protectedMinimum
+    ) {
+      return NextResponse.json(
+        {
+          error: "Cannot reduce total units below currently committed or unavailable units.",
+          details: inventoryProtection,
+        },
+        { status: 400 }
+      );
+    }
+
+    const equipment = await dbRentalEquipmentRepo.update(params.id, patch);
+    const nextInventoryProtection = await getRentalEquipmentInventoryProtection(params.id);
+    return NextResponse.json({ equipment, inventoryProtection: nextInventoryProtection });
   } catch (error) {
     if (isAdminUnauthorized(error)) return adminUnauthorizedResponse();
     const message = error instanceof Error ? error.message : "Equipment update failed";
     return NextResponse.json({ error: message }, { status: 400 });
   }
 }
+

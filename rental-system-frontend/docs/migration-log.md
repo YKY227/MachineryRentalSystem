@@ -1,4 +1,4 @@
-# Migration Log
+﻿# Migration Log
 
 ## How to use this log
 - Add one entry in the same PR whenever code changes data source, schema/SQL, API routes, auth/security, or invoice/pdf/email flows.
@@ -911,7 +911,7 @@ Risks / follow-up notes:
 
 Summary:
 - Refined the public landing hero to use the Teesin red palette more intentionally while keeping the page mostly neutral and public-first.
-- Added “Teesin Machinery Pte Ltd” as the hero brand anchor without inserting the logo asset.
+- Added â€œTeesin Machinery Pte Ltdâ€ as the hero brand anchor without inserting the logo asset.
 - Replaced the right-side hero action card with a branded trust/operations panel and kept auth awareness as lightweight status content only.
 
 Files changed:
@@ -1563,7 +1563,7 @@ Risks / follow-up notes:
 ## 2026-03-12 | Scope: equipment maintenance / downtime blocking v1
 Summary:
 - Audited the rental scheduling stack and confirmed per-equipment maintenance buffer days, DB-backed availability holds, DB-backed equipment inventory, and admin settings already existed, but explicit downtime blocking was still missing from production availability truth and the calendar still relied on localStorage for operational order/hold data.
-- Added a DB-backed equipment downtime model, wired downtime into checkout hold acquisition and extension availability reads, replaced the calendar’s authoritative operational data with DB-backed orders/downtime, and added a minimal admin downtime workflow plus an admin/settings operations default for maintenance buffer fallback.
+- Added a DB-backed equipment downtime model, wired downtime into checkout hold acquisition and extension availability reads, replaced the calendarâ€™s authoritative operational data with DB-backed orders/downtime, and added a minimal admin downtime workflow plus an admin/settings operations default for maintenance buffer fallback.
 
 Files changed:
 - `docs/sql/rental_equipment_downtime_v1.sql`
@@ -2126,3 +2126,27 @@ Risks / follow-up notes:
 - The current limiter is intentionally narrow and only protects the contact endpoint; broader public-endpoint protections or shared middleware can be considered later if exposure expands.
 - Stronger controls such as captcha, reputation scoring, or IP intelligence may still be needed later if abuse volume increases beyond what the v1 guard layer can absorb.
 
+
+
+## 2026-03-23 | Scope: equipment total-units reduction protection
+Summary:
+- Added server-authoritative protection so rental equipment total units cannot be reduced below the current operational floor derived from existing committed orders, active availability holds, and active downtime.
+- Added edit-form context around Total Units so admins can see the protected minimum and current unavailable breakdown before saving, while still allowing valid increases or reductions down to the exact floor.
+
+Files changed:
+- `src/lib/rental/equipment/equipment-inventory-protection-service.ts`
+- `src/app/api/admin/rental/equipment/[id]/route.ts`
+- `src/app/admin/rental/page.tsx`
+- `docs/migration-log.md`
+
+DB / Infra changes:
+- No schema changes were required; the protection reuses existing DB-backed orders, invoices, availability holds, downtime, and buffer-override records.
+- The protected minimum is computed from the same authoritative operational sources that already drive availability behavior.
+
+API / Page changes:
+- Admin equipment GET now returns inventory-protection context for the edit form, and PATCH rejects `totalUnits` reductions below the protected minimum with structured details.
+- Admin rental inventory edit UI now shows current total units, protected minimum, current committed units, active holds, and active downtime next to the Total Units field, plus a local warning when the entered value is below the server floor.
+
+Risks / follow-up notes:
+- The protection intentionally excludes operational states that are not yet modeled as authoritative unit-level allocations; returned/inspection notes alone do not create separate protected units outside the existing order/buffer/downtime model.
+- A later pass could expose richer allocation timelines or per-date inventory summaries in admin, but the current change keeps the UI small and the server authoritative.

@@ -1,4 +1,4 @@
-import "server-only";
+﻿import "server-only";
 
 import { createHash, randomUUID } from "crypto";
 
@@ -68,3 +68,4 @@ export const dbContactSubmissionAttemptRepo = {
     return data;
   },
 };
+

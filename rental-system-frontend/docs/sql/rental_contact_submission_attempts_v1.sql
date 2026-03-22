@@ -1,4 +1,4 @@
-create table if not exists rental_contact_submission_attempts (
+﻿create table if not exists rental_contact_submission_attempts (
   id text primary key,
   identifier_hash text not null,
   source text not null default 'website_contact_form',
@@ -9,3 +9,4 @@ create table if not exists rental_contact_submission_attempts (
 
 create index if not exists rental_contact_submission_attempts_identifier_created_idx
   on rental_contact_submission_attempts (identifier_hash, created_at desc);
+

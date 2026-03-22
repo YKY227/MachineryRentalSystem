@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useMemo, useState } from "react";
 import type { Equipment } from "@/lib/rental/types";
@@ -15,6 +15,18 @@ type LocalRentalOrder = {
   fulfillment: FulfillmentMode;
   pricingSnapshot: { total: number };
   createdAt: string;
+};
+
+type EquipmentInventoryProtection = {
+  currentTotalUnits: number;
+  protectedMinimum: number;
+  currentCommittedQty: number;
+  currentHeldQty: number;
+  currentDowntimeQty: number;
+  currentUnavailableQty: number;
+  peakCommittedQty: number;
+  peakHeldQty: number;
+  peakDowntimeQty: number;
 };
 
 type EditorState = {
@@ -122,7 +134,7 @@ function textToSpecs(value: string) {
 }
 
 function toEditor(item?: Equipment | null, defaultMaintenanceBufferDays = 7): EditorState {
-  if (!item) return emptyEditor();
+  if (!item) return emptyEditor(defaultMaintenanceBufferDays);
   return {
     id: item.id,
     title: item.title,
@@ -188,10 +200,15 @@ export default function AdminRentalInventoryPage() {
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [inventoryProtection, setInventoryProtection] = useState<EquipmentInventoryProtection | null>(null);
+  const [inventoryProtectionLoading, setInventoryProtectionLoading] = useState(false);
 
   const orderRevenue = useMemo(
     () => orders.reduce((sum, order) => sum + (order.pricingSnapshot?.total ?? 0), 0),
     [orders]
+  );
+  const totalUnitsBelowFloor = Boolean(
+    editor.id && inventoryProtection && editor.totalUnits < inventoryProtection.protectedMinimum
   );
 
   async function refreshInventory() {
@@ -227,6 +244,24 @@ export default function AdminRentalInventoryPage() {
     );
   }
 
+  async function loadInventoryProtection(equipmentId: string) {
+    setInventoryProtectionLoading(true);
+    try {
+      const res = await fetch(`/api/admin/rental/equipment/${encodeURIComponent(equipmentId)}`, {
+        cache: "no-store",
+        credentials: "include",
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error ?? "Failed to load equipment inventory context");
+      setInventoryProtection((data?.inventoryProtection ?? null) as EquipmentInventoryProtection | null);
+    } catch (nextError) {
+      console.error("loadInventoryProtection failed", nextError);
+      setInventoryProtection(null);
+    } finally {
+      setInventoryProtectionLoading(false);
+    }
+  }
+
   useEffect(() => {
     refreshSettings().catch((nextError) => {
       console.error("refreshSettings failed", nextError);
@@ -234,6 +269,18 @@ export default function AdminRentalInventoryPage() {
     refreshInventory();
     setOrders(readOrders());
   }, []);
+
+  useEffect(() => {
+    if (!editor.id) {
+      setInventoryProtection(null);
+      setInventoryProtectionLoading(false);
+      return;
+    }
+
+    loadInventoryProtection(editor.id).catch((nextError) => {
+      console.error("loadInventoryProtection effect failed", nextError);
+    });
+  }, [editor.id]);
 
   async function saveEquipment() {
     setSaving(true);
@@ -251,8 +298,14 @@ export default function AdminRentalInventoryPage() {
         body: JSON.stringify(buildPayload(editor)),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data?.error ?? "Failed to save equipment");
+      if (!res.ok) {
+        if (data?.details) {
+          setInventoryProtection(data.details as EquipmentInventoryProtection);
+        }
+        throw new Error(data?.error ?? "Failed to save equipment");
+      }
       const saved = (data?.equipment ?? null) as Equipment | null;
+      setInventoryProtection((data?.inventoryProtection ?? null) as EquipmentInventoryProtection | null);
       await refreshInventory();
       setEditor(toEditor(saved, defaultMaintenanceBufferDays));
       setNotice(editor.id ? "Equipment updated." : "Equipment created.");
@@ -295,7 +348,17 @@ export default function AdminRentalInventoryPage() {
 
         <div className="flex items-center gap-2">
           <button type="button" onClick={refreshInventory} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">Refresh</button>
-          <button type="button" onClick={() => { setEditor(emptyEditor(defaultMaintenanceBufferDays)); setTab("create"); }} className="rounded-lg bg-sky-600 px-3 py-2 text-sm font-medium text-white hover:bg-sky-700">Add equipment</button>
+          <button
+            type="button"
+            onClick={() => {
+              setEditor(emptyEditor(defaultMaintenanceBufferDays));
+              setInventoryProtection(null);
+              setTab("create");
+            }}
+            className="rounded-lg bg-sky-600 px-3 py-2 text-sm font-medium text-white hover:bg-sky-700"
+          >
+            Add equipment
+          </button>
         </div>
       </div>
 
@@ -377,7 +440,47 @@ export default function AdminRentalInventoryPage() {
               <input value={editor.brand} onChange={(e) => setEditor((prev) => ({ ...prev, brand: e.target.value }))} placeholder="Brand" className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
               <input value={editor.model} onChange={(e) => setEditor((prev) => ({ ...prev, model: e.target.value }))} placeholder="Model" className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
               <textarea value={editor.description} onChange={(e) => setEditor((prev) => ({ ...prev, description: e.target.value }))} rows={3} placeholder="Description" className="sm:col-span-2 rounded-xl border border-slate-200 px-3 py-2 text-sm" />
-              <input type="number" min={0} value={editor.totalUnits} onChange={(e) => setEditor((prev) => ({ ...prev, totalUnits: Math.max(0, Number(e.target.value || 0)) }))} placeholder="Total units" className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
+              <div className="rounded-xl border border-slate-200 p-3 sm:col-span-2">
+                <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] sm:items-start">
+                  <div>
+                    <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Total Units</div>
+                    <input
+                      type="number"
+                      min={0}
+                      value={editor.totalUnits}
+                      onChange={(e) => setEditor((prev) => ({ ...prev, totalUnits: Math.max(0, Number(e.target.value || 0)) }))}
+                      placeholder="Total units"
+                      className={["mt-2 w-full rounded-xl border px-3 py-2 text-sm", totalUnitsBelowFloor ? "border-rose-300 bg-rose-50" : "border-slate-200"].join(" ")}
+                    />
+                    {totalUnitsBelowFloor && (
+                      <div className="mt-2 text-xs text-rose-700">
+                        This value is below the current protected minimum of {inventoryProtection?.protectedMinimum ?? 0} unit(s). The backend will reject this reduction.
+                      </div>
+                    )}
+                  </div>
+                  <div className="rounded-xl bg-slate-50 p-3 text-xs text-slate-600">
+                    <div className="font-semibold text-slate-900">Operational floor</div>
+                    {editor.id ? (
+                      inventoryProtectionLoading ? (
+                        <div className="mt-2">Loading current allocation summary...</div>
+                      ) : inventoryProtection ? (
+                        <div className="mt-2 space-y-1">
+                          <div>Current total: {inventoryProtection.currentTotalUnits}</div>
+                          <div>Protected minimum: {inventoryProtection.protectedMinimum}</div>
+                          <div>Currently committed: {inventoryProtection.currentCommittedQty}</div>
+                          <div>Active holds: {inventoryProtection.currentHeldQty}</div>
+                          <div>Active downtime: {inventoryProtection.currentDowntimeQty}</div>
+                          <div>Currently unavailable: {inventoryProtection.currentUnavailableQty}</div>
+                        </div>
+                      ) : (
+                        <div className="mt-2">Inventory protection details are unavailable right now.</div>
+                      )
+                    ) : (
+                      <div className="mt-2">New equipment starts with no operational floor until it has committed allocations.</div>
+                    )}
+                  </div>
+                </div>
+              </div>
               <input type="number" min={0} value={editor.maintenanceBufferDays} onChange={(e) => setEditor((prev) => ({ ...prev, maintenanceBufferDays: Math.max(0, Number(e.target.value || 0)) }))} placeholder="Maintenance buffer days" className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
               <input type="number" min={0} value={editor.dayRate} onChange={(e) => setEditor((prev) => ({ ...prev, dayRate: Math.max(0, Number(e.target.value || 0)) }))} placeholder="Day rate" className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
               <input type="number" min={0} value={editor.depositAmount} onChange={(e) => setEditor((prev) => ({ ...prev, depositAmount: Math.max(0, Number(e.target.value || 0)) }))} placeholder="Deposit amount" className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
@@ -396,7 +499,7 @@ export default function AdminRentalInventoryPage() {
 
             <div className="mt-5 flex flex-col gap-2 sm:flex-row">
               <button type="button" onClick={saveEquipment} disabled={saving} className="inline-flex items-center justify-center rounded-xl bg-sky-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-sky-700 disabled:cursor-not-allowed disabled:bg-slate-300">{saving ? "Saving..." : editor.id ? "Save changes" : "Create equipment"}</button>
-              <button type="button" onClick={() => setEditor(emptyEditor(defaultMaintenanceBufferDays))} className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-900 hover:bg-slate-50">New entry</button>
+              <button type="button" onClick={() => { setEditor(emptyEditor(defaultMaintenanceBufferDays)); setInventoryProtection(null); }} className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-900 hover:bg-slate-50">New entry</button>
             </div>
           </div>
 
@@ -422,3 +525,4 @@ export default function AdminRentalInventoryPage() {
     </div>
   );
 }
+

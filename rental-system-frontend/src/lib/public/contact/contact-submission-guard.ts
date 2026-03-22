@@ -1,4 +1,4 @@
-import "server-only";
+﻿import "server-only";
 
 import {
   dbContactSubmissionAttemptRepo,
@@ -127,3 +127,4 @@ export async function guardContactSubmission(input: {
   });
   return { allowed: true };
 }
+

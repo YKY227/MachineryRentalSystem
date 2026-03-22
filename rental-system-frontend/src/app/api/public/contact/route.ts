@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+﻿import { NextResponse } from "next/server";
 
 import { guardContactSubmission } from "@/lib/public/contact/contact-submission-guard";
 import { submitRentalContactEnquiry } from "@/lib/rental/contact-enquiries/contact-enquiry-service";
@@ -91,3 +91,4 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: message }, { status: 400 });
   }
 }
+

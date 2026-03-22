@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import Link from "next/link";
 import { Mail, PhoneCall, Send } from "lucide-react";
@@ -174,3 +174,4 @@ export default function ContactPage() {
     </div>
   );
 }
+
