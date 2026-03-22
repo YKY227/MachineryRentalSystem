@@ -26,7 +26,9 @@ export async function POST(req: Request) {
       settings.testerEmails[0] ||
       settings.adminNotificationEmails[0] ||
       settings.bookingPaidRecipients[0] ||
-      settings.overdueRecipients[0];
+      settings.overdueRecipients[0] ||
+      settings.newOrderRecipients[0] ||
+      settings.contactFormRecipients[0];
 
     if (!recipient) {
       return NextResponse.json(
@@ -85,3 +87,4 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: message }, { status: 400 });
   }
 }
+

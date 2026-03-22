@@ -2068,3 +2068,35 @@ Risks / follow-up notes:
 - The new-order email currently links to the main admin orders page with the order id in the query string; a later pass could auto-open the matching drawer from the URL if needed.
 - A longer-term enhancement could add notification delivery logs or a dedicated admin inbox view without changing the current order acknowledgement model.
 
+## 2026-03-23 | Scope: public contact enquiry form and notification routing
+Summary:
+- Added a DB-backed public contact enquiry flow with configurable admin recipients, server-side persistence, and internal email delivery using the visitor email as Reply-To.
+- Added public Contact Us entry points on the landing page plus a dedicated `/contact` page, while keeping v1 scope limited to storage and email routing without an admin dashboard.
+
+Files changed:
+- `docs/sql/rental_contact_enquiries_v1.sql`
+- `src/lib/settings/db-admin-settings-repo.ts`
+- `src/app/api/admin/settings/route.ts`
+- `src/lib/admin-settings/use-admin-settings.ts`
+- `src/app/admin/settings/notifications/page.tsx`
+- `src/app/api/admin/settings/test-email/route.ts`
+- `src/lib/rental/invoices/email-delivery.ts`
+- `src/lib/rental/contact-enquiries/types.ts`
+- `src/lib/rental/contact-enquiries/db-rental-contact-enquiry-repo.ts`
+- `src/lib/rental/contact-enquiries/contact-enquiry-service.ts`
+- `src/app/api/public/contact/route.ts`
+- `src/app/(public-pages)/contact/page.tsx`
+- `src/app/(public-pages)/page.tsx`
+- `docs/migration-log.md`
+
+DB / Infra changes:
+- Added `rental_contact_enquiries` for persisted website enquiries with minimal status tracking for `new`, `emailed`, and `email_failed`.
+- Extended the existing admin notification settings payload with `contactFormRecipients` and reused the existing internal email delivery path with Reply-To support.
+
+API / Page changes:
+- Added a public POST route at `/api/public/contact` that validates input, stores the enquiry first, then attempts email delivery and updates delivery status without losing the enquiry record if email fails.
+- Added a public `/contact` page plus landing-page Contact Us links and CTA routing to the same form.
+
+Risks / follow-up notes:
+- Rate limiting, spam controls, and captcha are still intentionally deferred and should be the next safety enhancement before wider exposure.
+- A later phase can add an admin enquiry list or delivery log view without changing the DB-first storage and email-routing model added here.

@@ -55,12 +55,15 @@ function createProvider() {
 }
 
 export async function deliverRentalEmail(input: {
-  to: string;
-  cc?: string;
+  to: string | string[];
+  cc?: string | string[];
+  replyTo?: string;
   subject: string;
   html: string;
 }) {
   const { provider, from, resend } = createProvider();
+  const to = Array.isArray(input.to) ? input.to : [input.to];
+  const cc = input.cc ? (Array.isArray(input.cc) ? input.cc : [input.cc]) : undefined;
 
   let providerMessageId: string | null = null;
   if (provider === "mock") {
@@ -68,8 +71,9 @@ export async function deliverRentalEmail(input: {
   } else {
     const result = await resend!.emails.send({
       from,
-      to: input.to,
-      cc: input.cc ? [input.cc] : undefined,
+      to,
+      cc,
+      replyTo: input.replyTo ? [input.replyTo] : undefined,
       subject: input.subject,
       html: input.html,
     });

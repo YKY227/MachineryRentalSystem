@@ -1,4 +1,5 @@
-﻿import { NextResponse } from "next/server";
+// rental-system-frontend/src/app/api/admin/settings/route.ts
+import { NextResponse } from "next/server";
 
 import {
   adminUnauthorizedResponse,
@@ -13,8 +14,6 @@ import {
 } from "@/lib/settings/db-admin-settings-repo";
 
 export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
-export const revalidate = 0;
 
 type SettingsBody = {
   orgName?: string;
@@ -33,6 +32,7 @@ type SettingsBody = {
   bookingPaidRecipients?: string[];
   overdueRecipients?: string[];
   newOrderRecipients?: string[];
+  contactFormRecipients?: string[];
   operationsPolicy?: {
     defaultMaintenanceBufferDays?: number | string;
     enableDeveloperDeleteTools?: boolean;
@@ -126,6 +126,7 @@ function normalizeSettingsBody(body: SettingsBody): Omit<AdminSettings, "updated
     ),
     overdueRecipients: sanitizeEmailArray(body.overdueRecipients, "overdueRecipients"),
     newOrderRecipients: sanitizeEmailArray(body.newOrderRecipients, "newOrderRecipients"),
+    contactFormRecipients: sanitizeEmailArray(body.contactFormRecipients, "contactFormRecipients"),
     operationsPolicy: {
       defaultMaintenanceBufferDays:
         operationsPolicy.defaultMaintenanceBufferDays === undefined
@@ -188,4 +189,3 @@ export async function PUT(req: Request) {
     return NextResponse.json({ error: message }, { status: 400 });
   }
 }
-

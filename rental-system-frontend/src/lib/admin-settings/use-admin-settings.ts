@@ -1,4 +1,4 @@
-﻿// rental-system-frontend/src/lib/admin-settings/use-admin-settings.ts
+// rental-system-frontend/src/lib/admin-settings/use-admin-settings.ts
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -23,6 +23,7 @@ export type OrgSettingsDto = {
   bookingPaidRecipients: string[];
   overdueRecipients: string[];
   newOrderRecipients: string[];
+  contactFormRecipients: string[];
   operationsPolicy: {
     defaultMaintenanceBufferDays: number;
     enableDeveloperDeleteTools: boolean;
@@ -72,6 +73,7 @@ export function useAdminSettings() {
   const [bookingPaidRecipientsCsv, setBookingPaidRecipientsCsv] = useState("");
   const [overdueRecipientsCsv, setOverdueRecipientsCsv] = useState("");
   const [newOrderRecipientsCsv, setNewOrderRecipientsCsv] = useState("");
+  const [contactFormRecipientsCsv, setContactFormRecipientsCsv] = useState("");
   const [bccTesterEnabled, setBccTesterEnabled] = useState(false);
   const [testerEmailsCsv, setTesterEmailsCsv] = useState("");
   const [defaultMaintenanceBufferDays, setDefaultMaintenanceBufferDays] = useState("7");
@@ -122,6 +124,7 @@ export function useAdminSettings() {
       setBookingPaidRecipientsCsv(toCsv(data.bookingPaidRecipients));
       setOverdueRecipientsCsv(toCsv(data.overdueRecipients));
       setNewOrderRecipientsCsv(toCsv(data.newOrderRecipients));
+      setContactFormRecipientsCsv(toCsv(data.contactFormRecipients));
       setBccTesterEnabled(Boolean(data.bccTesterEnabled));
       setTesterEmailsCsv(toCsv(data.testerEmails));
       setDefaultMaintenanceBufferDays(
@@ -169,6 +172,7 @@ export function useAdminSettings() {
         bookingPaidRecipients: parseEmailsCsv(bookingPaidRecipientsCsv),
         overdueRecipients: parseEmailsCsv(overdueRecipientsCsv),
         newOrderRecipients: parseEmailsCsv(newOrderRecipientsCsv),
+        contactFormRecipients: parseEmailsCsv(contactFormRecipientsCsv),
         bccTesterEnabled,
         testerEmails: parseEmailsCsv(testerEmailsCsv),
         operationsPolicy: {
@@ -215,6 +219,7 @@ export function useAdminSettings() {
     companyGstRegNo,
     companyPhone,
     companyUen,
+    contactFormRecipientsCsv,
     defaultMaintenanceBufferDays,
     enableDeveloperDeleteTools,
     finalReminderDays,
@@ -298,6 +303,8 @@ export function useAdminSettings() {
     setOverdueRecipientsCsv,
     newOrderRecipientsCsv,
     setNewOrderRecipientsCsv,
+    contactFormRecipientsCsv,
+    setContactFormRecipientsCsv,
     bccTesterEnabled,
     setBccTesterEnabled,
     testerEmailsCsv,
@@ -320,4 +327,3 @@ export function useAdminSettings() {
     setReminderBatchLimit,
   };
 }
-
