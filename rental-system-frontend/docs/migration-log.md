@@ -1910,4 +1910,77 @@ API / Page changes:
 
 Risks / follow-up notes:
 - This fix is intentionally narrow to the reported prerender blocker; other rental pages using `useSearchParams()` should continue following the same wrapped-inner-component pattern to avoid future App Router build regressions.
+## 2026-03-22 | Scope: rental damage-deposit-credit current-state audit
+Summary:
+- Audited the current DB-first rental implementation for return inspection, deposit tracking, and credit control to map what is already implemented before any damage-assessment redesign work.
+- Confirmed inspection currently lives as order operational state, deposit resolution lives in a separate explicit ledger/action flow, and credit control is driven by invoice/payment receivables plus customer credit-policy fields.
 
+Files reviewed:
+- `src/lib/rental/orders/types.ts`
+- `src/lib/rental/orders/db-order-repo.ts`
+- `src/app/api/admin/rental/orders/[id]/operations/route.ts`
+- `src/app/admin/rental/orders/page.tsx`
+- `docs/sql/rental_order_return_inspection_v1.sql`
+- `src/lib/rental/deposits/types.ts`
+- `src/lib/rental/deposits/db-rental-deposit-repo.ts`
+- `src/app/api/admin/rental/orders/[id]/deposit/route.ts`
+- `docs/sql/rental_order_deposits_v1.sql`
+- `docs/sql/rental_order_deposits_resolution_v2.sql`
+- `src/lib/rental/credit-control/db-rental-credit-control.ts`
+- `src/lib/rental/credit-control/checkout-credit-evaluator.ts`
+- `src/lib/rental/customers/db-rental-customer-overview.ts`
+- `src/lib/rental/customers/db-rental-customer-portal-overview.ts`
+- `src/lib/rental/customers/db-rental-customer-repo.ts`
+- `src/app/api/admin/rental/customers/[id]/route.ts`
+- `src/app/admin/rental/customers/[id]/page.tsx`
+- `src/app/api/public/rental/checkout/start-payment/route.ts`
+- `src/lib/rental/invoices/checkout-invoice-automation.ts`
+- `src/lib/rental/invoices/checkout-credit-automation.ts`
+- `src/lib/rental/invoices/customer-invoice-access.ts`
+- `src/lib/rental/invoices/db-invoice-repo.ts`
+- `src/lib/rental/invoices/db-payment-repo.ts`
+- `docs/sql/rental_customers_credit_control_v1.sql`
+- `docs/migration-log.md`
+
+DB / Infra changes:
+- No migration added.
+- Audit/documentation only; no runtime behavior changed.
+
+API / Page changes:
+- No API or page behavior changed.
+- This entry records the reviewed current-state map only.
+
+Risks / follow-up notes:
+- UI copy in a few places suggests damage-related deposit reasoning, but the current implementation still keeps inspection state and deposit resolution as separate explicit workflows.
+
+
+## 2026-03-22 | Scope: rental damage assessment v1
+Summary:
+- Added a separate DB-backed rental order damage assessment evidence module with draft/finalized workflow, structured issue categories, estimated retention, and recommended deposit action fields.
+- Integrated the assessment into the existing admin rental orders workspace and exposed only a conservative customer-facing review status while keeping deposit resolution, invoicing, and credit behavior unchanged.
+
+Files changed:
+- `docs/sql/rental_order_damage_assessments_v1.sql`
+- `src/lib/rental/damage-assessments/types.ts`
+- `src/lib/rental/damage-assessments/db-rental-damage-assessment-repo.ts`
+- `src/lib/rental/damage-assessments/damage-assessment-service.ts`
+- `src/app/api/admin/rental/orders/[id]/assessment/route.ts`
+- `src/app/api/admin/rental/orders/[id]/assessment/finalize/route.ts`
+- `src/components/admin/rental/OrderDamageAssessmentPanel.tsx`
+- `src/app/api/admin/rental/orders/route.ts`
+- `src/app/admin/rental/orders/page.tsx`
+- `src/lib/rental/customers/db-rental-customer-overview.ts`
+- `src/lib/rental/customers/portal-types.ts`
+- `src/app/rental/account/page.tsx`
+- `docs/migration-log.md`
+
+DB / Infra changes:
+- Added `rental_order_damage_assessments` as a single-record-per-order evidence table for v1.
+- No deposit, invoice, payment, or credit schema changed.
+
+API / Page changes:
+- Added protected admin damage assessment read/save/finalize endpoints under the existing rental orders API namespace.
+- Added an assessment tab in the admin orders workspace and a conservative customer-visible review status label in the rental account portal.
+
+Risks / follow-up notes:
+- v1 intentionally stores one current assessment per order and does not yet include photo uploads, line-item evidence, or links from deposit resolution / invoicing to an assessment id.

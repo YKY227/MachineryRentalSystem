@@ -1,4 +1,5 @@
 import type { RentalCreditDecision } from "@/lib/rental/credit-control/db-rental-credit-control";
+import type { RentalCustomerDamageReviewStatus } from "@/lib/rental/damage-assessments/types";
 import type { RentalOrderDepositStatus } from "@/lib/rental/deposits/types";
 import type { RentalOrderExtensionStatus } from "@/lib/rental/extensions/types";
 import type { InvoicePaymentStatus } from "@/lib/rental/invoices/types";
@@ -49,6 +50,7 @@ export type RentalCustomerPortalRecentOrder = {
   returnStatus: RentalOrderReturnStatus;
   returnedAt?: string;
   inspectionStatus: RentalOrderInspectionStatus;
+  damageReviewStatus?: RentalCustomerDamageReviewStatus;
   completedAt?: string;
   createdAt: string;
 };

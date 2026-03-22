@@ -23,6 +23,12 @@ import {
   Wrench,
 } from "lucide-react";
 
+import { OrderDamageAssessmentPanel } from "@/components/admin/rental/OrderDamageAssessmentPanel";
+import type {
+  RentalDamageAssessmentRecommendedDepositAction,
+  RentalDamageAssessmentResult,
+  RentalDamageAssessmentSummary,
+} from "@/lib/rental/damage-assessments/types";
 import type {
   RentalDepositTransaction,
   RentalOrderDepositSummary,
@@ -48,7 +54,7 @@ type DeleteDialogState =
       orderIds: string[];
     };
 
-type OrderDetailView = "operations" | "deposit" | "extensions";
+type OrderDetailView = "operations" | "assessment" | "deposit" | "extensions";
 
 function formatMoney(n: number) {
   return new Intl.NumberFormat("en-SG", {
@@ -172,6 +178,60 @@ function inspectionStatusLabel(status: RentalOrderInspectionStatus) {
     default:
       return status;
   }
+}
+
+function assessmentStatusLabel(status?: RentalDamageAssessmentSummary["status"]) {
+  switch (status) {
+    case "draft":
+      return "Draft";
+    case "finalized":
+      return "Finalized";
+    default:
+      return "Not Started";
+  }
+}
+
+function assessmentResultLabel(result?: RentalDamageAssessmentResult) {
+  switch (result) {
+    case "clear":
+      return "Clear";
+    case "wear_and_tear":
+      return "Wear & Tear";
+    case "issues_found":
+      return "Issues Found";
+    case "further_review":
+      return "Further Review";
+    default:
+      return "-";
+  }
+}
+
+function recommendedAssessmentActionLabel(
+  action?: RentalDamageAssessmentRecommendedDepositAction
+) {
+  switch (action) {
+    case "none":
+      return "No follow-up recommended";
+    case "release":
+      return "Release deposit";
+    case "partial_retain":
+      return "Partial retain recommended";
+    case "full_retain":
+      return "Full retain recommended";
+    case "manual_review":
+      return "Manual financial review";
+    default:
+      return "-";
+  }
+}
+
+function defaultAssessmentSummary(orderId: string): RentalDamageAssessmentSummary {
+  return {
+    orderId,
+    exists: false,
+    issueCategories: [],
+    estimatedRetentionCents: 0,
+  };
 }
 
 function opsBadgeTone(status: RentalOrderReturnStatus, inspectionStatus: RentalOrderInspectionStatus) {
@@ -307,6 +367,9 @@ export default function AdminRentalOrdersPage() {
   const [depositSummariesByOrderId, setDepositSummariesByOrderId] = useState<
     Record<string, RentalOrderDepositSummary>
   >({});
+  const [assessmentSummariesByOrderId, setAssessmentSummariesByOrderId] = useState<
+    Record<string, RentalDamageAssessmentSummary>
+  >({});
   const [activeDepositOrderId, setActiveDepositOrderId] = useState<string | null>(null);
   const [depositPanelLoading, setDepositPanelLoading] = useState(false);
   const [depositPanelError, setDepositPanelError] = useState<string | null>(null);
@@ -397,6 +460,8 @@ export default function AdminRentalOrdersPage() {
         unresolvedAmountCents: Math.round(Number(order.pricingSnapshot?.deposit ?? 0) * 100),
         status: Number(order.pricingSnapshot?.deposit ?? 0) > 0 ? "pending" : "not_required",
       };
+      const assessment =
+        assessmentSummariesByOrderId[order.id] ?? defaultAssessmentSummary(order.id);
       const knownExtensions = orderExtensions[order.id] ?? [];
       const extensionNeedsAttention = knownExtensions.some(
         (extension) =>
@@ -404,13 +469,14 @@ export default function AdminRentalOrdersPage() {
       );
       const hasDepositAttention = deposit.heldAmountCents > 0 && deposit.unresolvedAmountCents > 0;
       const hasInspectionIssues = order.inspectionStatus === "issues_found";
+      const hasAssessmentDraft = assessment.status === "draft";
       const needsInspection =
         order.returnStatus === "returned" ||
         order.inspectionStatus === "pending" ||
         order.inspectionStatus === "not_started";
       const hasDowntimeImpact = overlappingDowntime.length > 0;
       const needsAttention =
-        hasInspectionIssues || hasDepositAttention || hasDowntimeImpact || extensionNeedsAttention;
+        hasInspectionIssues || hasDepositAttention || hasDowntimeImpact || extensionNeedsAttention || hasAssessmentDraft;
       const searchBlob = [
         order.id,
         order.equipmentTitle,
@@ -432,17 +498,19 @@ export default function AdminRentalOrdersPage() {
         downtimeQty,
         invoice,
         deposit,
+        assessment,
         knownExtensions,
         extensionNeedsAttention,
         hasDepositAttention,
         hasInspectionIssues,
+        hasAssessmentDraft,
         needsInspection,
         hasDowntimeImpact,
         needsAttention,
         searchBlob,
       };
     });
-  }, [depositSummariesByOrderId, downtime, equipmentById, orderExtensions, orders]);
+  }, [assessmentSummariesByOrderId, depositSummariesByOrderId, downtime, equipmentById, orderExtensions, orders]);
 
   const filteredOrderRows = useMemo(() => {
     const normalizedQuery = searchQuery.trim().toLowerCase();
@@ -524,6 +592,9 @@ export default function AdminRentalOrdersPage() {
       const nextOrders = (data?.orders ?? []) as RentalOrder[];
       setDepositSummariesByOrderId(
         (data?.depositSummariesByOrderId ?? {}) as Record<string, RentalOrderDepositSummary>
+      );
+      setAssessmentSummariesByOrderId(
+        (data?.assessmentSummariesByOrderId ?? {}) as Record<string, RentalDamageAssessmentSummary>
       );
       setDeveloperDeleteEnabled(Boolean(data?.developerDeleteEnabled));
       setOrders(nextOrders);
@@ -859,12 +930,25 @@ export default function AdminRentalOrdersPage() {
     setActiveExtensionOrderId(null);
   }
 
+  function handleAssessmentSummaryChange(orderId: string, summary: RentalDamageAssessmentSummary) {
+    setAssessmentSummariesByOrderId((current) => ({
+      ...current,
+      [orderId]: summary,
+    }));
+  }
+
   function openOrderWorkspace(order: RentalOrder, view: OrderDetailView = "operations") {
     setDetailDrawer({ orderId: order.id, view });
     if (view === "operations") {
       setActiveDepositOrderId(null);
       setActiveExtensionOrderId(null);
       openOperationsPanel(order);
+      return;
+    }
+    if (view === "assessment") {
+      setActiveOpsOrderId(null);
+      setActiveDepositOrderId(null);
+      setActiveExtensionOrderId(null);
       return;
     }
     if (view === "deposit") {
@@ -1225,9 +1309,11 @@ export default function AdminRentalOrdersPage() {
                   downtimeQty,
                   invoice: inv,
                   deposit,
+                  assessment,
                   extensionNeedsAttention,
                   hasDepositAttention,
                   hasInspectionIssues,
+                  hasAssessmentDraft,
                   needsAttention,
                 } = row;
 
@@ -1296,6 +1382,11 @@ export default function AdminRentalOrdersPage() {
                           Invoice {loadingInv ? "..." : inv.status.toUpperCase()}
                         </div>
                       )}
+                      {assessment.exists && (
+                        <div className="mt-1 text-xs text-slate-500">
+                          Assessment {assessmentStatusLabel(assessment.status).toUpperCase()}
+                        </div>
+                      )}
                     </td>
 
                     <td className="px-4 py-4 align-top">
@@ -1329,6 +1420,18 @@ export default function AdminRentalOrdersPage() {
                           <span className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-semibold ${warningChipTone("warning")}`}>
                             <Wallet className="h-3.5 w-3.5" />
                             Deposit unresolved
+                          </span>
+                        )}
+                        {assessment.status === "draft" && (
+                          <span className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-semibold ${warningChipTone("info")}`}>
+                            <ShieldAlert className="h-3.5 w-3.5" />
+                            Assessment draft
+                          </span>
+                        )}
+                        {assessment.status === "finalized" && (
+                          <span className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-semibold ${warningChipTone("ok")}`}>
+                            <CheckCircle2 className="h-3.5 w-3.5" />
+                            Assessment finalized
                           </span>
                         )}
                         {overlappingDowntime.length > 0 && (
@@ -1383,6 +1486,14 @@ export default function AdminRentalOrdersPage() {
                             >
                               <ClipboardCheck className="h-4 w-4 text-slate-500" />
                               Return / inspection
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => openOrderWorkspace(o, "assessment")}
+                              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
+                            >
+                              <ShieldAlert className="h-4 w-4 text-slate-500" />
+                              Damage assessment
                             </button>
                             <button
                               type="button"
@@ -1884,6 +1995,17 @@ export default function AdminRentalOrdersPage() {
                 </button>
                 <button
                   type="button"
+                  onClick={() => openOrderWorkspace(detailOrder, "assessment")}
+                  className={`rounded-lg px-3 py-2 text-sm font-medium ${
+                    detailDrawer.view === "assessment"
+                      ? "bg-[#D24338] text-white hover:bg-[#B9382E]"
+                      : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                  }`}
+                >
+                  Assessment
+                </button>
+                <button
+                  type="button"
                   onClick={() => openOrderWorkspace(detailOrder, "deposit")}
                   className={`rounded-lg px-3 py-2 text-sm font-medium ${
                     detailDrawer.view === "deposit"
@@ -1957,6 +2079,14 @@ export default function AdminRentalOrdersPage() {
                         {opsSaving ? "Saving..." : "Save return & inspection"}
                       </button>
                     </div>
+                  )}
+
+                  {detailDrawer.view === "assessment" && (
+                    <OrderDamageAssessmentPanel
+                      order={detailOrder}
+                      summary={activeDetailOrder.assessment}
+                      onSummaryChange={(summary) => handleAssessmentSummaryChange(detailOrder.id, summary)}
+                    />
                   )}
 
                   {detailDrawer.view === "deposit" && (
@@ -2071,6 +2201,10 @@ export default function AdminRentalOrdersPage() {
                       <div>Inspection: {inspectionStatusLabel(detailOrder.inspectionStatus)}</div>
                       <div>Reserved until: {activeDetailOrder.reservedUntil}</div>
                       <div>Deposit: {depositStatusLabel(activeDetailOrder.deposit.status)}</div>
+                      <div>Assessment: {assessmentStatusLabel(activeDetailOrder.assessment.status)}</div>
+                      <div>Assessment result: {assessmentResultLabel(activeDetailOrder.assessment.assessmentResult)}</div>
+                      <div>Recommended action: {recommendedAssessmentActionLabel(activeDetailOrder.assessment.recommendedDepositAction)}</div>
+                      <div>Estimate: {formatMoney(activeDetailOrder.assessment.estimatedRetentionCents / 100)}</div>
                       <div>Held: {formatMoney(activeDetailOrder.deposit.heldAmountCents / 100)}</div>
                       <div>Unresolved: {formatMoney(activeDetailOrder.deposit.unresolvedAmountCents / 100)}</div>
                     </div>
@@ -2080,6 +2214,7 @@ export default function AdminRentalOrdersPage() {
                     <div className="text-sm font-semibold text-slate-900">Attention</div>
                     <div className="mt-3 flex flex-wrap gap-2">
                       {activeDetailOrder.hasInspectionIssues && <span className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${warningChipTone("critical")}`}>Inspection issues</span>}
+                      {activeDetailOrder.hasAssessmentDraft && <span className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${warningChipTone("info")}`}>Assessment draft</span>}
                       {activeDetailOrder.hasDepositAttention && <span className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${warningChipTone("warning")}`}>Deposit unresolved</span>}
                       {activeDetailOrder.hasDowntimeImpact && <span className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${warningChipTone("warning")}`}>Downtime overlap</span>}
                       {activeDetailOrder.extensionNeedsAttention && <span className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${warningChipTone("info")}`}>Extension review</span>}
@@ -2163,3 +2298,5 @@ export default function AdminRentalOrdersPage() {
     </div>
   );
 }
+
+
