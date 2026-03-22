@@ -131,6 +131,18 @@ function toSummary(
 }
 
 export const dbRentalDamageAssessmentRepo = {
+  async getById(id: string): Promise<RentalDamageAssessment | null> {
+    const supabase = supabaseAdmin();
+    const { data, error } = await supabase
+      .from(DAMAGE_ASSESSMENTS_TABLE)
+      .select(DAMAGE_ASSESSMENT_COLUMNS)
+      .eq("id", id)
+      .maybeSingle<DamageAssessmentRow>();
+
+    if (error) throw new Error(`Damage assessment read failed: ${error.message}`);
+    return data ? toDamageAssessment(data) : null;
+  },
+
   async getByOrderId(orderId: string): Promise<RentalDamageAssessment | null> {
     const supabase = supabaseAdmin();
     const { data, error } = await supabase

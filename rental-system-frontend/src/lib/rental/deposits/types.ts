@@ -46,6 +46,7 @@ export type RentalDepositTransaction = {
   depositId: string;
   orderId: string;
   customerId?: string;
+  damageAssessmentId?: string;
   transactionType: RentalDepositTransactionType;
   amountCents: number;
   paymentSessionId?: string;

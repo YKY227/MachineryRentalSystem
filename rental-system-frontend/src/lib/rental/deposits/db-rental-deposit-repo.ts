@@ -1,5 +1,6 @@
 import "server-only";
 
+import { dbRentalDamageAssessmentRepo } from "@/lib/rental/damage-assessments/db-rental-damage-assessment-repo";
 import type {
   RentalDepositTransaction,
   RentalDepositTransactionType,
@@ -46,6 +47,7 @@ type DepositTransactionRow = {
   deposit_id: string;
   order_id: string;
   customer_id: string | null;
+  damage_assessment_id: string | null;
   transaction_type: RentalDepositTransactionType;
   amount_cents: number;
   payment_session_id: string | null;
@@ -90,6 +92,7 @@ const DEPOSIT_TRANSACTION_COLUMNS = [
   "deposit_id",
   "order_id",
   "customer_id",
+  "damage_assessment_id",
   "transaction_type",
   "amount_cents",
   "payment_session_id",
@@ -197,6 +200,7 @@ function toTransaction(row: DepositTransactionRow): RentalDepositTransaction {
     depositId: row.deposit_id,
     orderId: row.order_id,
     customerId: row.customer_id ?? undefined,
+    damageAssessmentId: row.damage_assessment_id ?? undefined,
     transactionType: row.transaction_type,
     amountCents: clampNonNegativeInt(row.amount_cents),
     paymentSessionId: row.payment_session_id ?? undefined,
@@ -249,10 +253,29 @@ function toSummary(deposit: RentalOrderDeposit | null, orderId: string): RentalO
   };
 }
 
+async function validateResolutionDamageAssessment(input: {
+  orderId: string;
+  damageAssessmentId?: string;
+}) {
+  if (!input.damageAssessmentId) return null;
+
+  const assessment = await dbRentalDamageAssessmentRepo.getById(input.damageAssessmentId);
+  if (!assessment) throw new Error("Damage assessment not found");
+  if (assessment.orderId !== input.orderId) {
+    throw new Error("Damage assessment does not belong to this order");
+  }
+  if (assessment.status !== "finalized") {
+    throw new Error("Only finalized damage assessments can be linked to deposit resolutions");
+  }
+
+  return assessment;
+}
+
 async function insertTransaction(input: {
   depositId: string;
   orderId: string;
   customerId?: string;
+  damageAssessmentId?: string;
   transactionType: RentalDepositTransactionType;
   amountCents: number;
   paymentSessionId?: string;
@@ -271,6 +294,7 @@ async function insertTransaction(input: {
       deposit_id: input.depositId,
       order_id: input.orderId,
       customer_id: input.customerId ?? null,
+      damage_assessment_id: input.damageAssessmentId ?? null,
       transaction_type: input.transactionType,
       amount_cents: clampNonNegativeInt(input.amountCents),
       payment_session_id: input.paymentSessionId ?? null,
@@ -542,6 +566,7 @@ export const dbRentalDepositRepo = {
     note?: string;
     recordedBy?: string;
     externalReference?: string;
+    damageAssessmentId?: string;
   }): Promise<{
     deposit: RentalOrderDeposit;
     transactions: RentalDepositTransaction[];
@@ -568,6 +593,11 @@ export const dbRentalDepositRepo = {
       throw new Error("Resolution exceeds unresolved held deposit balance");
     }
 
+    const linkedDamageAssessment = await validateResolutionDamageAssessment({
+      orderId: input.orderId,
+      damageAssessmentId: input.damageAssessmentId,
+    });
+
     const transactions: RentalDepositTransaction[] = [];
     const resolutionType =
       releaseAmountCents > 0 && retainAmountCents > 0
@@ -585,12 +615,14 @@ export const dbRentalDepositRepo = {
           customerId: deposit.customerId,
           transactionType: "released",
           amountCents: releaseAmountCents,
+          damageAssessmentId: linkedDamageAssessment?.id,
           recordedBy: input.recordedBy,
           externalReference: input.externalReference,
           notes: input.note?.trim() || "Deposit released/refund recorded",
           metadata: {
             resolutionType,
             accountingOnly: true,
+            linkedDamageAssessment: linkedDamageAssessment ? true : undefined,
           },
         })
       );
@@ -604,11 +636,13 @@ export const dbRentalDepositRepo = {
           customerId: deposit.customerId,
           transactionType: "retained",
           amountCents: retainAmountCents,
+          damageAssessmentId: linkedDamageAssessment?.id,
           recordedBy: input.recordedBy,
           externalReference: input.externalReference,
           notes: input.note?.trim() || "Deposit retained",
           metadata: {
             resolutionType,
+            linkedDamageAssessment: linkedDamageAssessment ? true : undefined,
           },
         })
       );

@@ -15,6 +15,7 @@ type ResolveBody = {
   retainAmountCents?: number | string;
   note?: string;
   externalReference?: string;
+  damageAssessmentId?: string;
 };
 
 function parseAmount(value: number | string | undefined) {
@@ -71,6 +72,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       retainAmountCents,
       note: body.note?.trim() || undefined,
       externalReference: body.externalReference?.trim() || undefined,
+      damageAssessmentId: body.damageAssessmentId?.trim() || undefined,
     });
     const summary = await dbRentalDepositRepo.getSummaryByOrderId(params.id);
 

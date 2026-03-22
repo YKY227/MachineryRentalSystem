@@ -1984,3 +1984,27 @@ API / Page changes:
 
 Risks / follow-up notes:
 - v1 intentionally stores one current assessment per order and does not yet include photo uploads, line-item evidence, or links from deposit resolution / invoicing to an assessment id.
+## 2026-03-22 | Scope: rental deposit to damage assessment linkage
+Summary:
+- Added optional audit linkage from manual deposit resolution transactions to finalized damage assessments so admins can record the evidence used for a release or retention decision.
+- Extended the existing admin deposit workflow to show advisory damage assessment context and allow explicit linking without automating deposit, invoice, or credit outcomes.
+
+Files changed:
+- `docs/sql/rental_order_deposit_assessment_links_v3.sql`
+- `src/lib/rental/damage-assessments/db-rental-damage-assessment-repo.ts`
+- `src/lib/rental/deposits/types.ts`
+- `src/lib/rental/deposits/db-rental-deposit-repo.ts`
+- `src/app/api/admin/rental/orders/[id]/deposit/route.ts`
+- `src/app/admin/rental/orders/page.tsx`
+- `docs/migration-log.md`
+
+DB / Infra changes:
+- Added nullable `damage_assessment_id` to `rental_deposit_transactions` with a foreign-key reference to `rental_order_damage_assessments`.
+- No credit, invoice, payment, or deposit status derivation schema changed.
+
+API / Page changes:
+- Deposit resolution API now accepts an optional `damageAssessmentId` and validates that it belongs to the same order and is finalized before linking.
+- Admin deposit resolution UI now shows damage assessment context and supports explicit linking of the finalized assessment to the manual deposit action.
+
+Risks / follow-up notes:
+- The linkage is recorded per resolution transaction for auditability; broader reporting or invoice follow-on flows can reference the same assessment later if approved.

@@ -380,6 +380,7 @@ export default function AdminRentalOrdersPage() {
   const [retainAmountInput, setRetainAmountInput] = useState("");
   const [resolutionNote, setResolutionNote] = useState("");
   const [resolutionReference, setResolutionReference] = useState("");
+  const [linkAssessmentToDeposit, setLinkAssessmentToDeposit] = useState(false);
   const [depositSaving, setDepositSaving] = useState(false);
   const [activeOpsOrderId, setActiveOpsOrderId] = useState<string | null>(null);
   const [opsBanner, setOpsBanner] = useState<string | null>(null);
@@ -754,6 +755,7 @@ export default function AdminRentalOrdersPage() {
     setRetainAmountInput("");
     setResolutionNote("");
     setResolutionReference("");
+    setLinkAssessmentToDeposit(false);
 
     try {
       const res = await fetch(`/api/admin/rental/orders/${encodeURIComponent(orderId)}/deposit`, {
@@ -783,12 +785,20 @@ export default function AdminRentalOrdersPage() {
       setDepositPanelError(null);
       setDepositPanelBanner(null);
 
+      const linkedAssessmentId =
+        linkAssessmentToDeposit &&
+        activeDetailOrder?.assessment.status === "finalized" &&
+        activeDetailOrder.assessment.assessmentId
+          ? activeDetailOrder.assessment.assessmentId
+          : undefined;
+
       const payload = {
         actionType: depositActionType,
         releaseAmountCents: Math.round(Number(releaseAmountInput || 0) * 100),
         retainAmountCents: Math.round(Number(retainAmountInput || 0) * 100),
         note: resolutionNote,
         externalReference: resolutionReference,
+        damageAssessmentId: linkedAssessmentId,
       };
 
       const res = await fetch(`/api/admin/rental/orders/${encodeURIComponent(orderId)}/deposit`, {
@@ -814,6 +824,7 @@ export default function AdminRentalOrdersPage() {
       setRetainAmountInput("");
       setResolutionNote("");
       setResolutionReference("");
+      setLinkAssessmentToDeposit(false);
     } catch (error) {
       setDepositPanelError(error instanceof Error ? error.message : "Failed to resolve deposit");
     } finally {
@@ -2097,6 +2108,43 @@ export default function AdminRentalOrdersPage() {
                       </div>
                       {depositPanelBanner && <div className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-700">{depositPanelBanner}</div>}
                       {depositPanelError && <div className="mt-3 rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">{depositPanelError}</div>}
+                      <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
+                        <div className="font-semibold text-slate-900">Damage assessment context</div>
+                        <div className="mt-1 text-xs text-slate-500">
+                          Advisory evidence only. Deposit release or retention still requires an explicit manual action below.
+                        </div>
+                        {!activeDetailOrder.assessment.exists && (
+                          <div className="mt-3 text-sm text-slate-600">No damage assessment recorded for this order.</div>
+                        )}
+                        {activeDetailOrder.assessment.exists && (
+                          <div className="mt-3 space-y-1 text-sm text-slate-600">
+                            <div>Status: {assessmentStatusLabel(activeDetailOrder.assessment.status)}</div>
+                            <div>Result: {assessmentResultLabel(activeDetailOrder.assessment.assessmentResult)}</div>
+                            <div>
+                              Issue categories: {activeDetailOrder.assessment.issueCategories.length > 0 ? activeDetailOrder.assessment.issueCategories.join(", ") : "None recorded"}
+                            </div>
+                            <div>Estimated retention: {formatMoney(activeDetailOrder.assessment.estimatedRetentionCents / 100)}</div>
+                            <div>Recommended action: {recommendedAssessmentActionLabel(activeDetailOrder.assessment.recommendedDepositAction)}</div>
+                          </div>
+                        )}
+                        {activeDetailOrder.assessment.status === "finalized" && activeDetailOrder.assessment.assessmentId && (
+                          <label className="mt-4 flex items-start gap-2 text-sm text-slate-700">
+                            <input
+                              type="checkbox"
+                              checked={linkAssessmentToDeposit}
+                              onChange={(e) => setLinkAssessmentToDeposit(e.target.checked)}
+                            />
+                            <span>
+                              Link finalized assessment <span className="font-mono text-xs">{activeDetailOrder.assessment.assessmentId}</span> to this deposit resolution.
+                            </span>
+                          </label>
+                        )}
+                        {activeDetailOrder.assessment.exists && activeDetailOrder.assessment.status !== "finalized" && (
+                          <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                            Draft assessments can be reviewed here but cannot be linked as finalized deposit evidence yet.
+                          </div>
+                        )}
+                      </div>
                       <div className="mt-4 grid gap-3 sm:grid-cols-3">
                         <label className="grid gap-1 text-sm">
                           <span className="text-slate-700">Action</span>
@@ -2240,6 +2288,7 @@ export default function AdminRentalOrdersPage() {
                               <div className="mt-1">{formatDateTime(transaction.createdAt)}</div>
                               {transaction.notes && <div className="mt-1">{transaction.notes}</div>}
                               {transaction.externalReference && <div className="mt-1">Ref: {transaction.externalReference}</div>}
+                              {transaction.damageAssessmentId && <div className="mt-1">Assessment: {transaction.damageAssessmentId}</div>}
                             </div>
                           ))}
                         </div>
