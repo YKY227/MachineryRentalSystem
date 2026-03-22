@@ -191,6 +191,9 @@ export default function AdminInvoiceDetailPage() {
   const isDraft = inv?.status === "draft";
   const isIssued = inv?.status === "issued";
   const isVoid = inv?.status === "void";
+  const damageChargeContext = inv?.metadata?.damageCharge;
+  const isDamageChargeInvoice =
+    inv?.metadata?.contextType === "damage_charge" || damageChargeContext?.kind === "damage_charge";
 
   const [showEmailModal, setShowEmailModal] = useState(false);
   const [emailTo, setEmailTo] = useState("");
@@ -1335,9 +1338,34 @@ export default function AdminInvoiceDetailPage() {
                       <span className="text-slate-600">Order Ref</span>
                       <span className="font-mono text-xs font-semibold text-slate-900">{inv.orderId}</span>
                     </div>
+                    {isDamageChargeInvoice && (
+                      <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                        Manual damage charge receivable. Assessment and deposit references below are advisory audit links only.
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
+
+              {isDamageChargeInvoice && (
+                <div className="mt-6 rounded-xl border border-slate-200 bg-slate-50 p-4">
+                  <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Damage Charge Context</div>
+                  <div className="mt-3 space-y-2 text-sm text-slate-700">
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-slate-600">Assessment Ref</span>
+                      <span className="font-mono text-xs text-slate-900">{damageChargeContext?.damageAssessmentId ?? "-"}</span>
+                    </div>
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-slate-600">Deposit Ref</span>
+                      <span className="font-mono text-xs text-slate-900">{damageChargeContext?.depositTransactionId ?? "-"}</span>
+                    </div>
+                    <div>
+                      <span className="text-slate-600">Notes</span>
+                      <div className="mt-1 text-slate-900">{damageChargeContext?.notes?.trim() || "-"}</div>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               <div className="mt-6 overflow-hidden rounded-xl border border-slate-200">
                 <table className="w-full text-left text-sm">

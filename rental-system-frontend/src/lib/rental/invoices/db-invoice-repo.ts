@@ -7,6 +7,7 @@ import type {
   InvoiceListSortBy,
   InvoiceListSortDir,
   InvoiceItem,
+  InvoiceMetadata,
   InvoicePdfStorage,
   InvoiceStatus,
   InvoiceSupplierSnapshot,
@@ -41,6 +42,7 @@ export type CreateCustomDraftInvoiceInput = {
   description: string;
   amountExclGstCents: number;
   depositCents?: number;
+  metadata?: InvoiceMetadata;
 };
 
 export type InvoiceListFilters = {
@@ -72,6 +74,7 @@ type InvoiceRow = {
   gst_amount_cents: number | null;
   total_incl_gst_cents: number | null;
   deposit_cents: number | null;
+  metadata: InvoiceMetadata | null;
   email_log: InvoiceEmailLogItem[] | null;
   void_reason: string | null;
   voided_at: string | null;
@@ -112,6 +115,7 @@ const BASE_COLUMNS = [
   "gst_amount_cents",
   "total_incl_gst_cents",
   "deposit_cents",
+  "metadata",
   "email_log",
   "void_reason",
   "voided_at",
@@ -153,6 +157,7 @@ function toInvoice(row: InvoiceRow): Invoice {
     gstAmountCents: Number(row.gst_amount_cents ?? 0),
     totalInclGstCents: Number(row.total_incl_gst_cents ?? 0),
     depositCents: typeof row.deposit_cents === "number" ? row.deposit_cents : undefined,
+    metadata: row.metadata ?? undefined,
     emailLog: Array.isArray(row.email_log) ? row.email_log : [],
     voidReason: row.void_reason ?? undefined,
     voidedAt: row.voided_at ?? undefined,
@@ -205,6 +210,7 @@ function toDbPatch(patch: Partial<Invoice>) {
   if (patch.gstAmountCents !== undefined) db.gst_amount_cents = patch.gstAmountCents;
   if (patch.totalInclGstCents !== undefined) db.total_incl_gst_cents = patch.totalInclGstCents;
   if (patch.depositCents !== undefined) db.deposit_cents = patch.depositCents;
+  if (patch.metadata !== undefined) db.metadata = patch.metadata;
   if (patch.emailLog !== undefined) db.email_log = patch.emailLog;
   if (patch.voidReason !== undefined) db.void_reason = patch.voidReason;
   if (patch.voidedAt !== undefined) db.voided_at = patch.voidedAt;
@@ -585,6 +591,7 @@ export const dbInvoiceRepo = {
       gst_amount_cents: gstAmountCents,
       total_incl_gst_cents: totalInclGstCents,
       deposit_cents: depositCents > 0 ? depositCents : null,
+      metadata: {},
       email_log: [] as InvoiceEmailLogItem[],
       void_reason: null,
       voided_at: null,
@@ -646,6 +653,7 @@ export const dbInvoiceRepo = {
       gst_amount_cents: gstAmountCents,
       total_incl_gst_cents: totalInclGstCents,
       deposit_cents: depositCents > 0 ? depositCents : null,
+      metadata: input.metadata ?? {},
       email_log: [] as InvoiceEmailLogItem[],
       void_reason: null,
       voided_at: null,

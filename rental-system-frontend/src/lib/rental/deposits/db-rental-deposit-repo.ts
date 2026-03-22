@@ -377,6 +377,18 @@ export const dbRentalDepositRepo = {
     return ((data ?? []) as unknown as DepositTransactionRow[]).map(toTransaction);
   },
 
+  async getTransactionById(transactionId: string): Promise<RentalDepositTransaction | null> {
+    const supabase = supabaseAdmin();
+    const { data, error } = await supabase
+      .from(DEPOSIT_TRANSACTIONS_TABLE)
+      .select(DEPOSIT_TRANSACTION_COLUMNS)
+      .eq("id", transactionId)
+      .maybeSingle<DepositTransactionRow>();
+
+    if (error) throw new Error(`Deposit transaction read failed: ${error.message}`);
+    return data ? toTransaction(data) : null;
+  },
+
   async findCollectedTransactionByPaymentSessionId(
     depositId: string,
     paymentSessionId: string

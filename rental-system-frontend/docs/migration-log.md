@@ -1,4 +1,4 @@
-# Migration Log
+﻿# Migration Log
 
 ## How to use this log
 - Add one entry in the same PR whenever code changes data source, schema/SQL, API routes, auth/security, or invoice/pdf/email flows.
@@ -911,7 +911,7 @@ Risks / follow-up notes:
 
 Summary:
 - Refined the public landing hero to use the Teesin red palette more intentionally while keeping the page mostly neutral and public-first.
-- Added “Teesin Machinery Pte Ltd” as the hero brand anchor without inserting the logo asset.
+- Added â€œTeesin Machinery Pte Ltdâ€ as the hero brand anchor without inserting the logo asset.
 - Replaced the right-side hero action card with a branded trust/operations panel and kept auth awareness as lightweight status content only.
 
 Files changed:
@@ -1563,7 +1563,7 @@ Risks / follow-up notes:
 ## 2026-03-12 | Scope: equipment maintenance / downtime blocking v1
 Summary:
 - Audited the rental scheduling stack and confirmed per-equipment maintenance buffer days, DB-backed availability holds, DB-backed equipment inventory, and admin settings already existed, but explicit downtime blocking was still missing from production availability truth and the calendar still relied on localStorage for operational order/hold data.
-- Added a DB-backed equipment downtime model, wired downtime into checkout hold acquisition and extension availability reads, replaced the calendar’s authoritative operational data with DB-backed orders/downtime, and added a minimal admin downtime workflow plus an admin/settings operations default for maintenance buffer fallback.
+- Added a DB-backed equipment downtime model, wired downtime into checkout hold acquisition and extension availability reads, replaced the calendarâ€™s authoritative operational data with DB-backed orders/downtime, and added a minimal admin downtime workflow plus an admin/settings operations default for maintenance buffer fallback.
 
 Files changed:
 - `docs/sql/rental_equipment_downtime_v1.sql`
@@ -2008,3 +2008,30 @@ API / Page changes:
 
 Risks / follow-up notes:
 - The linkage is recorded per resolution transaction for auditability; broader reporting or invoice follow-on flows can reference the same assessment later if approved.
+
+## 2026-03-22 | Scope: manual rental damage charge invoicing
+Summary:
+- Added an explicit admin-only damage charge invoice draft workflow for returned/completed rental orders using the existing custom invoice creation path.
+- Kept damage assessment and deposit references advisory/manual only by storing optional audit metadata on the invoice without automating deposit, invoicing, or credit decisions.
+
+Files changed:
+- `docs/sql/rental_invoice_damage_context_v1.sql`
+- `src/lib/rental/invoices/types.ts`
+- `src/lib/rental/invoices/db-invoice-repo.ts`
+- `src/lib/rental/deposits/db-rental-deposit-repo.ts`
+- `src/lib/rental/invoices/damage-charge-invoice-service.ts`
+- `src/app/api/admin/rental/orders/[id]/damage-invoice/route.ts`
+- `src/app/admin/rental/orders/page.tsx`
+- `src/app/admin/rental/invoices/[id]/page.tsx`
+- `docs/migration-log.md`
+
+DB / Infra changes:
+- Added nullable invoice `metadata` support on `rental_invoices` for damage-charge audit context.
+- No deposit ledger derivation, payment schema, or credit-control schema changed.
+
+API / Page changes:
+- Added a protected admin route to create a manual damage charge invoice draft for an order with optional finalized assessment and deposit resolution references.
+- Added a manual damage invoice action in the admin rental orders deposit workflow and surfaced the linked damage-charge context on the standard admin invoice detail page.
+
+Risks / follow-up notes:
+- The created damage invoice becomes a normal receivable after creation, but broader reporting or customer-facing wording may need a later pass if damage-charge invoices should be more explicitly labeled outside the admin detail view.

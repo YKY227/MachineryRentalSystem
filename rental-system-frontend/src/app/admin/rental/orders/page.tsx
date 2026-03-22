@@ -381,6 +381,14 @@ export default function AdminRentalOrdersPage() {
   const [resolutionNote, setResolutionNote] = useState("");
   const [resolutionReference, setResolutionReference] = useState("");
   const [linkAssessmentToDeposit, setLinkAssessmentToDeposit] = useState(false);
+  const [damageInvoiceDescription, setDamageInvoiceDescription] = useState("");
+  const [damageInvoiceAmountInput, setDamageInvoiceAmountInput] = useState("");
+  const [damageInvoiceNotes, setDamageInvoiceNotes] = useState("");
+  const [linkAssessmentToDamageInvoice, setLinkAssessmentToDamageInvoice] = useState(false);
+  const [linkedDamageInvoiceDepositTransactionId, setLinkedDamageInvoiceDepositTransactionId] = useState("");
+  const [damageInvoiceSaving, setDamageInvoiceSaving] = useState(false);
+  const [damageInvoiceError, setDamageInvoiceError] = useState<string | null>(null);
+  const [damageInvoiceBanner, setDamageInvoiceBanner] = useState<string | null>(null);
   const [depositSaving, setDepositSaving] = useState(false);
   const [activeOpsOrderId, setActiveOpsOrderId] = useState<string | null>(null);
   const [opsBanner, setOpsBanner] = useState<string | null>(null);
@@ -569,6 +577,13 @@ export default function AdminRentalOrdersPage() {
     [activeDetailOrderId, orderRows]
   );
   const detailOrder = activeDetailOrder?.order ?? null;
+  const depositResolutionTransactions = useMemo(
+    () =>
+      depositTransactions.filter(
+        (transaction) => transaction.transactionType === "released" || transaction.transactionType === "retained"
+      ),
+    [depositTransactions]
+  );
 
   async function refreshInventory() {
     const res = await fetch("/api/admin/rental/equipment", {
@@ -756,6 +771,13 @@ export default function AdminRentalOrdersPage() {
     setResolutionNote("");
     setResolutionReference("");
     setLinkAssessmentToDeposit(false);
+    setDamageInvoiceDescription("");
+    setDamageInvoiceAmountInput("");
+    setDamageInvoiceNotes("");
+    setLinkAssessmentToDamageInvoice(false);
+    setLinkedDamageInvoiceDepositTransactionId("");
+    setDamageInvoiceError(null);
+    setDamageInvoiceBanner(null);
 
     try {
       const res = await fetch(`/api/admin/rental/orders/${encodeURIComponent(orderId)}/deposit`, {
@@ -829,6 +851,54 @@ export default function AdminRentalOrdersPage() {
       setDepositPanelError(error instanceof Error ? error.message : "Failed to resolve deposit");
     } finally {
       setDepositSaving(false);
+    }
+  }
+
+  async function submitDamageInvoice(orderId: string) {
+    try {
+      setDamageInvoiceSaving(true);
+      setDamageInvoiceError(null);
+      setDamageInvoiceBanner(null);
+
+      const linkedAssessmentId =
+        linkAssessmentToDamageInvoice &&
+        activeDetailOrder?.assessment.status === "finalized" &&
+        activeDetailOrder.assessment.assessmentId
+          ? activeDetailOrder.assessment.assessmentId
+          : undefined;
+
+      const payload = {
+        description: damageInvoiceDescription,
+        amountExclGstCents: Math.round(Number(damageInvoiceAmountInput || 0) * 100),
+        notes: damageInvoiceNotes,
+        damageAssessmentId: linkedAssessmentId,
+        depositTransactionId: linkedDamageInvoiceDepositTransactionId || undefined,
+      };
+
+      const res = await fetch(`/api/admin/rental/orders/${encodeURIComponent(orderId)}/damage-invoice`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error ?? "Failed to create damage charge invoice");
+
+      const invoice = data?.invoice as Invoice | undefined;
+      if (!invoice?.id) throw new Error("Damage invoice response missing id");
+
+      setDamageInvoiceBanner(String(data?.message ?? "Damage charge invoice draft created."));
+      setDamageInvoiceDescription("");
+      setDamageInvoiceAmountInput("");
+      setDamageInvoiceNotes("");
+      setLinkAssessmentToDamageInvoice(false);
+      setLinkedDamageInvoiceDepositTransactionId("");
+      await refreshInvoices(orders);
+      router.push(`/admin/rental/invoices/${encodeURIComponent(invoice.id)}`);
+    } catch (error) {
+      setDamageInvoiceError(error instanceof Error ? error.message : "Failed to create damage charge invoice");
+    } finally {
+      setDamageInvoiceSaving(false);
     }
   }
 
@@ -2178,6 +2248,59 @@ export default function AdminRentalOrdersPage() {
                       <button type="button" onClick={() => submitDepositResolution(detailOrder.id)} disabled={depositSaving || depositPanelLoading} className="mt-4 rounded-lg bg-[#D24338] px-4 py-2 text-sm font-semibold text-white hover:bg-[#B9382E] disabled:bg-slate-300">
                         {depositSaving ? "Recording..." : "Record deposit resolution"}
                       </button>
+
+                      <div className="mt-6 rounded-xl border border-slate-200 bg-slate-50 p-4">
+                        <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+                          <BadgeDollarSign className="h-4 w-4 text-[#D24338]" />
+                          Manual damage charge invoice
+                        </div>
+                        <div className="mt-1 text-xs text-slate-500">
+                          Separate finance action only. This creates a normal draft invoice and does not automate deposit, invoicing, or credit decisions.
+                        </div>
+                        {damageInvoiceBanner && <div className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-700">{damageInvoiceBanner}</div>}
+                        {damageInvoiceError && <div className="mt-3 rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">{damageInvoiceError}</div>}
+                        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                          <label className="grid gap-1 text-sm sm:col-span-2">
+                            <span className="text-slate-700">Description</span>
+                            <input type="text" value={damageInvoiceDescription} onChange={(e) => setDamageInvoiceDescription(e.target.value)} className="rounded-lg border border-slate-200 px-3 py-2 text-sm" placeholder={`Damage charge for ${detailOrder.equipmentTitle}`} />
+                          </label>
+                          <label className="grid gap-1 text-sm">
+                            <span className="text-slate-700">Amount (Excl GST, SGD)</span>
+                            <input type="number" min="0" step="0.01" value={damageInvoiceAmountInput} onChange={(e) => setDamageInvoiceAmountInput(e.target.value)} className="rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+                          </label>
+                          <label className="grid gap-1 text-sm">
+                            <span className="text-slate-700">Linked deposit decision</span>
+                            <select value={linkedDamageInvoiceDepositTransactionId} onChange={(e) => setLinkedDamageInvoiceDepositTransactionId(e.target.value)} className="rounded-lg border border-slate-200 px-3 py-2 text-sm">
+                              <option value="">None</option>
+                              {depositResolutionTransactions.map((transaction) => (
+                                <option key={transaction.id} value={transaction.id}>
+                                  {depositTransactionLabel(transaction.transactionType)} · {formatMoney(transaction.amountCents / 100)} · {transaction.id}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                        </div>
+                        <label className="mt-3 grid gap-1 text-sm">
+                          <span className="text-slate-700">Internal finance note</span>
+                          <textarea value={damageInvoiceNotes} onChange={(e) => setDamageInvoiceNotes(e.target.value)} className="min-h-24 rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+                        </label>
+                        {activeDetailOrder.assessment.status === "finalized" && activeDetailOrder.assessment.assessmentId && (
+                          <label className="mt-4 flex items-start gap-2 text-sm text-slate-700">
+                            <input type="checkbox" checked={linkAssessmentToDamageInvoice} onChange={(e) => setLinkAssessmentToDamageInvoice(e.target.checked)} />
+                            <span>
+                              Link finalized assessment <span className="font-mono text-xs">{activeDetailOrder.assessment.assessmentId}</span> as evidence for this invoice draft.
+                            </span>
+                          </label>
+                        )}
+                        {activeDetailOrder.assessment.exists && activeDetailOrder.assessment.status !== "finalized" && (
+                          <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                            Draft assessments are visible for context but cannot be linked as finalized invoice evidence yet.
+                          </div>
+                        )}
+                        <button type="button" onClick={() => submitDamageInvoice(detailOrder.id)} disabled={damageInvoiceSaving || depositPanelLoading} className="mt-4 rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700 disabled:bg-slate-300">
+                          {damageInvoiceSaving ? "Creating..." : "Create damage invoice draft"}
+                        </button>
+                      </div>
                     </div>
                   )}
 
@@ -2347,5 +2470,3 @@ export default function AdminRentalOrdersPage() {
     </div>
   );
 }
-
-
