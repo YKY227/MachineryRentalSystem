@@ -10,6 +10,7 @@ import {
   Shield,
   Truck,
   ClipboardList,
+  LoaderCircle,
 } from "lucide-react";
 
 import type { Equipment } from "@/lib/rental/types";
@@ -409,7 +410,7 @@ function CheckoutInner() {
                 <h2 className="text-lg font-semibold text-slate-900">{equipment.title}</h2>
                 <p className="mt-1 text-sm text-slate-600">
                   {equipment.brand ?? "-"}
-                  {equipment.model ? ` • ${equipment.model}` : ""}
+                  {equipment.model ? ` | ${equipment.model}` : ""}
                 </p>
 
                 <div className="mt-4 grid gap-3 sm:grid-cols-2">
@@ -496,7 +497,7 @@ function CheckoutInner() {
                     Signed in as <span className="font-semibold text-slate-800">{authCustomer.email}</span>
                     <div className="mt-1">
                       Terms: <span className="font-medium text-slate-700">{authCustomer.paymentTerms.toUpperCase()}</span>
-                      {" · "}
+                      {" | "}
                       Vetting: <span className="font-medium text-slate-700">{authCustomer.vettingStatus.replace("_", " ").toUpperCase()}</span>
                     </div>
                   </div>
@@ -663,6 +664,18 @@ function CheckoutInner() {
                 </div>
               )}
 
+              {confirming && (
+                <div className="mt-4 rounded-xl border border-sky-200 bg-sky-50 p-3 text-xs text-sky-800">
+                  <div className="flex items-center gap-2 font-medium">
+                    <LoaderCircle className="h-4 w-4 animate-spin" />
+                    Processing your checkout...
+                  </div>
+                  <div className="mt-1 text-sky-700">
+                    We are validating inventory, preparing your order, and redirecting you to payment if required.
+                  </div>
+                </div>
+              )}
+
               <button
                 type="button"
                 disabled={!valid || confirming}
@@ -674,12 +687,17 @@ function CheckoutInner() {
                     : "cursor-not-allowed bg-slate-200 text-slate-500",
                 ].join(" ")}
               >
-                {confirming
-                  ? "Processing..."
-                  : adminAuthenticated
-                    ? "Customer checkout only"
-                    : "Continue checkout"}
-                <ArrowRight className="ml-2 h-4 w-4" />
+                {confirming ? (
+                  <>
+                    <LoaderCircle className="mr-2 h-4 w-4 animate-spin" />
+                    Processing...
+                  </>
+                ) : (
+                  <>
+                    {adminAuthenticated ? "Customer checkout only" : "Continue checkout"}
+                    <ArrowRight className="ml-2 h-4 w-4" />
+                  </>
+                )}
               </button>
 
               <div className="mt-3 text-xs text-slate-500">

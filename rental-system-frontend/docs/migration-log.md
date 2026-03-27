@@ -2268,3 +2268,24 @@ Risks / follow-up notes:
 - Webhook latency can still delay visible success briefly until one of the trusted payment-application markers is written, so very short pending windows remain possible by design.
 - A later shared checkout-state normalizer or optional real-time update channel could further simplify status handling, but this change keeps the current server-authoritative polling model intact.
 
+## 2026-03-28 | Scope: rental detail UI polish and checkout processing feedback
+Summary:
+- Added clearer customer-facing processing feedback in the checkout flow so users can see when booking validation and payment redirection are still in progress.
+- Tightened the rental detail booking form so past dates cannot be selected in the browser and aligned the page accents with the public-site palette without changing the existing layout.
+
+Files changed:
+- src/app/rental/[id]/page.tsx
+- src/app/rental/checkout/page.tsx
+- docs/migration-log.md
+
+DB / Infra changes:
+- No schema changes were required.
+- Existing server-side checkout, availability, and date validation logic remain authoritative and unchanged.
+
+API / Page changes:
+- Rental detail page now applies a client-side minimum date floor for start and end date inputs, keeps end date aligned to the chosen start date, and refreshes a few panel/button accents to match the broader public palette already used on landing and contact pages.
+- Checkout page now shows an inline animated processing state while booking validation and payment redirection are underway, giving customers clearer feedback during server/payment actions.
+
+Risks / follow-up notes:
+- Browser-side date flooring improves UX, but server-side availability and date validation must remain the source of truth for any malformed or manually crafted requests.
+- A later pass could standardize loading treatments across more public rental steps, but this change intentionally stays limited to the current detail and checkout flow.

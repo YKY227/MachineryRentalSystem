@@ -7,6 +7,7 @@ import {
   ArrowRight,
   CalendarDays,
   CheckCircle2,
+  LoaderCircle,
   Package,
   Shield,
   Truck,
@@ -43,11 +44,20 @@ function formatMoney(n: number) {
   }).format(n);
 }
 
+function todayLocalIso() {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
 export default function RentalDetailPage() {
   const params = useParams();
   const router = useRouter();
 
   const equipmentId = (params?.id as string) ?? "";
+  const todayIso = useMemo(() => todayLocalIso(), []);
 
   const [loading, setLoading] = useState(true);
   const [equipment, setEquipment] = useState<Equipment | null>(null);
@@ -117,6 +127,18 @@ export default function RentalDetailPage() {
       setDeliveryAddress("");
     }
   }, [deliveryAddress, fulfillment]);
+
+  useEffect(() => {
+    if (startDate < todayIso) {
+      setStartDate(todayIso);
+    }
+  }, [startDate, todayIso]);
+
+  useEffect(() => {
+    if (endDate < startDate) {
+      setEndDate(startDate);
+    }
+  }, [endDate, startDate]);
 
   const days = useMemo(() => calculateRentalDaysInclusive(startDate, endDate), [startDate, endDate]);
   const minDays = equipment?.pricing?.minDays ?? 1;
@@ -250,7 +272,7 @@ export default function RentalDetailPage() {
           </h1>
           <p className="mt-1 text-sm text-slate-600">
             {equipment.brand ?? "-"}
-            {equipment.model ? ` • ${equipment.model}` : ""}
+            {equipment.model ? ` | ${equipment.model}` : ""}
           </p>
         </div>
 
@@ -316,7 +338,7 @@ export default function RentalDetailPage() {
 
               <div className="mt-4 space-y-2 text-xs text-slate-600">
                 <div className="flex items-center gap-2">
-                  <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                  <CheckCircle2 className="h-4 w-4 text-[#D24338]" />
                   {inStock
                     ? dateValid
                       ? `${availableUnitsForRange} unit(s) available for ${startDate} to ${endDate}`
@@ -337,19 +359,19 @@ export default function RentalDetailPage() {
             </div>
 
             <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-              <h2 className="text-sm font-semibold text-slate-900">Specifications</h2>
+              <h2 className="text-sm font-semibold text-[#2A2A2A]">Specifications</h2>
               <div className="mt-3 space-y-2">
                 {Object.entries(equipment.specs ?? {}).map(([k, v]) => (
                   <div
                     key={k}
-                    className="flex items-start justify-between gap-3 rounded-lg bg-slate-50 px-3 py-2"
+                    className="flex items-start justify-between gap-3 rounded-lg border border-[#F2C7C2] bg-[#FFF6F4] px-3 py-2"
                   >
-                    <div className="text-xs font-medium text-slate-600">{k}</div>
+                    <div className="text-xs font-medium text-[#8A453F]">{k}</div>
                     <div className="text-xs text-slate-900">{v}</div>
                   </div>
                 ))}
                 {Object.keys(equipment.specs ?? {}).length === 0 && (
-                  <div className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">
+                  <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-500">
                     No specs provided yet.
                   </div>
                 )}
@@ -414,7 +436,7 @@ export default function RentalDetailPage() {
             <div className="grid gap-6 md:grid-cols-2">
               <div>
                 <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
-                  <Sparkles className="h-4 w-4 text-amber-600" />
+                  <Sparkles className="h-4 w-4 text-[#D24338]" />
                   Key features
                 </div>
                 <ul className="mt-3 space-y-2 text-sm text-slate-600">
@@ -427,7 +449,7 @@ export default function RentalDetailPage() {
                       ]
                   ).map((item) => (
                     <li key={item} className="flex items-start gap-2">
-                      <span className="mt-1 inline-block h-1.5 w-1.5 rounded-full bg-slate-400" />
+                      <span className="mt-1 inline-block h-1.5 w-1.5 rounded-full bg-[#D24338]" />
                       <span>{item}</span>
                     </li>
                   ))}
@@ -436,7 +458,7 @@ export default function RentalDetailPage() {
 
               <div className="md:border-l md:border-slate-200 md:pl-6">
                 <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
-                  <Factory className="h-4 w-4 text-slate-700" />
+                  <Factory className="h-4 w-4 text-[#D24338]" />
                   Applications
                 </div>
                 <ul className="mt-3 space-y-2 text-sm text-slate-600">
@@ -449,7 +471,7 @@ export default function RentalDetailPage() {
                       ]
                   ).map((item) => (
                     <li key={item} className="flex items-start gap-2">
-                      <span className="mt-1 inline-block h-1.5 w-1.5 rounded-full bg-slate-400" />
+                      <span className="mt-1 inline-block h-1.5 w-1.5 rounded-full bg-[#D24338]" />
                       <span>{item}</span>
                     </li>
                   ))}
@@ -461,14 +483,14 @@ export default function RentalDetailPage() {
 
         <div className="lg:col-span-5">
           <div className="sticky top-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <h2 className="text-sm font-semibold text-slate-900">
+            <h2 className="text-sm font-semibold text-[#2A2A2A]">
               Create rental booking
             </h2>
             <p className="mt-1 text-xs text-slate-500">
               Final availability is checked and locked server-side when checkout begins.
             </p>
 
-            <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
+            <div className="mt-4 rounded-xl border border-[#F2C7C2] bg-[#FFF6F4] p-4">
               <div className="flex items-baseline justify-between">
                 <div className="text-xs text-slate-500">From</div>
                 <div className="text-lg font-semibold text-slate-900">
@@ -477,19 +499,19 @@ export default function RentalDetailPage() {
                 </div>
               </div>
               <div className="mt-2 grid grid-cols-3 gap-2 text-center">
-                <div className="rounded-lg bg-white p-2">
+                <div className="rounded-lg border border-white/80 bg-white p-2">
                   <div className="text-[10px] uppercase tracking-wide text-slate-500">Day</div>
                   <div className="text-sm font-semibold text-slate-900">
                     {formatMoney(equipment.pricing.dayRate)}
                   </div>
                 </div>
-                <div className="rounded-lg bg-white p-2">
+                <div className="rounded-lg border border-white/80 bg-white p-2">
                   <div className="text-[10px] uppercase tracking-wide text-slate-500">Week</div>
                   <div className="text-sm font-semibold text-slate-900">
                     {equipment.pricing.weekRate ? formatMoney(equipment.pricing.weekRate) : "-"}
                   </div>
                 </div>
-                <div className="rounded-lg bg-white p-2">
+                <div className="rounded-lg border border-white/80 bg-white p-2">
                   <div className="text-[10px] uppercase tracking-wide text-slate-500">Month</div>
                   <div className="text-sm font-semibold text-slate-900">
                     {equipment.pricing.monthRate ? formatMoney(equipment.pricing.monthRate) : "-"}
@@ -506,7 +528,8 @@ export default function RentalDetailPage() {
                     type="date"
                     value={startDate}
                     onChange={(e) => setStartDate(e.target.value)}
-                    className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-slate-400"
+                    min={todayIso}
+                    className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-[#D24338]"
                   />
                 </div>
                 <div>
@@ -515,7 +538,8 @@ export default function RentalDetailPage() {
                     type="date"
                     value={endDate}
                     onChange={(e) => setEndDate(e.target.value)}
-                    className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-slate-400"
+                    min={startDate || todayIso}
+                    className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-[#D24338]"
                   />
                 </div>
               </div>
@@ -534,14 +558,17 @@ export default function RentalDetailPage() {
                   max={Math.max(1, availableUnitsForRange)}
                   value={qty}
                   onChange={(e) => setQty(Math.max(1, Number(e.target.value || 1)))}
-                  className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-slate-400"
+                  className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-[#D24338]"
                 />
                 <div className="mt-1 text-xs text-slate-500">
                   {dateValid ? "Available for selected dates:" : "Current catalog units:"}{" "}
                   <span className="font-semibold text-slate-700">{availableUnitsForRange}</span>
                 </div>
                 {availabilityLoading && (
-                  <div className="mt-1 text-xs text-slate-500">Checking server availability...</div>
+                  <div className="mt-1 inline-flex items-center gap-2 text-xs text-slate-500">
+                    <LoaderCircle className="h-3.5 w-3.5 animate-spin text-[#D24338]" />
+                    Checking server availability...
+                  </div>
                 )}
                 {!qtyValid && (
                   <p className="mt-1 text-xs text-rose-600">
@@ -559,8 +586,8 @@ export default function RentalDetailPage() {
                     className={[
                       "inline-flex items-center justify-center gap-2 rounded-xl border px-3 py-2 text-sm font-semibold",
                       fulfillment === "deliver"
-                        ? "border-slate-900 bg-slate-900 text-white"
-                        : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50",
+                        ? "border-[#D24338] bg-[#D24338] text-white"
+                        : "border-slate-200 bg-white text-slate-700 hover:border-[#F2C7C2] hover:bg-[#FFF6F4]",
                     ].join(" ")}
                   >
                     <Truck className="h-4 w-4" />
@@ -573,8 +600,8 @@ export default function RentalDetailPage() {
                     className={[
                       "inline-flex items-center justify-center gap-2 rounded-xl border px-3 py-2 text-sm font-semibold",
                       fulfillment === "self_collect"
-                        ? "border-slate-900 bg-slate-900 text-white"
-                        : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50",
+                        ? "border-[#D24338] bg-[#D24338] text-white"
+                        : "border-slate-200 bg-white text-slate-700 hover:border-[#F2C7C2] hover:bg-[#FFF6F4]",
                     ].join(" ")}
                   >
                     <Package className="h-4 w-4" />
@@ -597,7 +624,7 @@ export default function RentalDetailPage() {
                         className={[
                           "w-full rounded-xl border bg-white py-2 pl-9 pr-3 text-sm outline-none",
                           addressValid
-                            ? "border-slate-200 focus:border-slate-400"
+                            ? "border-slate-200 focus:border-[#D24338]"
                             : "border-rose-300 focus:border-rose-400",
                         ].join(" ")}
                       />
@@ -664,7 +691,7 @@ export default function RentalDetailPage() {
               className={[
                 "mt-4 inline-flex w-full items-center justify-center rounded-xl px-4 py-3 text-sm font-semibold",
                 canProceed
-                  ? "bg-sky-600 text-white hover:bg-sky-700"
+                  ? "bg-[#D24338] text-white hover:bg-[#B9382E]"
                   : "cursor-not-allowed bg-slate-200 text-slate-500",
               ].join(" ")}
             >
