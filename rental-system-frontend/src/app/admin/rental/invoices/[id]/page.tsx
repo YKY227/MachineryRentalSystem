@@ -180,6 +180,7 @@ export default function AdminInvoiceDetailPage() {
   const [loading, setLoading] = useState(true);
   const [paymentsLoading, setPaymentsLoading] = useState(false);
   const [activeAction, setActiveAction] = useState<InvoiceActionKey | null>(null);
+  const [issuingInvoice, setIssuingInvoice] = useState(false);
   const [banner, setBanner] = useState<BannerState | null>(null);
   const bannerTimeoutRef = useRef<number | null>(null);
 
@@ -431,7 +432,7 @@ export default function AdminInvoiceDetailPage() {
   }
 
   async function onIssue() {
-    if (!inv || inv.status !== "draft") return;
+    if (!inv || inv.status !== "draft" || issuingInvoice) return;
 
     const ok = window.confirm(
       "Issue Tax Invoice?\n\nOnce issued, an invoice number will be assigned and the invoice will be locked."
@@ -439,6 +440,7 @@ export default function AdminInvoiceDetailPage() {
     if (!ok) return;
 
     try {
+      setIssuingInvoice(true);
       const res = await fetch(`/api/admin/rental/invoices/${encodeURIComponent(inv.id)}/issue`, {
         method: "POST",
         credentials: "include",
@@ -453,6 +455,8 @@ export default function AdminInvoiceDetailPage() {
     } catch (e) {
       const message = e instanceof Error ? e.message : "Failed to issue invoice";
       flash(message, "error");
+    } finally {
+      setIssuingInvoice(false);
     }
   }
 
@@ -762,18 +766,18 @@ export default function AdminInvoiceDetailPage() {
                   </button>
                   <button
                     type="button"
-                    disabled={!canIssue}
+                    disabled={!canIssue || issuingInvoice}
                     onClick={onIssue}
                     className={[
                       "inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold",
-                      canIssue
+                      canIssue && !issuingInvoice
                         ? "bg-[#D24338] text-white hover:bg-[#B9382E]"
                         : "bg-slate-200 text-slate-500",
                     ].join(" ")}
-                    title={!canIssue ? "Fill Bill To name and ensure items exist." : "Issue and lock invoice"}
+                    title={issuingInvoice ? "Issuing invoice..." : !canIssue ? "Fill Bill To name and ensure items exist." : "Issue and lock invoice"}
                   >
                     <Receipt className="h-4 w-4" />
-                    Issue Invoice
+                    {issuingInvoice ? "Issuing..." : "Issue Invoice"}
                   </button>
                 </>
               )}

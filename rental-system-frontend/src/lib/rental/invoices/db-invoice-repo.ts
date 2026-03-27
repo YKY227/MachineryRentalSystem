@@ -17,6 +17,7 @@ import { supabaseAdmin } from "@/lib/supabase/server";
 
 const INVOICE_TABLE = process.env.SUPABASE_INVOICES_TABLE ?? "rental_invoices";
 const INVOICE_EMAILS_TABLE = process.env.SUPABASE_INVOICE_EMAILS_TABLE ?? "rental_invoice_emails";
+const ALLOCATE_INVOICE_NO_RPC = "allocate_rental_invoice_no";
 const ORDER_NOT_VOID_FILTER = "void";
 
 export type DraftFromOrderInput = {
@@ -127,15 +128,23 @@ function nowIso() {
   return new Date().toISOString();
 }
 
-function pad5(n: number) {
-  return String(n).padStart(5, "0");
-}
-
 function monthKeyFromISO(iso: string) {
   const d = new Date(iso);
   const y = d.getUTCFullYear();
   const m = String(d.getUTCMonth() + 1).padStart(2, "0");
   return `${y}${m}`;
+}
+
+async function allocateInvoiceNumber(period: string) {
+  const supabase = supabaseAdmin();
+  const { data, error } = await supabase.rpc(ALLOCATE_INVOICE_NO_RPC, { p_period_key: period });
+
+  if (error) throw new Error(`Invoice number allocation failed: ${error.message}`);
+  if (typeof data !== "string" || !data.trim()) {
+    throw new Error("Invoice number allocation failed: empty allocator response");
+  }
+
+  return data;
 }
 
 function toInvoice(row: InvoiceRow): Invoice {
@@ -421,18 +430,7 @@ export const dbInvoiceRepo = {
 
     const issueDate = nowIso();
     const period = monthKeyFromISO(issueDate);
-    let invoiceNo = current.invoice_no;
-
-    if (!invoiceNo) {
-      const supabase = supabaseAdmin();
-      const { count, error: countError } = await supabase
-        .from(INVOICE_TABLE)
-        .select("id", { count: "exact", head: true })
-        .like("invoice_no", `INV-${period}-%`);
-
-      if (countError) throw new Error(`Invoice issue count failed: ${countError.message}`);
-      invoiceNo = `INV-${period}-${pad5((count ?? 0) + 1)}`;
-    }
+    const invoiceNo = current.invoice_no ?? (await allocateInvoiceNumber(period));
 
     const supabase = supabaseAdmin();
     const { data, error } = await supabase
@@ -444,10 +442,12 @@ export const dbInvoiceRepo = {
         updated_at: issueDate,
       })
       .eq("id", id)
+      .eq("status", "draft")
       .select(BASE_COLUMNS)
-      .single<InvoiceRow>();
+      .maybeSingle<InvoiceRow>();
 
     if (error) throw new Error(`Invoice issue failed: ${error.message}`);
+    if (!data) return toInvoice(await readByIdOrThrow(id));
     return toInvoice(data);
   },
 

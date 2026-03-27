@@ -2193,4 +2193,25 @@ Risks / follow-up notes:
 - This is a presentation-only improvement; richer time-based allocation previews or low-availability indicators can be added later without changing the current backend contract.
 - If the inventory model grows more granular later, the secondary breakdown section may need to expand into a richer per-status summary.
 
+## 2026-03-27 | Scope: atomic rental invoice number allocation
+Summary:
+- Replaced count-based invoice number generation during invoice issue with a DB-backed atomic allocator so issued invoice numbers remain unique under migrated data and concurrent requests.
+- Added a small admin invoice-detail loading safeguard so the Issue Invoice action is disabled while the issue request is in flight.
 
+Files changed:
+- `docs/sql/rental_invoice_number_allocator_v1.sql`
+- `src/lib/rental/invoices/db-invoice-repo.ts`
+- `src/app/admin/rental/invoices/[id]/page.tsx`
+- `docs/migration-log.md`
+
+DB / Infra changes:
+- Added `rental_invoice_number_counters` plus `allocate_rental_invoice_no(p_period_key text)` to allocate `INV-YYYYMM-00001` style invoice numbers atomically in the database.
+- The allocator seeds a new period from the highest existing suffix already present in `rental_invoices`, avoiding count-based collisions from migrated or manual data.
+
+API / Page changes:
+- `dbInvoiceRepo.issue(id)` now allocates invoice numbers through the DB function and only updates invoices that are still in `draft`, falling back to a fresh read if another issue attempt has already completed.
+- Admin invoice detail now disables the Issue Invoice button and shows an issuing state while the request is in flight to reduce duplicate user-triggered submissions.
+
+Risks / follow-up notes:
+- Existing duplicate or malformed `invoice_no` data already stored in the database is not cleaned up by this change and may still need one-time manual review if present.
+- A retry-on-conflict safeguard could still be added later around the issue path, but the database allocator is now the primary concurrency-safe uniqueness control.
