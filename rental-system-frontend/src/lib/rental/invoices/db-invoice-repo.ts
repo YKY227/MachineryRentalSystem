@@ -13,6 +13,8 @@ import type {
   InvoiceSupplierSnapshot,
 } from "@/lib/rental/invoices/types";
 import { calculateRentalCharges, RENTAL_GST_RATE } from "@/lib/rental/orders/pricing";
+import { resolveInvoiceBillToContext } from "@/lib/rental/invoices/invoice-bill-to";
+import type { RentalOrderCustomerSnapshot } from "@/lib/rental/orders/types";
 import { supabaseAdmin } from "@/lib/supabase/server";
 
 const INVOICE_TABLE = process.env.SUPABASE_INVOICES_TABLE ?? "rental_invoices";
@@ -22,6 +24,8 @@ const ORDER_NOT_VOID_FILTER = "void";
 
 export type DraftFromOrderInput = {
   orderId: string;
+  customerId?: string;
+  customerSnapshot?: RentalOrderCustomerSnapshot;
   equipmentTitle: string;
   qty: number;
   start: string;
@@ -556,6 +560,10 @@ export const dbInvoiceRepo = {
     const createdAt = nowIso();
 
     const qty = Math.max(1, Number(order.qty) || 1);
+    const billToContext = await resolveInvoiceBillToContext({
+      customerId: order.customerId,
+      customerSnapshot: order.customerSnapshot,
+    });
 
     const insertPayload = {
       status: "draft" as InvoiceStatus,
@@ -574,11 +582,7 @@ export const dbInvoiceRepo = {
         addressLines: ["Address line 1", "Singapore"],
         email: "billing@yourcompany.com",
       } satisfies InvoiceSupplierSnapshot,
-      bill_to: {
-        name: "Customer (Demo)",
-        addressLines: ["-"],
-        email: "",
-      } satisfies InvoiceBillToSnapshot,
+      bill_to: billToContext.billTo,
       items: [
         {
           description: `${order.equipmentTitle} (Rental ${order.start} -> ${order.end})`,

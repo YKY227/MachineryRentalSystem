@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 
 import { dbInvoiceRepo } from "@/lib/rental/invoices/db-invoice-repo";
+import { resolveInvoiceBillToContext } from "@/lib/rental/invoices/invoice-bill-to";
+import { dbOrderRepo } from "@/lib/rental/orders/db-order-repo";
+import type { InvoiceBillToSnapshot } from "@/lib/rental/invoices/types";
 import type { Invoice } from "@/lib/rental/invoices/types";
 import {
   adminUnauthorizedResponse,
@@ -31,7 +34,22 @@ export async function GET(_req: Request, ctx: RouteContext) {
     const invoice = await dbInvoiceRepo.get(id);
     if (!invoice) return NextResponse.json({ error: "Invoice not found" }, { status: 404 });
     const emails = await dbInvoiceRepo.listEmails(id);
-    return NextResponse.json({ invoice, emails });
+
+    let customerAccountBillTo: InvoiceBillToSnapshot | null = null;
+    if (invoice.status === "draft") {
+      const order = await dbOrderRepo.get(invoice.orderId);
+      if (order) {
+        const billToContext = await resolveInvoiceBillToContext({
+          customerId: order.customerId,
+          customerSnapshot: order.customerSnapshot,
+        });
+        if (billToContext.hasCustomerAccount) {
+          customerAccountBillTo = billToContext.billTo;
+        }
+      }
+    }
+
+    return NextResponse.json({ invoice, emails, customerAccountBillTo });
   } catch (e) {
     if (isAdminUnauthorized(e)) return adminUnauthorizedResponse();
     const message = e instanceof Error ? e.message : "Invoice read failed";

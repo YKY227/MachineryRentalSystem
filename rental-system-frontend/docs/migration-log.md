@@ -2215,3 +2215,32 @@ API / Page changes:
 Risks / follow-up notes:
 - Existing duplicate or malformed `invoice_no` data already stored in the database is not cleaned up by this change and may still need one-time manual review if present.
 - A retry-on-conflict safeguard could still be added later around the issue path, but the database allocator is now the primary concurrency-safe uniqueness control.
+
+## 2026-03-27 | Scope: invoice draft Bill To seeding from linked customer accounts
+Summary:
+- Fixed invoice draft Bill To seeding so order-linked registered customer accounts populate the invoice snapshot when drafts are first created instead of falling back to placeholder demo data.
+- Added a draft-only admin action to load the Bill To snapshot from the linked customer account without changing issued or voided invoice snapshot behavior.
+
+Files changed:
+- src/lib/rental/invoices/invoice-bill-to.ts
+- src/lib/rental/invoices/db-invoice-repo.ts
+- src/lib/rental/invoices/checkout-credit-automation.ts
+- src/lib/rental/invoices/checkout-invoice-automation.ts
+- src/app/api/admin/rental/invoices/route.ts
+- src/app/api/admin/rental/invoices/[id]/route.ts
+- src/app/api/admin/rental/invoices/[id]/load-customer-bill-to/route.ts
+- src/app/admin/rental/invoices/[id]/page.tsx
+- docs/migration-log.md
+
+DB / Infra changes:
+- No schema changes were required.
+- The fix reuses the existing ental_orders.customer_id, customer_snapshot, and ental_customers records as the Bill To source of truth for draft seeding.
+
+API / Page changes:
+- Draft invoice creation now seeds the invoice Bill To snapshot from the linked registered customer account when available, otherwise falling back to the order snapshot rather than placeholder demo values.
+- Admin invoice detail now exposes draft-only customer-account Bill To context and a Load from customer account action that refreshes the invoice snapshot without live-binding issued invoices to customer data.
+
+Risks / follow-up notes:
+- Older draft invoices that were already created with placeholder or incomplete Bill To data are not backfilled automatically and will still need a manual draft refresh by admin if correction is required.
+- Some invoice creation paths that do not carry a linked registered customer account will still fall back to order snapshot or explicit custom Bill To inputs by design.
+

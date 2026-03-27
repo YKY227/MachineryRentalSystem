@@ -103,6 +103,8 @@ export async function POST(req: Request) {
 
     const invoice = await dbInvoiceRepo.createDraftFromOrder({
       orderId: order.id,
+      customerId: order.customerId,
+      customerSnapshot: order.customerSnapshot,
       equipmentTitle: order.equipmentTitle,
       qty: order.qty,
       start: order.start,

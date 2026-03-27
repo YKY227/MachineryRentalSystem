@@ -20,6 +20,7 @@ import {
 
 import type {
   Invoice,
+  InvoiceBillToSnapshot,
   InvoiceEmailEventType,
   InvoiceEmailLogItem,
   InvoicePayment,
@@ -57,6 +58,10 @@ function toDateInputValue(iso?: string) {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return new Date().toISOString().slice(0, 10);
   return d.toISOString().slice(0, 10);
+}
+
+function billToAddressText(billTo?: InvoiceBillToSnapshot | null) {
+  return (billTo?.addressLines ?? []).join("\n");
 }
 
 function statusChip(status: Invoice["status"]) {
@@ -188,6 +193,8 @@ export default function AdminInvoiceDetailPage() {
   const [billToEmail, setBillToEmail] = useState("");
   const [billToUen, setBillToUen] = useState("");
   const [billToAddress, setBillToAddress] = useState("");
+  const [customerAccountBillTo, setCustomerAccountBillTo] = useState<InvoiceBillToSnapshot | null>(null);
+  const [loadingCustomerBillTo, setLoadingCustomerBillTo] = useState(false);
 
   const isDraft = inv?.status === "draft";
   const isIssued = inv?.status === "issued";
@@ -281,12 +288,13 @@ export default function AdminInvoiceDetailPage() {
         : [];
       setInv(found);
       setEmails(nextEmails);
+      setCustomerAccountBillTo((data?.customerAccountBillTo ?? null) as InvoiceBillToSnapshot | null);
 
       if (found) {
         setBillToName(found.billTo?.name ?? "");
         setBillToEmail(found.billTo?.email ?? "");
         setBillToUen(found.billTo?.uen ?? "");
-        setBillToAddress((found.billTo?.addressLines ?? []).join("\n"));
+        setBillToAddress(billToAddressText(found.billTo));
         await loadPayments(found.id);
       } else {
         setPayments([]);
@@ -295,6 +303,7 @@ export default function AdminInvoiceDetailPage() {
     } catch (e) {
       setInv(null);
       setEmails([]);
+      setCustomerAccountBillTo(null);
       setPayments([]);
       setPaymentTotals(EMPTY_PAYMENT_TOTALS);
       const message = e instanceof Error ? e.message : "Failed to load invoice";
@@ -428,6 +437,42 @@ export default function AdminInvoiceDetailPage() {
     } catch (e) {
       const message = e instanceof Error ? e.message : "Failed to save draft";
       flash(message, "error");
+    }
+  }
+
+  async function onLoadBillToFromCustomerAccount() {
+    if (!inv || inv.status !== "draft" || !customerAccountBillTo || loadingCustomerBillTo) return;
+
+    try {
+      setLoadingCustomerBillTo(true);
+      const res = await fetch(
+        `/api/admin/rental/invoices/${encodeURIComponent(inv.id)}/load-customer-bill-to`,
+        {
+          method: "POST",
+          credentials: "include",
+        }
+      );
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error ?? "Failed to load Bill To from customer account");
+
+      const nextInvoice = (data?.invoice ?? null) as Invoice | null;
+      const nextCustomerBillTo = (data?.customerAccountBillTo ?? null) as InvoiceBillToSnapshot | null;
+      setCustomerAccountBillTo(nextCustomerBillTo);
+
+      if (nextInvoice) {
+        setInv(nextInvoice);
+        setBillToName(nextInvoice.billTo?.name ?? "");
+        setBillToEmail(nextInvoice.billTo?.email ?? "");
+        setBillToUen(nextInvoice.billTo?.uen ?? "");
+        setBillToAddress(billToAddressText(nextInvoice.billTo));
+      }
+
+      flash("Loaded Bill To from customer account.", "success");
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "Failed to load Bill To from customer account";
+      flash(message, "error");
+    } finally {
+      setLoadingCustomerBillTo(false);
     }
   }
 
@@ -1143,14 +1188,31 @@ export default function AdminInvoiceDetailPage() {
                 title="Bill To"
                 subtitle={isDraft ? "Editable while draft." : "Locked after issue or void."}
               />
-              {!isDraft && (
-                <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-600">
-                  Locked
-                </span>
-              )}
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                {isDraft && customerAccountBillTo && (
+                  <button
+                    type="button"
+                    disabled={loadingCustomerBillTo}
+                    onClick={onLoadBillToFromCustomerAccount}
+                    className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400"
+                  >
+                    {loadingCustomerBillTo ? "Loading customer..." : "Load from customer account"}
+                  </button>
+                )}
+                {!isDraft && (
+                  <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-600">
+                    Locked
+                  </span>
+                )}
+              </div>
             </div>
 
             <div className="mt-4 grid gap-3">
+              {isDraft && customerAccountBillTo ? (
+                <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+                  Linked registered customer account details are available for this draft invoice. Loading from customer account updates the invoice snapshot only.
+                </div>
+              ) : null}
               <div>
                 <label className="text-xs font-semibold text-slate-600">Company Name</label>
                 <input
