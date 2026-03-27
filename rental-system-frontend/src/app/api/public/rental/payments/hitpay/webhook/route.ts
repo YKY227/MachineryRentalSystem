@@ -69,6 +69,16 @@ function describeError(error: unknown) {
   return error instanceof Error ? error.message : "unknown error";
 }
 
+function mergeWebhookPayload(
+  existing: Record<string, unknown> | undefined,
+  patch: Record<string, unknown>
+) {
+  return {
+    ...(existing ?? {}),
+    ...patch,
+  };
+}
+
 export async function POST(req: Request) {
   try {
     requireWebhookEnv();
@@ -135,10 +145,10 @@ export async function POST(req: Request) {
       nextSession = await dbOrderPaymentSessionRepo.update(session.id, {
         providerReferenceNumber: providerState.referenceNumber || session.providerReferenceNumber,
         status: providerState.status,
-        webhookPayload: {
+        webhookPayload: mergeWebhookPayload(session.webhookPayload, {
           webhook: payload,
           provider: providerState.raw,
-        },
+        }),
         paidAt:
           providerState.status === "paid"
             ? providerState.paidAt ?? session.paidAt ?? new Date().toISOString()

@@ -1,10 +1,10 @@
-//rental-system-frontend/src/app/api/public/rental/checkout/payment-status/route.ts
-import { NextResponse } from "next/server";
+﻿import { NextResponse } from "next/server";
 
 import { dbRentalDepositRepo } from "@/lib/rental/deposits/db-rental-deposit-repo";
 import { dbInvoiceRepo } from "@/lib/rental/invoices/db-invoice-repo";
 import { dbOrderRepo } from "@/lib/rental/orders/db-order-repo";
 import { dbOrderPaymentSessionRepo } from "@/lib/rental/orders/db-order-payment-session-repo";
+import type { RentalOrderPaymentSession } from "@/lib/rental/orders/types";
 
 export const runtime = "nodejs";
 
@@ -14,6 +14,30 @@ function requireCheckoutEnv() {
   if (missing.length) {
     throw new Error(`Missing required env vars: ${missing.join(", ")}`);
   }
+}
+
+function normalizePaymentSession(session: RentalOrderPaymentSession | null) {
+  if (!session) return { paymentSession: null, normalizedFromEvidence: false };
+  if (session.status !== "pending") {
+    return { paymentSession: session, normalizedFromEvidence: false };
+  }
+
+  const hasSuccessfulEvidence = Boolean(
+    session.invoiceAppliedAt || session.invoicePaymentId || session.invoiceEmailSentAt
+  );
+
+  if (!hasSuccessfulEvidence) {
+    return { paymentSession: session, normalizedFromEvidence: false };
+  }
+
+  return {
+    paymentSession: {
+      ...session,
+      status: "paid",
+      paidAt: session.paidAt ?? session.invoiceAppliedAt ?? session.invoiceEmailSentAt,
+    },
+    normalizedFromEvidence: true,
+  };
 }
 
 export async function GET(req: Request) {
@@ -36,7 +60,14 @@ export async function GET(req: Request) {
       const order = await dbOrderRepo.get(session.orderId);
       const invoice = order ? await dbInvoiceRepo.findActiveByOrderId(order.id) : null;
       const depositSummary = order ? await dbRentalDepositRepo.getSummaryByOrderId(order.id) : null;
-      return NextResponse.json({ order, paymentSession: session, invoice, depositSummary });
+      const normalized = normalizePaymentSession(session);
+      return NextResponse.json({
+        order,
+        paymentSession: normalized.paymentSession,
+        invoice,
+        depositSummary,
+        normalizedFromEvidence: normalized.normalizedFromEvidence,
+      });
     }
 
     const order = await dbOrderRepo.get(orderId);
@@ -46,7 +77,7 @@ export async function GET(req: Request) {
 
     const invoice = await dbInvoiceRepo.findActiveByOrderId(order.id);
     const depositSummary = await dbRentalDepositRepo.getSummaryByOrderId(order.id);
-    return NextResponse.json({ order, paymentSession: null, invoice, depositSummary });
+    return NextResponse.json({ order, paymentSession: null, invoice, depositSummary, normalizedFromEvidence: false });
   } catch (e) {
     const message = e instanceof Error ? e.message : "Payment status read failed";
     return NextResponse.json({ error: message }, { status: 400 });

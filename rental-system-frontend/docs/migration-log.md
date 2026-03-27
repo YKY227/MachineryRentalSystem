@@ -2244,3 +2244,27 @@ Risks / follow-up notes:
 - Older draft invoices that were already created with placeholder or incomplete Bill To data are not backfilled automatically and will still need a manual draft refresh by admin if correction is required.
 - Some invoice creation paths that do not carry a linked registered customer account will still fall back to order snapshot or explicit custom Bill To inputs by design.
 
+## 2026-03-27 | Scope: checkout status reconciliation and HitPay payload preservation
+Summary:
+- Improved the public checkout status experience so pending sessions recheck server state, show clear payment-confirmation progress feedback, and stop polling once a terminal state is reached.
+- Hardened backend payment status interpretation to normalize stale pending sessions to paid when trusted payment-application markers already confirm successful checkout processing, while preserving existing HitPay session metadata during payload updates.
+
+Files changed:
+- src/app/rental/checkout/status/page.tsx
+- src/app/api/public/rental/checkout/payment-status/route.ts
+- src/app/api/public/rental/payments/hitpay/webhook/route.ts
+- src/app/api/public/rental/checkout/start-payment/route.ts
+- docs/migration-log.md
+
+DB / Infra changes:
+- No schema changes were required.
+- The status hardening reuses existing payment-session markers such as invoice_payment_id, invoice_applied_at, and invoice_email_sent_at as trusted evidence that checkout reconciliation has already completed.
+
+API / Page changes:
+- Public checkout status page now polls the payment-status API every 2.5 seconds while the session is still pending, shows a loading/progress panel with an animated loader, and stops polling after success, terminal failure states, or a bounded retry window.
+- Payment-status API now normalizes stale pending sessions to paid when trusted downstream checkout-processing evidence already exists, and HitPay session payload updates now merge into existing metadata instead of overwriting keys such as paymentMode or prior checkout context.
+
+Risks / follow-up notes:
+- Webhook latency can still delay visible success briefly until one of the trusted payment-application markers is written, so very short pending windows remain possible by design.
+- A later shared checkout-state normalizer or optional real-time update channel could further simplify status handling, but this change keeps the current server-authoritative polling model intact.
+

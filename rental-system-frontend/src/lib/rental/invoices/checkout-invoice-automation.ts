@@ -1,4 +1,5 @@
-﻿import "server-only";
+﻿//src/lib/rental/invoices/checkout-invoice-automation.ts
+import "server-only";
 
 import { dbInvoiceRepo } from "@/lib/rental/invoices/db-invoice-repo";
 import { dbPaymentRepo } from "@/lib/rental/invoices/db-payment-repo";

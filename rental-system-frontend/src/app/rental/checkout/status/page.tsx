@@ -1,12 +1,16 @@
-"use client";
+﻿"use client";
 
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
+import { LoaderCircle } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 
 import type { RentalOrderDepositSummary } from "@/lib/rental/deposits/types";
 import type { Invoice } from "@/lib/rental/invoices/types";
 import type { RentalOrder, RentalOrderPaymentSession } from "@/lib/rental/orders/types";
+
+const STATUS_POLL_INTERVAL_MS = 2500;
+const STATUS_POLL_MAX_ATTEMPTS = 8;
 
 function moneyFromCents(cents: number) {
   return new Intl.NumberFormat("en-SG", {
@@ -39,6 +43,10 @@ function formatCheckoutStatus(input: {
 }) {
   if (!input.paymentSession && input.invoice) return "Invoice issued on credit terms";
   return formatStatus(input.paymentSession?.status);
+}
+
+function isTerminalCheckoutStatus(status?: RentalOrderPaymentSession["status"]) {
+  return status === "paid" || status === "failed" || status === "expired" || status === "cancelled";
 }
 
 function formatDepositStatus(status?: RentalOrderDepositSummary["status"]) {
@@ -91,6 +99,9 @@ function CheckoutStatusInner() {
   const [paymentSession, setPaymentSession] = useState<RentalOrderPaymentSession | null>(null);
   const [invoice, setInvoice] = useState<Invoice | null>(null);
   const [depositSummary, setDepositSummary] = useState<RentalOrderDepositSummary | null>(null);
+  const [isPolling, setIsPolling] = useState(false);
+  const [pollAttempts, setPollAttempts] = useState(0);
+  const [pollTimedOut, setPollTimedOut] = useState(false);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -100,48 +111,79 @@ function CheckoutStatusInner() {
     window.sessionStorage.removeItem("rental_checkout_notice");
   }, []);
 
-  useEffect(() => {
-    let mounted = true;
+  const loadStatus = useCallback(
+    async (options?: { background?: boolean }) => {
+      const background = Boolean(options?.background);
 
-    (async () => {
       if (!sessionId && !orderId) {
-        if (mounted) {
-          setError("Missing checkout reference.");
-          setLoading(false);
-        }
+        setError("Missing checkout reference.");
+        setLoading(false);
+        setIsPolling(false);
         return;
       }
 
       try {
-        setLoading(true);
+        setError(null);
+        if (background) {
+          setIsPolling(true);
+        } else {
+          setLoading(true);
+        }
+
         const query = sessionId
           ? `sessionId=${encodeURIComponent(sessionId)}`
           : `orderId=${encodeURIComponent(orderId)}`;
-        const res = await fetch(
-          `/api/public/rental/checkout/payment-status?${query}`,
-          {
-            cache: "no-store",
-          }
-        );
+        const res = await fetch(`/api/public/rental/checkout/payment-status?${query}`, {
+          cache: "no-store",
+        });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data?.error ?? "Failed to load payment status");
-        if (!mounted) return;
+
+        const nextPaymentSession = (data?.paymentSession ?? null) as RentalOrderPaymentSession | null;
         setOrder((data?.order ?? null) as RentalOrder | null);
-        setPaymentSession((data?.paymentSession ?? null) as RentalOrderPaymentSession | null);
+        setPaymentSession(nextPaymentSession);
         setInvoice((data?.invoice ?? null) as Invoice | null);
         setDepositSummary((data?.depositSummary ?? null) as RentalOrderDepositSummary | null);
+
+        if (!nextPaymentSession || isTerminalCheckoutStatus(nextPaymentSession.status)) {
+          setPollTimedOut(false);
+        }
       } catch (e) {
-        if (!mounted) return;
         setError(e instanceof Error ? e.message : "Failed to load payment status");
       } finally {
-        if (mounted) setLoading(false);
+        if (background) {
+          setIsPolling(false);
+        } else {
+          setLoading(false);
+        }
       }
-    })();
+    },
+    [orderId, sessionId]
+  );
 
-    return () => {
-      mounted = false;
-    };
-  }, [orderId, sessionId]);
+  useEffect(() => {
+    setPollAttempts(0);
+    setPollTimedOut(false);
+    loadStatus();
+  }, [loadStatus]);
+
+  useEffect(() => {
+    if (!sessionId) return;
+    if (loading || isPolling || error) return;
+    if (!paymentSession || paymentSession.status !== "pending") return;
+
+    if (pollAttempts >= STATUS_POLL_MAX_ATTEMPTS) {
+      setPollTimedOut(true);
+      return;
+    }
+
+    const timer = window.setTimeout(async () => {
+      await loadStatus({ background: true });
+      setPollAttempts((current) => current + 1);
+    }, STATUS_POLL_INTERVAL_MS);
+
+    return () => window.clearTimeout(timer);
+  }, [error, isPolling, loadStatus, loading, paymentSession, pollAttempts, sessionId]);
 
   return (
     <div className="mx-auto max-w-4xl p-4">
@@ -173,6 +215,30 @@ function CheckoutStatusInner() {
                 {formatCheckoutStatus({ paymentSession, invoice })}
               </div>
             </div>
+
+            {paymentSession?.status === "pending" && (
+              <div className="rounded-xl border border-sky-200 bg-sky-50 p-4 text-sm text-sky-900">
+                <div className="flex items-start gap-3">
+                  <LoaderCircle
+                    className={[
+                      "mt-0.5 h-5 w-5 shrink-0 text-sky-600",
+                      !pollTimedOut ? "animate-spin" : "",
+                    ].join(" ")}
+                  />
+                  <div>
+                    <div className="font-semibold">Confirming your payment...</div>
+                    <div className="mt-1 text-sky-800">
+                      We are still checking for the final payment confirmation from HitPay. This can take a few seconds after you return here.
+                    </div>
+                    {pollTimedOut && (
+                      <div className="mt-2 text-xs text-sky-700">
+                        Confirmation is taking longer than usual. You can stay on this page, refresh shortly, or check your account for the latest invoice and payment state.
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
 
             {order && (
               <div className="rounded-xl border border-slate-200 p-4 text-sm">
@@ -231,9 +297,9 @@ function CheckoutStatusInner() {
                         {formatDepositStatus(depositSummary.status)}
                       </div>
                       <div className="mt-1 text-xs text-slate-600">
-                        Required: {moneyFromCents(depositSummary.requiredAmountCents)} · Held:{" "}
-                        {moneyFromCents(depositSummary.heldAmountCents)} · Released:{" "}
-                        {moneyFromCents(depositSummary.releasedAmountCents)} · Retained:{" "}
+                        Required: {moneyFromCents(depositSummary.requiredAmountCents)} | Held:{" "}
+                        {moneyFromCents(depositSummary.heldAmountCents)} | Released:{" "}
+                        {moneyFromCents(depositSummary.releasedAmountCents)} | Retained:{" "}
                         {moneyFromCents(depositSummary.retainedAmountCents)}
                       </div>
                     </div>
