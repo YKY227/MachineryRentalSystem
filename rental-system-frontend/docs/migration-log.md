@@ -2289,3 +2289,24 @@ API / Page changes:
 Risks / follow-up notes:
 - Browser-side date flooring improves UX, but server-side availability and date validation must remain the source of truth for any malformed or manually crafted requests.
 - A later pass could standardize loading treatments across more public rental steps, but this change intentionally stays limited to the current detail and checkout flow.
+
+## 2026-03-28 | Scope: preserve checkout query state across customer auth redirects
+Summary:
+- Fixed guest checkout auth redirects so the full checkout URL, including selected equipment and booking query parameters, is preserved when sending users to customer sign-in, registration, or account switching.
+- Kept the existing URL-param-driven checkout model intact and reused the auth pages' existing next redirect handling.
+
+Files changed:
+- src/app/rental/checkout/page.tsx
+- docs/migration-log.md
+
+DB / Infra changes:
+- No schema changes were required.
+- Existing customer auth endpoints and checkout state model remain unchanged.
+
+API / Page changes:
+- Checkout page now rebuilds the full current /rental/checkout?... URL from the active query string and passes that encoded value through the existing next parameter for login, register, and switch-account links.
+- Customer login and registration pages already respected the next parameter, so no auth-page logic changes were required for the redirect to return to the same checkout selection state.
+
+Risks / follow-up notes:
+- This preserves the current query-driven checkout state cleanly, but a later lightweight checkout draft persistence layer could still improve resilience if users abandon the flow mid-auth or across devices.
+- Other public flows that use next should still be reviewed separately if they need to preserve richer query state in the same way.

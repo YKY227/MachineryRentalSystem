@@ -78,6 +78,19 @@ export default function RentalCheckoutPage() {
 
 function CheckoutInner() {
   const searchParams = useSearchParams();
+  const checkoutQueryString = useMemo(() => searchParams?.toString() ?? "", [searchParams]);
+  const checkoutReturnUrl = useMemo(
+    () => (checkoutQueryString ? `/rental/checkout?${checkoutQueryString}` : "/rental/checkout"),
+    [checkoutQueryString]
+  );
+  const loginHref = useMemo(
+    () => `/rental/account/login?next=${encodeURIComponent(checkoutReturnUrl)}`,
+    [checkoutReturnUrl]
+  );
+  const registerHref = useMemo(
+    () => `/rental/account/register?next=${encodeURIComponent(checkoutReturnUrl)}`,
+    [checkoutReturnUrl]
+  );
 
   const getParam = (key: string): string | null => searchParams?.get(key) ?? null;
 
@@ -502,7 +515,7 @@ function CheckoutInner() {
                     </div>
                   </div>
                   <Link
-                    href="/rental/account/login?next=%2Frental%2Fcheckout"
+                    href={loginHref}
                     className="font-medium text-sky-700 hover:text-sky-800"
                   >
                     Switch account
@@ -524,13 +537,13 @@ function CheckoutInner() {
                 <div className="flex flex-wrap items-center gap-3">
                   <span>Sign in or register to continue with booking.</span>
                   <Link
-                    href="/rental/account/login?next=%2Frental%2Fcheckout"
+                    href={loginHref}
                     className="font-medium text-sky-700 hover:text-sky-800"
                   >
                     Sign in
                   </Link>
                   <Link
-                    href="/rental/account/register?next=%2Frental%2Fcheckout"
+                    href={registerHref}
                     className="font-medium text-sky-700 hover:text-sky-800"
                   >
                     Register
