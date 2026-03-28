@@ -56,6 +56,8 @@ type DeleteDialogState =
 
 type OrderDetailView = "operations" | "assessment" | "deposit" | "extensions";
 
+const ORDERS_PER_PAGE = 20;
+
 function formatMoney(n: number) {
   return new Intl.NumberFormat("en-SG", {
     style: "currency",
@@ -542,6 +544,7 @@ export default function AdminRentalOrdersPage() {
     "all" | "unresolved" | "pending" | "held" | "released" | "retained"
   >("all");
   const [attentionFilter, setAttentionFilter] = useState<"all" | "attention" | "extensions" | "downtime">("all");
+  const [currentPage, setCurrentPage] = useState(1);
   const [detailDrawer, setDetailDrawer] = useState<{ orderId: string; view: OrderDetailView } | null>(null);
 
   const equipmentById = useMemo(() => {
@@ -672,6 +675,22 @@ export default function AdminRentalOrdersPage() {
       return true;
     });
   }, [attentionFilter, depositFilter, opsFilter, orderRows, searchQuery]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredOrderRows.length / ORDERS_PER_PAGE));
+  const paginatedOrderRows = useMemo(() => {
+    const startIndex = (currentPage - 1) * ORDERS_PER_PAGE;
+    return filteredOrderRows.slice(startIndex, startIndex + ORDERS_PER_PAGE);
+  }, [currentPage, filteredOrderRows]);
+  const paginatedStart = filteredOrderRows.length === 0 ? 0 : (currentPage - 1) * ORDERS_PER_PAGE + 1;
+  const paginatedEnd = filteredOrderRows.length === 0 ? 0 : Math.min(currentPage * ORDERS_PER_PAGE, filteredOrderRows.length);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, opsFilter, depositFilter, attentionFilter]);
+
+  useEffect(() => {
+    setCurrentPage((current) => Math.min(current, totalPages));
+  }, [totalPages]);
 
   const operationsSummary = useMemo(() => {
     const activeRentals = orderRows.filter((row) => row.order.returnStatus === "out").length;
@@ -827,7 +846,7 @@ export default function AdminRentalOrdersPage() {
   }
 
   function toggleSelectAllCurrentOrders() {
-    const visibleOrderIds = filteredOrderRows.map((row) => row.order.id);
+    const visibleOrderIds = paginatedOrderRows.map((row) => row.order.id);
     setSelectedOrderIds((current) =>
       visibleOrderIds.every((orderId) => current.includes(orderId))
         ? current.filter((orderId) => !visibleOrderIds.includes(orderId))
@@ -1414,8 +1433,8 @@ export default function AdminRentalOrdersPage() {
             </div>
           </div>
           <div className="text-xs text-slate-500">
-            Showing <span className="font-semibold text-slate-700">{filteredOrderRows.length}</span> of{" "}
-            <span className="font-semibold text-slate-700">{orderRows.length}</span> orders
+            Showing <span className="font-semibold text-slate-700">{paginatedStart}</span>-<span className="font-semibold text-slate-700">{paginatedEnd}</span> of{" "}
+            <span className="font-semibold text-slate-700">{filteredOrderRows.length}</span> filtered orders
           </div>
         </div>
         <div className="mt-4 grid gap-3 xl:grid-cols-[minmax(0,1.4fr)_repeat(3,minmax(180px,1fr))]">
@@ -1521,8 +1540,8 @@ export default function AdminRentalOrdersPage() {
                     <input
                       type="checkbox"
                       checked={
-                        filteredOrderRows.length > 0 &&
-                        filteredOrderRows.every((row) => selectedOrderIds.includes(row.order.id))
+                        paginatedOrderRows.length > 0 &&
+                        paginatedOrderRows.every((row) => selectedOrderIds.includes(row.order.id))
                       }
                       onChange={toggleSelectAllCurrentOrders}
                       aria-label="Select all orders"
@@ -1539,7 +1558,7 @@ export default function AdminRentalOrdersPage() {
             </thead>
 
             <tbody>
-              {filteredOrderRows.map((row) => {
+              {paginatedOrderRows.map((row) => {
                 const {
                   order: o,
                   buffer,
@@ -1819,7 +1838,7 @@ export default function AdminRentalOrdersPage() {
                           )}
 
                           <div className="mt-4 grid gap-4 lg:grid-cols-2">
-                            <div className="space-y-4">
+                            <div className="space-y-5">
                               <div className="grid gap-3 sm:grid-cols-2">
                                 <label className="grid gap-1 text-sm">
                                   <span className="text-slate-700">Return Status</span>
@@ -1964,8 +1983,8 @@ export default function AdminRentalOrdersPage() {
                             </div>
                           )}
 
-                          <div className="mt-4 grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
-                            <div className="space-y-4">
+                          <div className="mt-4 grid gap-5 xl:grid-cols-[minmax(0,1.35fr)_320px]">
+                            <div className="space-y-5">
                               <div className="grid gap-3 sm:grid-cols-3">
                                 <label className="grid gap-1 text-sm">
                                   <span className="text-slate-700">Action</span>
@@ -2107,15 +2126,17 @@ export default function AdminRentalOrdersPage() {
                             </div>
                           )}
 
-                          <label className="mt-4 grid gap-1 text-sm">
-                            <span className="text-slate-700">Review note</span>
-                            <textarea
-                              value={extensionReviewNote}
-                              onChange={(e) => setExtensionReviewNote(e.target.value)}
-                              className="min-h-24 rounded-lg border border-slate-200 px-3 py-2 text-sm"
-                              placeholder="Approval note, payment instruction, or rejection context..."
-                            />
-                          </label>
+                          <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
+                            <label className="grid gap-1 text-sm">
+                              <span className="text-slate-700">Review note</span>
+                              <textarea
+                                value={extensionReviewNote}
+                                onChange={(e) => setExtensionReviewNote(e.target.value)}
+                                className="min-h-24 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
+                                placeholder="Approval note, payment instruction, or rejection context..."
+                              />
+                            </label>
+                          </div>
 
                           {extensionPanelLoading ? (
                             <div className="mt-4 text-sm text-slate-500">Loading extension requests...</div>
@@ -2207,7 +2228,7 @@ export default function AdminRentalOrdersPage() {
 
       {detailDrawer && detailOrder && activeDetailOrder && (
         <div className="fixed inset-y-0 right-0 z-40 flex w-full justify-end bg-slate-900/20">
-          <div className="flex h-full w-full max-w-2xl flex-col border-l border-slate-200 bg-white shadow-2xl">
+          <div className="flex h-full w-full max-w-[1180px] flex-col border-l border-slate-200 bg-white shadow-2xl">
             <div className="shrink-0 border-b border-slate-200 bg-slate-50 p-5">
               <div className="flex items-start justify-between gap-4">
                 <div>
@@ -2290,7 +2311,7 @@ export default function AdminRentalOrdersPage() {
                       </div>
                       <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
                         <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Workflow guide</div>
-                        <div className="mt-3 grid gap-2 sm:grid-cols-4">
+                        <div className="mt-3 grid gap-2 sm:grid-cols-2">
                           {opsWorkflowSteps.map((step, index) => {
                             const tone =
                               step.state === "done"
@@ -2432,7 +2453,10 @@ export default function AdminRentalOrdersPage() {
                           </div>
                         )}
                       </div>
-                      <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                      <div className="mt-4 rounded-xl border border-[#F2C7C2] bg-[#FFF6F4] p-4">
+                        <div className="text-sm font-semibold text-slate-900">Deposit resolution action</div>
+                        <div className="mt-1 text-xs text-slate-500">Record the manual release or retain decision here. This remains the primary finance action in this tab.</div>
+                        <div className="mt-4 grid gap-3 sm:grid-cols-3">
                         <label className="grid gap-1 text-sm">
                           <span className="text-slate-700">Action</span>
                           <select value={depositActionType} onChange={(e) => setDepositActionType(e.target.value as "release" | "retain" | "split")} className="rounded-lg border border-slate-200 px-3 py-2 text-sm">
@@ -2465,8 +2489,9 @@ export default function AdminRentalOrdersPage() {
                       <button type="button" onClick={() => submitDepositResolution(detailOrder.id)} disabled={depositSaving || depositPanelLoading} className="mt-4 rounded-lg bg-[#D24338] px-4 py-2 text-sm font-semibold text-white hover:bg-[#B9382E] disabled:bg-slate-300">
                         {depositSaving ? "Recording..." : "Record deposit resolution"}
                       </button>
+                      </div>
 
-                      <div className="mt-6 rounded-xl border border-slate-200 bg-slate-50 p-4">
+                      <div className="mt-5 rounded-xl border border-dashed border-slate-300 bg-slate-50 p-4">
                         <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
                           <BadgeDollarSign className="h-4 w-4 text-[#D24338]" />
                           Manual damage charge invoice
@@ -2522,17 +2547,20 @@ export default function AdminRentalOrdersPage() {
                   )}
 
                   {detailDrawer.view === "extensions" && (
-                    <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                    <div className="rounded-2xl border border-slate-200 bg-white p-5">
                       <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
                         <ChevronRight className="h-4 w-4 text-[#D24338]" />
                         Extension review
                       </div>
+                      <div className="mt-1 text-xs text-slate-500">Review the note once, then work through each request card below.</div>
                       {extensionPanelBanner && <div className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-700">{extensionPanelBanner}</div>}
                       {extensionPanelError && <div className="mt-3 rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">{extensionPanelError}</div>}
-                      <label className="mt-4 grid gap-1 text-sm">
-                        <span className="text-slate-700">Review note</span>
-                        <textarea value={extensionReviewNote} onChange={(e) => setExtensionReviewNote(e.target.value)} className="min-h-24 rounded-lg border border-slate-200 px-3 py-2 text-sm" />
-                      </label>
+                      <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
+                        <label className="grid gap-1 text-sm">
+                          <span className="text-slate-700">Review note</span>
+                          <textarea value={extensionReviewNote} onChange={(e) => setExtensionReviewNote(e.target.value)} className="min-h-24 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" />
+                        </label>
+                      </div>
                       {extensionPanelLoading ? (
                         <div className="mt-4 text-sm text-slate-500">Loading extension requests...</div>
                       ) : activeDetailOrder.knownExtensions.length === 0 ? (
@@ -2540,7 +2568,7 @@ export default function AdminRentalOrdersPage() {
                       ) : (
                         <div className="mt-4 space-y-3">
                           {activeDetailOrder.knownExtensions.map((extension) => (
-                            <div key={extension.id} className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                            <div key={extension.id} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
                               <div className="flex flex-wrap items-start justify-between gap-3">
                                 <div>
                                   <div className="font-semibold text-slate-900">Through {extension.requestedRentalEnd}</div>
@@ -2550,11 +2578,11 @@ export default function AdminRentalOrdersPage() {
                                   {extensionStatusLabel(extension.status)}
                                 </span>
                               </div>
-                              <div className="mt-3 grid gap-2 text-xs text-slate-600 sm:grid-cols-2">
-                                <div>Estimated: {formatMoney(extension.extensionChargeEstimateCents / 100)}</div>
-                                <div>Final: {formatMoney((extension.finalExtensionChargeCents ?? 0) / 100)}</div>
-                                <div>Payment terms: {extension.paymentTermsSnapshot}</div>
-                                <div>Availability: {extension.availabilityStatus}</div>
+                              <div className="mt-4 grid gap-2 text-xs text-slate-600 sm:grid-cols-2">
+                                <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">Estimated: {formatMoney(extension.extensionChargeEstimateCents / 100)}</div>
+                                <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">Final: {formatMoney((extension.finalExtensionChargeCents ?? 0) / 100)}</div>
+                                <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">Payment terms: {extension.paymentTermsSnapshot}</div>
+                                <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">Availability: {extension.availabilityStatus}</div>
                               </div>
                               {(extension.availabilityMessage || extension.customerMessage || extension.reviewNote) && (
                                 <div className="mt-3 space-y-1 text-xs text-slate-600">
@@ -2584,18 +2612,33 @@ export default function AdminRentalOrdersPage() {
                 <div className="space-y-4">
                   <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
                     <div className="text-sm font-semibold text-slate-900">Operational summary</div>
-                    <div className="mt-3 space-y-2 text-sm text-slate-600">
-                      <div>Physical return: {returnStatusLabel(detailOrder.returnStatus)}</div>
-                      <div>Inspection: {inspectionStatusLabel(detailOrder.inspectionStatus)}</div>
-                      <div>Reserved until: {activeDetailOrder.reservedUntil}</div>
-                      <div>Deposit: {depositStatusLabel(activeDetailOrder.deposit.status)}</div>
-                      <div>Workflow closed: {detailOrder.completedAt ? formatDateTime(String(detailOrder.completedAt)) : "-"}</div>
-                      <div>Assessment: {assessmentStatusLabel(activeDetailOrder.assessment.status)}</div>
-                      <div>Assessment result: {assessmentResultLabel(activeDetailOrder.assessment.assessmentResult)}</div>
-                      <div>Recommended action: {recommendedAssessmentActionLabel(activeDetailOrder.assessment.recommendedDepositAction)}</div>
-                      <div>Estimate: {formatMoney(activeDetailOrder.assessment.estimatedRetentionCents / 100)}</div>
-                      <div>Held: {formatMoney(activeDetailOrder.deposit.heldAmountCents / 100)}</div>
-                      <div>Unresolved: {formatMoney(activeDetailOrder.deposit.unresolvedAmountCents / 100)}</div>
+                    <div className="mt-3 space-y-3 text-sm text-slate-600">
+                      <div className="rounded-xl border border-slate-200 bg-white p-3">
+                        <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Lifecycle</div>
+                        <div className="mt-2 grid gap-2">
+                          <div>Physical return: {returnStatusLabel(detailOrder.returnStatus)}</div>
+                          <div>Inspection: {inspectionStatusLabel(detailOrder.inspectionStatus)}</div>
+                          <div>Workflow closed: {detailOrder.completedAt ? formatDateTime(String(detailOrder.completedAt)) : "-"}</div>
+                          <div>Reserved until: {activeDetailOrder.reservedUntil}</div>
+                        </div>
+                      </div>
+                      <div className="rounded-xl border border-slate-200 bg-white p-3">
+                        <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Assessment</div>
+                        <div className="mt-2 grid gap-2">
+                          <div>Status: {assessmentStatusLabel(activeDetailOrder.assessment.status)}</div>
+                          <div>Result: {assessmentResultLabel(activeDetailOrder.assessment.assessmentResult)}</div>
+                          <div>Recommended action: {recommendedAssessmentActionLabel(activeDetailOrder.assessment.recommendedDepositAction)}</div>
+                          <div>Estimate: {formatMoney(activeDetailOrder.assessment.estimatedRetentionCents / 100)}</div>
+                        </div>
+                      </div>
+                      <div className="rounded-xl border border-slate-200 bg-white p-3">
+                        <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Deposit</div>
+                        <div className="mt-2 grid gap-2">
+                          <div>Status: {depositStatusLabel(activeDetailOrder.deposit.status)}</div>
+                          <div>Held: {formatMoney(activeDetailOrder.deposit.heldAmountCents / 100)}</div>
+                          <div>Unresolved: {formatMoney(activeDetailOrder.deposit.unresolvedAmountCents / 100)}</div>
+                        </div>
+                      </div>
                     </div>
                   </div>
 

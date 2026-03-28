@@ -88,21 +88,14 @@ function recommendedActionLabel(action?: RentalDamageAssessmentRecommendedDeposi
   }
 }
 
-export function OrderDamageAssessmentPanel({
-  order,
-  summary,
-  onSummaryChange,
-}: Props) {
+export function OrderDamageAssessmentPanel({ order, summary, onSummaryChange }: Props) {
   const [assessment, setAssessment] = useState<RentalDamageAssessment | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [banner, setBanner] = useState<string | null>(null);
-  const [assessmentResult, setAssessmentResult] =
-    useState<RentalDamageAssessmentResult>("further_review");
-  const [issueCategories, setIssueCategories] = useState<
-    RentalDamageAssessmentIssueCategory[]
-  >([]);
+  const [assessmentResult, setAssessmentResult] = useState<RentalDamageAssessmentResult>("further_review");
+  const [issueCategories, setIssueCategories] = useState<RentalDamageAssessmentIssueCategory[]>([]);
   const [notes, setNotes] = useState("");
   const [estimatedRetention, setEstimatedRetention] = useState("0.00");
   const [recommendedDepositAction, setRecommendedDepositAction] =
@@ -137,20 +130,12 @@ export function OrderDamageAssessmentPanel({
         setAssessmentResult(nextAssessment?.assessmentResult ?? "further_review");
         setIssueCategories(nextAssessment?.issueCategories ?? []);
         setNotes(nextAssessment?.notes ?? "");
-        setEstimatedRetention(
-          ((nextAssessment?.estimatedRetentionCents ?? 0) / 100).toFixed(2)
-        );
-        setRecommendedDepositAction(
-          nextAssessment?.recommendedDepositAction ?? "manual_review"
-        );
+        setEstimatedRetention(((nextAssessment?.estimatedRetentionCents ?? 0) / 100).toFixed(2));
+        setRecommendedDepositAction(nextAssessment?.recommendedDepositAction ?? "manual_review");
       } catch (loadError) {
         if (cancelled) return;
         setAssessment(null);
-        setError(
-          loadError instanceof Error
-            ? loadError.message
-            : "Failed to load damage assessment"
-        );
+        setError(loadError instanceof Error ? loadError.message : "Failed to load damage assessment");
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -160,16 +145,14 @@ export function OrderDamageAssessmentPanel({
     return () => {
       cancelled = true;
     };
-  }, [order.id]);
+  }, [order.id, onSummaryChange]);
 
   const isLocked = assessment?.status === "finalized";
   const canAssess = order.returnStatus !== "out";
 
   function toggleCategory(value: RentalDamageAssessmentIssueCategory) {
     setIssueCategories((current) =>
-      current.includes(value)
-        ? current.filter((entry) => entry !== value)
-        : [...current, value]
+      current.includes(value) ? current.filter((entry) => entry !== value) : [...current, value]
     );
   }
 
@@ -220,18 +203,14 @@ export function OrderDamageAssessmentPanel({
           : "Damage assessment draft saved."
       );
     } catch (submitError) {
-      setError(
-        submitError instanceof Error
-          ? submitError.message
-          : "Failed to save damage assessment"
-      );
+      setError(submitError instanceof Error ? submitError.message : "Failed to save damage assessment");
     } finally {
       setSaving(false);
     }
   }
 
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-4">
+    <div className="rounded-2xl border border-slate-200 bg-white p-5">
       <div className="flex items-center justify-between gap-3">
         <div>
           <div className="text-sm font-semibold text-slate-900">Damage assessment</div>
@@ -263,52 +242,51 @@ export function OrderDamageAssessmentPanel({
       {loading ? (
         <div className="mt-4 text-sm text-slate-500">Loading damage assessment...</div>
       ) : (
-        <>
-          <div className="mt-4 grid gap-3 sm:grid-cols-2">
-            <label className="grid gap-1 text-sm">
-              <span className="text-slate-700">Condition result</span>
-              <select
-                value={assessmentResult}
-                onChange={(e) =>
-                  setAssessmentResult(e.target.value as RentalDamageAssessmentResult)
-                }
-                disabled={!canAssess || isLocked}
-                className="rounded-lg border border-slate-200 px-3 py-2 text-sm"
-              >
-                <option value="clear">Clear</option>
-                <option value="wear_and_tear">Wear and tear only</option>
-                <option value="issues_found">Issues found</option>
-                <option value="further_review">Further review needed</option>
-              </select>
-            </label>
-            <label className="grid gap-1 text-sm">
-              <span className="text-slate-700">Recommended deposit action</span>
-              <select
-                value={recommendedDepositAction}
-                onChange={(e) =>
-                  setRecommendedDepositAction(
-                    e.target.value as RentalDamageAssessmentRecommendedDepositAction
-                  )
-                }
-                disabled={!canAssess || isLocked}
-                className="rounded-lg border border-slate-200 px-3 py-2 text-sm"
-              >
-                <option value="manual_review">Manual financial review</option>
-                <option value="none">No follow-up recommended</option>
-                <option value="release">Release deposit</option>
-                <option value="partial_retain">Partial retain</option>
-                <option value="full_retain">Full retain</option>
-              </select>
-            </label>
+        <div className="mt-4 space-y-4">
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+            <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Assessment setup</div>
+            <div className="mt-3 grid gap-3 sm:grid-cols-2">
+              <label className="grid gap-1 text-sm">
+                <span className="text-slate-700">Condition result</span>
+                <select
+                  value={assessmentResult}
+                  onChange={(e) => setAssessmentResult(e.target.value as RentalDamageAssessmentResult)}
+                  disabled={!canAssess || isLocked}
+                  className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
+                >
+                  <option value="clear">Clear</option>
+                  <option value="wear_and_tear">Wear and tear only</option>
+                  <option value="issues_found">Issues found</option>
+                  <option value="further_review">Further review needed</option>
+                </select>
+              </label>
+              <label className="grid gap-1 text-sm">
+                <span className="text-slate-700">Recommended deposit action</span>
+                <select
+                  value={recommendedDepositAction}
+                  onChange={(e) =>
+                    setRecommendedDepositAction(e.target.value as RentalDamageAssessmentRecommendedDepositAction)
+                  }
+                  disabled={!canAssess || isLocked}
+                  className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
+                >
+                  <option value="manual_review">Manual financial review</option>
+                  <option value="none">No follow-up recommended</option>
+                  <option value="release">Release deposit</option>
+                  <option value="partial_retain">Partial retain</option>
+                  <option value="full_retain">Full retain</option>
+                </select>
+              </label>
+            </div>
           </div>
 
-          <div className="mt-4 grid gap-2 text-sm">
-            <span className="text-slate-700">Issue categories</span>
-            <div className="grid gap-2 sm:grid-cols-2">
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+            <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Issue categories</div>
+            <div className="mt-3 grid gap-2 sm:grid-cols-2">
               {ISSUE_CATEGORIES.map((category) => (
                 <label
                   key={category.value}
-                  className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700"
+                  className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
                 >
                   <input
                     type="checkbox"
@@ -322,67 +300,65 @@ export function OrderDamageAssessmentPanel({
             </div>
           </div>
 
-          <label className="mt-4 grid gap-1 text-sm">
-            <span className="text-slate-700">Notes</span>
-            <textarea
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              disabled={!canAssess || isLocked}
-              className="min-h-28 rounded-lg border border-slate-200 px-3 py-2 text-sm"
-            />
-          </label>
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+            <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Notes and estimate</div>
+            <label className="mt-3 grid gap-1 text-sm">
+              <span className="text-slate-700">Notes</span>
+              <textarea
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                disabled={!canAssess || isLocked}
+                className="min-h-28 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
+              />
+            </label>
 
-          <label className="mt-4 grid gap-1 text-sm sm:max-w-xs">
-            <span className="text-slate-700">Estimated retention amount (SGD)</span>
-            <input
-              type="number"
-              min="0"
-              step="0.01"
-              value={estimatedRetention}
-              onChange={(e) => setEstimatedRetention(e.target.value)}
-              disabled={!canAssess || isLocked}
-              className="rounded-lg border border-slate-200 px-3 py-2 text-sm"
-            />
-          </label>
+            <label className="mt-4 grid gap-1 text-sm sm:max-w-xs">
+              <span className="text-slate-700">Estimated retention amount (SGD)</span>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={estimatedRetention}
+                onChange={(e) => setEstimatedRetention(e.target.value)}
+                disabled={!canAssess || isLocked}
+                className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
+              />
+            </label>
 
-          {assessment && (
-            <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
-              <div>Status: {assessmentStatusLabel(assessment.status)}</div>
-              <div className="mt-1">Result: {assessmentResultLabel(assessment.assessmentResult)}</div>
-              <div className="mt-1">Estimated retention: {formatMoney(assessment.estimatedRetentionCents)}</div>
-              <div className="mt-1">
-                Recommendation: {recommendedActionLabel(assessment.recommendedDepositAction)}
+            {assessment && (
+              <div className="mt-4 rounded-xl border border-slate-200 bg-white p-3 text-xs text-slate-600">
+                <div>Status: {assessmentStatusLabel(assessment.status)}</div>
+                <div className="mt-1">Result: {assessmentResultLabel(assessment.assessmentResult)}</div>
+                <div className="mt-1">Estimated retention: {formatMoney(assessment.estimatedRetentionCents)}</div>
+                <div className="mt-1">Recommendation: {recommendedActionLabel(assessment.recommendedDepositAction)}</div>
+                <div className="mt-1">Last updated: {formatDateTime(assessment.updatedAt)}</div>
+                {assessment.finalizedAt && <div className="mt-1">Finalized: {formatDateTime(assessment.finalizedAt)}</div>}
               </div>
-              <div className="mt-1">Last updated: {formatDateTime(assessment.updatedAt)}</div>
-              {assessment.finalizedAt && (
-                <div className="mt-1">Finalized: {formatDateTime(assessment.finalizedAt)}</div>
-              )}
-            </div>
-          )}
+            )}
 
-          {!isLocked && (
-            <div className="mt-4 flex flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={() => submit("draft")}
-                disabled={saving || !canAssess}
-                className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:bg-slate-100 disabled:text-slate-400"
-              >
-                {saving ? "Saving..." : "Save draft"}
-              </button>
-              <button
-                type="button"
-                onClick={() => submit("finalize")}
-                disabled={saving || !canAssess}
-                className="rounded-lg bg-[#D24338] px-4 py-2 text-sm font-semibold text-white hover:bg-[#B9382E] disabled:bg-slate-300"
-              >
-                {saving ? "Saving..." : "Finalize assessment"}
-              </button>
-            </div>
-          )}
-        </>
+            {!isLocked && (
+              <div className="mt-4 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => submit("draft")}
+                  disabled={saving || !canAssess}
+                  className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:bg-slate-100 disabled:text-slate-400"
+                >
+                  {saving ? "Saving..." : "Save draft"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => submit("finalize")}
+                  disabled={saving || !canAssess}
+                  className="rounded-lg bg-[#D24338] px-4 py-2 text-sm font-semibold text-white hover:bg-[#B9382E] disabled:bg-slate-300"
+                >
+                  {saving ? "Saving..." : "Finalize assessment"}
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
       )}
     </div>
   );
 }
-

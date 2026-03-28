@@ -2332,3 +2332,25 @@ API / Page changes:
 Risks / follow-up notes:
 - The underlying status model still uses return_status = completed to represent a closed workflow, so the UI now explains that meaning more clearly without redesigning the persistence model in this pass.
 - A later SOP panel or lightweight onboarding hint could still help occasional admins, but this change intentionally keeps guidance embedded directly in the existing drawer.
+
+## 2026-03-28 | Scope: rental orders drawer readability pass and client-side pagination
+Summary:
+- Refined the Rental Orders drawer layout so the operations, assessment, deposit, and extensions tabs read more comfortably within the existing right-side workspace, with better width usage, cleaner card grouping, and clearer secondary-versus-primary sections.
+- Added simple client-side pagination to the filtered Rental Orders table so the list shows 20 orders per page with page clamping and Previous / Next controls.
+
+Files changed:
+- src/app/admin/rental/orders/page.tsx
+- src/components/admin/rental/OrderDamageAssessmentPanel.tsx
+- docs/migration-log.md
+
+DB / Infra changes:
+- No schema or API contract changes were required.
+- Pagination is client-side only and operates on the already-filtered in-memory order rows.
+
+API / Page changes:
+- Rental Orders drawer now uses a wider panel, a cleaner main-versus-summary column split, a more readable 2x2 workflow guide in operations, clearer grouped summary cards, better section hierarchy in deposit and extensions, and improved spacing in the damage assessment panel.
+- Orders table now paginates the filtered result set at 20 rows per page, updates the select-all behavior to the current visible page, and clamps or resets the page index when filters and search change the result count.
+
+Risks / follow-up notes:
+- Client-side pagination is appropriate for the current list size, but server-side pagination should still be considered later if the order volume grows significantly.
+- Some dense action groupings remain by design to keep all current workflows in one drawer, so a future pass could still consider deeper simplification or optional sub-steps without changing the current business logic.
