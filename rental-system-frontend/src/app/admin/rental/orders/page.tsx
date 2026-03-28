@@ -727,7 +727,26 @@ export default function AdminRentalOrdersPage() {
         depositUnresolvedAmountCents: activeDetailOrder.deposit.unresolvedAmountCents,
       })
     : { impossible: [], warnings: [] };
-  const opsWorkflowSteps = buildWorkflowSteps(opsReturnStatus, opsInspectionStatus, opsMarkCompleted);
+  const drawerWorkflowReturnStatus: RentalOrderReturnStatus =
+  detailDrawer?.view === "operations"
+    ? opsReturnStatus
+    : (detailOrder?.returnStatus ?? "out");
+
+const drawerWorkflowInspectionStatus: RentalOrderInspectionStatus =
+  detailDrawer?.view === "operations"
+    ? opsInspectionStatus
+    : (detailOrder?.inspectionStatus ?? "not_started");
+
+const drawerWorkflowClosed =
+  detailDrawer?.view === "operations"
+    ? opsMarkCompleted
+    : detailOrder?.returnStatus === "completed";
+
+const drawerWorkflowSteps = buildWorkflowSteps(
+  drawerWorkflowReturnStatus,
+  drawerWorkflowInspectionStatus,
+  drawerWorkflowClosed
+);
   const depositResolutionTransactions = useMemo(
     () =>
       depositTransactions.filter(
@@ -2227,464 +2246,841 @@ export default function AdminRentalOrdersPage() {
       )}
 
       {detailDrawer && detailOrder && activeDetailOrder && (
-        <div className="fixed inset-y-0 right-0 z-40 flex w-full justify-end bg-slate-900/20">
-          <div className="flex h-full w-full max-w-[1180px] flex-col border-l border-slate-200 bg-white shadow-2xl">
-            <div className="shrink-0 border-b border-slate-200 bg-slate-50 p-5">
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <div className="inline-flex items-center gap-2 rounded-full border border-[#F2C7C2] bg-[#FCE9E7] px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-[#B9382E]">
-                    <ClipboardList className="h-4 w-4" />
-                    Order workspace
-                  </div>
-                  <div className="mt-3 text-lg font-semibold text-[#2A2A2A]">{detailOrder.id}</div>
-                  <div className="mt-1 text-sm text-slate-600">
-                    {detailOrder.customerSnapshot?.companyName ?? "Direct customer"} Â· {detailOrder.equipmentTitle}
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={closeDetailDrawer}
-                  className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-                >
-                  Close
-                </button>
-              </div>
-              <div className="mt-4 flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={() => openOrderWorkspace(detailOrder, "operations")}
-                  className={`rounded-lg px-3 py-2 text-sm font-medium ${
-                    detailDrawer.view === "operations"
-                      ? "bg-[#D24338] text-white hover:bg-[#B9382E]"
-                      : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
-                  }`}
-                >
-                  Return / inspection
-                </button>
-                <button
-                  type="button"
-                  onClick={() => openOrderWorkspace(detailOrder, "assessment")}
-                  className={`rounded-lg px-3 py-2 text-sm font-medium ${
-                    detailDrawer.view === "assessment"
-                      ? "bg-[#D24338] text-white hover:bg-[#B9382E]"
-                      : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
-                  }`}
-                >
-                  Assessment
-                </button>
-                <button
-                  type="button"
-                  onClick={() => openOrderWorkspace(detailOrder, "deposit")}
-                  className={`rounded-lg px-3 py-2 text-sm font-medium ${
-                    detailDrawer.view === "deposit"
-                      ? "bg-[#D24338] text-white hover:bg-[#B9382E]"
-                      : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
-                  }`}
-                >
-                  Deposit
-                </button>
-                <button
-                  type="button"
-                  onClick={() => openOrderWorkspace(detailOrder, "extensions")}
-                  className={`rounded-lg px-3 py-2 text-sm font-medium ${
-                    detailDrawer.view === "extensions"
-                      ? "bg-[#D24338] text-white hover:bg-[#B9382E]"
-                      : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
-                  }`}
-                >
-                  Extensions
-                </button>
-              </div>
+  <div className="fixed inset-y-0 right-0 z-40 flex w-full justify-end bg-slate-900/20">
+    <div className="flex h-full w-full md:max-w-[min(62vw,1040px)] flex-col border-l border-slate-200 bg-white shadow-2xl">
+      <div className="shrink-0 border-b border-slate-200 bg-slate-50 px-5 py-4">
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <div className="inline-flex items-center gap-2 rounded-full border border-[#F2C7C2] bg-[#FCE9E7] px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-[#B9382E]">
+              <ClipboardList className="h-4 w-4" />
+              Order workspace
             </div>
-
-            <div className="min-h-0 flex-1 overflow-y-auto p-5">
-              <div className="grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
-                <div className="space-y-4">
-                  {detailDrawer.view === "operations" && (
-                    <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                      <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
-                        <ClipboardCheck className="h-4 w-4 text-[#D24338]" />
-                        Return & inspection workflow
-                      </div>
-                      <div className="mt-1 text-xs text-slate-500">
-                        Record the physical return first, then finish inspection, then close the operational workflow when follow-up is done.
-                      </div>
-                      <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
-                        <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Workflow guide</div>
-                        <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                          {opsWorkflowSteps.map((step, index) => {
-                            const tone =
-                              step.state === "done"
-                                ? "border-emerald-200 bg-emerald-50 text-emerald-800"
-                                : step.state === "current"
-                                  ? "border-[#F2C7C2] bg-[#FFF6F4] text-[#8A453F]"
-                                  : "border-slate-200 bg-white text-slate-500";
-                            return (
-                              <div key={step.label} className={["rounded-xl border p-3", tone].join(" ")}>
-                                <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide">
-                                  <span className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-current text-[10px]">{index + 1}</span>
-                                  {step.label}
-                                </div>
-                                <div className="mt-2 text-[11px] leading-5">{step.description}</div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                        <div className="mt-3 text-xs text-slate-500">Use this as a quick reference for what should happen next.</div>
-                      </div>
-                      {opsBanner && <div className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-700">{opsBanner}</div>}
-                      {opsError && <div className="mt-3 rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">{opsError}</div>}
-                      {opsGuardrails.impossible.length > 0 && (
-                        <div className="mt-3 rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">
-                          <div className="font-semibold">This combination cannot be saved yet.</div>
-                          <ul className="mt-2 list-disc space-y-1 pl-5 text-xs">
-                            {opsGuardrails.impossible.map((message) => (
-                              <li key={message}>{message}</li>
-                            ))}
-                          </ul>
-                        </div>
-                      )}
-                      {opsGuardrails.warnings.length > 0 && (
-                        <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
-                          <div className="font-semibold">Before you close this workflow</div>
-                          <ul className="mt-2 list-disc space-y-1 pl-5 text-xs">
-                            {opsGuardrails.warnings.map((message) => (
-                              <li key={message}>{message}</li>
-                            ))}
-                          </ul>
-                        </div>
-                      )}
-                      <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                        <label className="grid gap-1 text-sm">
-                          <span className="text-slate-700">Physical return status</span>
-                          <select value={normalizeOperationalReturnStatus(opsReturnStatus)} onChange={(e) => setOpsReturnStatus(e.target.value as RentalOrderReturnStatus)} className="rounded-lg border border-slate-200 px-3 py-2 text-sm">
-                            <option value="out">Active / out on rent</option>
-                            <option value="returned">Returned to yard / site</option>
-                          </select>
-                          <span className="text-xs text-slate-500">{returnStatusHelp(opsReturnStatus)}</span>
-                        </label>
-                        <label className="grid gap-1 text-sm">
-                          <span className="text-slate-700">Inspection status</span>
-                          <select value={opsInspectionStatus} onChange={(e) => setOpsInspectionStatus(e.target.value as RentalOrderInspectionStatus)} className="rounded-lg border border-slate-200 px-3 py-2 text-sm">
-                            <option value="not_started">Not started</option>
-                            <option value="pending" disabled={normalizeOperationalReturnStatus(opsReturnStatus) === "out"}>Pending inspection</option>
-                            <option value="passed" disabled={normalizeOperationalReturnStatus(opsReturnStatus) === "out"}>Passed - no issues</option>
-                            <option value="issues_found" disabled={normalizeOperationalReturnStatus(opsReturnStatus) === "out"}>Issues found - follow-up needed</option>
-                          </select>
-                          <span className="text-xs text-slate-500">{inspectionStatusHelp(opsInspectionStatus)}</span>
-                        </label>
-                      </div>
-                      <label className="mt-3 grid gap-1 text-sm">
-                        <span className="text-slate-700">Returned on</span>
-                        <input type="date" value={opsReturnedAt} onChange={(e) => setOpsReturnedAt(e.target.value)} className="rounded-lg border border-slate-200 px-3 py-2 text-sm" />
-                        <span className="text-xs text-slate-500">Add the date the equipment physically came back so inspection timing is clear.</span>
-                      </label>
-                      <label className="mt-3 grid gap-1 text-sm">
-                        <span className="text-slate-700">Return notes</span>
-                        <textarea value={opsReturnNotes} onChange={(e) => setOpsReturnNotes(e.target.value)} className="min-h-24 rounded-lg border border-slate-200 px-3 py-2 text-sm" />
-                      </label>
-                      <label className="mt-3 grid gap-1 text-sm">
-                        <span className="text-slate-700">Inspection notes</span>
-                        <textarea value={opsInspectionNotes} onChange={(e) => setOpsInspectionNotes(e.target.value)} className="min-h-24 rounded-lg border border-slate-200 px-3 py-2 text-sm" />
-                      </label>
-                      <label className="mt-3 flex items-start gap-2 text-sm text-slate-700">
-                        <input type="checkbox" checked={opsMarkCompleted} onChange={(e) => setOpsMarkCompleted(e.target.checked)} />
-                        <span>
-                          <span className="font-medium text-slate-900">Close order workflow</span>
-                          <span className="mt-1 block text-xs text-slate-500">Use this only after the equipment is returned and inspection is finished. This does not resolve deposit, invoicing, or credit automatically.</span>
-                        </span>
-                      </label>
-                      <button type="button" onClick={() => submitOperationsUpdate(detailOrder.id)} disabled={opsSaving || opsGuardrails.impossible.length > 0} className="mt-4 rounded-lg bg-[#D24338] px-4 py-2 text-sm font-semibold text-white hover:bg-[#B9382E] disabled:bg-slate-300">
-                        {opsSaving ? "Saving..." : "Save operational workflow"}
-                      </button>
-                    </div>
-                  )}
-
-                  {detailDrawer.view === "assessment" && (
-                    <OrderDamageAssessmentPanel
-                      order={detailOrder}
-                      summary={activeDetailOrder.assessment}
-                      onSummaryChange={(summary) => handleAssessmentSummaryChange(detailOrder.id, summary)}
-                    />
-                  )}
-
-                  {detailDrawer.view === "deposit" && (
-                    <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                      <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
-                        <Wallet className="h-4 w-4 text-[#D24338]" />
-                        Deposit resolution
-                      </div>
-                      {depositPanelBanner && <div className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-700">{depositPanelBanner}</div>}
-                      {depositPanelError && <div className="mt-3 rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">{depositPanelError}</div>}
-                      <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
-                        <div className="font-semibold text-slate-900">Damage assessment context</div>
-                        <div className="mt-1 text-xs text-slate-500">
-                          Advisory evidence only. Deposit release or retention still requires an explicit manual action below.
-                        </div>
-                        {!activeDetailOrder.assessment.exists && (
-                          <div className="mt-3 text-sm text-slate-600">No damage assessment recorded for this order.</div>
-                        )}
-                        {activeDetailOrder.assessment.exists && (
-                          <div className="mt-3 space-y-1 text-sm text-slate-600">
-                            <div>Status: {assessmentStatusLabel(activeDetailOrder.assessment.status)}</div>
-                            <div>Result: {assessmentResultLabel(activeDetailOrder.assessment.assessmentResult)}</div>
-                            <div>
-                              Issue categories: {activeDetailOrder.assessment.issueCategories.length > 0 ? activeDetailOrder.assessment.issueCategories.join(", ") : "None recorded"}
-                            </div>
-                            <div>Estimated retention: {formatMoney(activeDetailOrder.assessment.estimatedRetentionCents / 100)}</div>
-                            <div>Recommended action: {recommendedAssessmentActionLabel(activeDetailOrder.assessment.recommendedDepositAction)}</div>
-                          </div>
-                        )}
-                        {activeDetailOrder.assessment.status === "finalized" && activeDetailOrder.assessment.assessmentId && (
-                          <label className="mt-4 flex items-start gap-2 text-sm text-slate-700">
-                            <input
-                              type="checkbox"
-                              checked={linkAssessmentToDeposit}
-                              onChange={(e) => setLinkAssessmentToDeposit(e.target.checked)}
-                            />
-                            <span>
-                              Link finalized assessment <span className="font-mono text-xs">{activeDetailOrder.assessment.assessmentId}</span> to this deposit resolution.
-                            </span>
-                          </label>
-                        )}
-                        {activeDetailOrder.assessment.exists && activeDetailOrder.assessment.status !== "finalized" && (
-                          <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
-                            Draft assessments can be reviewed here but cannot be linked as finalized deposit evidence yet.
-                          </div>
-                        )}
-                      </div>
-                      <div className="mt-4 rounded-xl border border-[#F2C7C2] bg-[#FFF6F4] p-4">
-                        <div className="text-sm font-semibold text-slate-900">Deposit resolution action</div>
-                        <div className="mt-1 text-xs text-slate-500">Record the manual release or retain decision here. This remains the primary finance action in this tab.</div>
-                        <div className="mt-4 grid gap-3 sm:grid-cols-3">
-                        <label className="grid gap-1 text-sm">
-                          <span className="text-slate-700">Action</span>
-                          <select value={depositActionType} onChange={(e) => setDepositActionType(e.target.value as "release" | "retain" | "split")} className="rounded-lg border border-slate-200 px-3 py-2 text-sm">
-                            <option value="release">Release / refund record</option>
-                            <option value="retain">Retain</option>
-                            <option value="split">Split release + retain</option>
-                          </select>
-                        </label>
-                        {(depositActionType === "release" || depositActionType === "split") && (
-                          <label className="grid gap-1 text-sm">
-                            <span className="text-slate-700">Release amount (SGD)</span>
-                            <input type="number" min="0" step="0.01" value={releaseAmountInput} onChange={(e) => setReleaseAmountInput(e.target.value)} className="rounded-lg border border-slate-200 px-3 py-2 text-sm" />
-                          </label>
-                        )}
-                        {(depositActionType === "retain" || depositActionType === "split") && (
-                          <label className="grid gap-1 text-sm">
-                            <span className="text-slate-700">Retain amount (SGD)</span>
-                            <input type="number" min="0" step="0.01" value={retainAmountInput} onChange={(e) => setRetainAmountInput(e.target.value)} className="rounded-lg border border-slate-200 px-3 py-2 text-sm" />
-                          </label>
-                        )}
-                      </div>
-                      <label className="mt-3 grid gap-1 text-sm">
-                        <span className="text-slate-700">Reason / note</span>
-                        <textarea value={resolutionNote} onChange={(e) => setResolutionNote(e.target.value)} className="min-h-24 rounded-lg border border-slate-200 px-3 py-2 text-sm" />
-                      </label>
-                      <label className="mt-3 grid gap-1 text-sm">
-                        <span className="text-slate-700">Refund / reference</span>
-                        <input type="text" value={resolutionReference} onChange={(e) => setResolutionReference(e.target.value)} className="rounded-lg border border-slate-200 px-3 py-2 text-sm" />
-                      </label>
-                      <button type="button" onClick={() => submitDepositResolution(detailOrder.id)} disabled={depositSaving || depositPanelLoading} className="mt-4 rounded-lg bg-[#D24338] px-4 py-2 text-sm font-semibold text-white hover:bg-[#B9382E] disabled:bg-slate-300">
-                        {depositSaving ? "Recording..." : "Record deposit resolution"}
-                      </button>
-                      </div>
-
-                      <div className="mt-5 rounded-xl border border-dashed border-slate-300 bg-slate-50 p-4">
-                        <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
-                          <BadgeDollarSign className="h-4 w-4 text-[#D24338]" />
-                          Manual damage charge invoice
-                        </div>
-                        <div className="mt-1 text-xs text-slate-500">
-                          Separate finance action only. This creates a normal draft invoice and does not automate deposit, invoicing, or credit decisions.
-                        </div>
-                        {damageInvoiceBanner && <div className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-700">{damageInvoiceBanner}</div>}
-                        {damageInvoiceError && <div className="mt-3 rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">{damageInvoiceError}</div>}
-                        <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                          <label className="grid gap-1 text-sm sm:col-span-2">
-                            <span className="text-slate-700">Description</span>
-                            <input type="text" value={damageInvoiceDescription} onChange={(e) => setDamageInvoiceDescription(e.target.value)} className="rounded-lg border border-slate-200 px-3 py-2 text-sm" placeholder={`Damage charge for ${detailOrder.equipmentTitle}`} />
-                          </label>
-                          <label className="grid gap-1 text-sm">
-                            <span className="text-slate-700">Amount (Excl GST, SGD)</span>
-                            <input type="number" min="0" step="0.01" value={damageInvoiceAmountInput} onChange={(e) => setDamageInvoiceAmountInput(e.target.value)} className="rounded-lg border border-slate-200 px-3 py-2 text-sm" />
-                          </label>
-                          <label className="grid gap-1 text-sm">
-                            <span className="text-slate-700">Linked deposit decision</span>
-                            <select value={linkedDamageInvoiceDepositTransactionId} onChange={(e) => setLinkedDamageInvoiceDepositTransactionId(e.target.value)} className="rounded-lg border border-slate-200 px-3 py-2 text-sm">
-                              <option value="">None</option>
-                              {depositResolutionTransactions.map((transaction) => (
-                                <option key={transaction.id} value={transaction.id}>
-                                  {depositTransactionLabel(transaction.transactionType)} Â· {formatMoney(transaction.amountCents / 100)} Â· {transaction.id}
-                                </option>
-                              ))}
-                            </select>
-                          </label>
-                        </div>
-                        <label className="mt-3 grid gap-1 text-sm">
-                          <span className="text-slate-700">Internal finance note</span>
-                          <textarea value={damageInvoiceNotes} onChange={(e) => setDamageInvoiceNotes(e.target.value)} className="min-h-24 rounded-lg border border-slate-200 px-3 py-2 text-sm" />
-                        </label>
-                        {activeDetailOrder.assessment.status === "finalized" && activeDetailOrder.assessment.assessmentId && (
-                          <label className="mt-4 flex items-start gap-2 text-sm text-slate-700">
-                            <input type="checkbox" checked={linkAssessmentToDamageInvoice} onChange={(e) => setLinkAssessmentToDamageInvoice(e.target.checked)} />
-                            <span>
-                              Link finalized assessment <span className="font-mono text-xs">{activeDetailOrder.assessment.assessmentId}</span> as evidence for this invoice draft.
-                            </span>
-                          </label>
-                        )}
-                        {activeDetailOrder.assessment.exists && activeDetailOrder.assessment.status !== "finalized" && (
-                          <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
-                            Draft assessments are visible for context but cannot be linked as finalized invoice evidence yet.
-                          </div>
-                        )}
-                        <button type="button" onClick={() => submitDamageInvoice(detailOrder.id)} disabled={damageInvoiceSaving || depositPanelLoading} className="mt-4 rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700 disabled:bg-slate-300">
-                          {damageInvoiceSaving ? "Creating..." : "Create damage invoice draft"}
-                        </button>
-                      </div>
-                    </div>
-                  )}
-
-                  {detailDrawer.view === "extensions" && (
-                    <div className="rounded-2xl border border-slate-200 bg-white p-5">
-                      <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
-                        <ChevronRight className="h-4 w-4 text-[#D24338]" />
-                        Extension review
-                      </div>
-                      <div className="mt-1 text-xs text-slate-500">Review the note once, then work through each request card below.</div>
-                      {extensionPanelBanner && <div className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-700">{extensionPanelBanner}</div>}
-                      {extensionPanelError && <div className="mt-3 rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">{extensionPanelError}</div>}
-                      <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
-                        <label className="grid gap-1 text-sm">
-                          <span className="text-slate-700">Review note</span>
-                          <textarea value={extensionReviewNote} onChange={(e) => setExtensionReviewNote(e.target.value)} className="min-h-24 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" />
-                        </label>
-                      </div>
-                      {extensionPanelLoading ? (
-                        <div className="mt-4 text-sm text-slate-500">Loading extension requests...</div>
-                      ) : activeDetailOrder.knownExtensions.length === 0 ? (
-                        <div className="mt-4 text-sm text-slate-500">No extension requests recorded for this order.</div>
-                      ) : (
-                        <div className="mt-4 space-y-3">
-                          {activeDetailOrder.knownExtensions.map((extension) => (
-                            <div key={extension.id} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-                              <div className="flex flex-wrap items-start justify-between gap-3">
-                                <div>
-                                  <div className="font-semibold text-slate-900">Through {extension.requestedRentalEnd}</div>
-                                  <div className="mt-1 text-xs text-slate-500">Current end {extension.currentRentalEnd} Â· Requested {formatDateTime(extension.createdAt)}</div>
-                                </div>
-                                <span className={["rounded-full px-2 py-1 text-[11px] font-semibold uppercase", extensionBadgeTone(extension.status)].join(" ")}>
-                                  {extensionStatusLabel(extension.status)}
-                                </span>
-                              </div>
-                              <div className="mt-4 grid gap-2 text-xs text-slate-600 sm:grid-cols-2">
-                                <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">Estimated: {formatMoney(extension.extensionChargeEstimateCents / 100)}</div>
-                                <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">Final: {formatMoney((extension.finalExtensionChargeCents ?? 0) / 100)}</div>
-                                <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">Payment terms: {extension.paymentTermsSnapshot}</div>
-                                <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">Availability: {extension.availabilityStatus}</div>
-                              </div>
-                              {(extension.availabilityMessage || extension.customerMessage || extension.reviewNote) && (
-                                <div className="mt-3 space-y-1 text-xs text-slate-600">
-                                  {extension.availabilityMessage && <div>Availability: {extension.availabilityMessage}</div>}
-                                  {extension.customerMessage && <div>Customer note: {extension.customerMessage}</div>}
-                                  {extension.reviewNote && <div>Review note: {extension.reviewNote}</div>}
-                                </div>
-                              )}
-                              {(extension.status === "awaiting_admin_review" || extension.status === "availability_blocked") && (
-                                <div className="mt-3 flex flex-wrap gap-2">
-                                  <button type="button" onClick={() => reviewExtension(detailOrder.id, extension.id, "approve")} disabled={extensionActingId === extension.id} className="rounded-lg bg-[#D24338] px-3 py-2 text-xs font-semibold text-white hover:bg-[#B9382E] disabled:bg-slate-300">
-                                    {extensionActingId === extension.id ? "Saving..." : "Approve"}
-                                  </button>
-                                  <button type="button" onClick={() => reviewExtension(detailOrder.id, extension.id, "reject")} disabled={extensionActingId === extension.id} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-100 disabled:text-slate-400">
-                                    Reject
-                                  </button>
-                                </div>
-                              )}
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-
-                <div className="space-y-4">
-                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                    <div className="text-sm font-semibold text-slate-900">Operational summary</div>
-                    <div className="mt-3 space-y-3 text-sm text-slate-600">
-                      <div className="rounded-xl border border-slate-200 bg-white p-3">
-                        <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Lifecycle</div>
-                        <div className="mt-2 grid gap-2">
-                          <div>Physical return: {returnStatusLabel(detailOrder.returnStatus)}</div>
-                          <div>Inspection: {inspectionStatusLabel(detailOrder.inspectionStatus)}</div>
-                          <div>Workflow closed: {detailOrder.completedAt ? formatDateTime(String(detailOrder.completedAt)) : "-"}</div>
-                          <div>Reserved until: {activeDetailOrder.reservedUntil}</div>
-                        </div>
-                      </div>
-                      <div className="rounded-xl border border-slate-200 bg-white p-3">
-                        <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Assessment</div>
-                        <div className="mt-2 grid gap-2">
-                          <div>Status: {assessmentStatusLabel(activeDetailOrder.assessment.status)}</div>
-                          <div>Result: {assessmentResultLabel(activeDetailOrder.assessment.assessmentResult)}</div>
-                          <div>Recommended action: {recommendedAssessmentActionLabel(activeDetailOrder.assessment.recommendedDepositAction)}</div>
-                          <div>Estimate: {formatMoney(activeDetailOrder.assessment.estimatedRetentionCents / 100)}</div>
-                        </div>
-                      </div>
-                      <div className="rounded-xl border border-slate-200 bg-white p-3">
-                        <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Deposit</div>
-                        <div className="mt-2 grid gap-2">
-                          <div>Status: {depositStatusLabel(activeDetailOrder.deposit.status)}</div>
-                          <div>Held: {formatMoney(activeDetailOrder.deposit.heldAmountCents / 100)}</div>
-                          <div>Unresolved: {formatMoney(activeDetailOrder.deposit.unresolvedAmountCents / 100)}</div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                    <div className="text-sm font-semibold text-slate-900">Attention</div>
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      {activeDetailOrder.hasInspectionIssues && <span className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${warningChipTone("critical")}`}>Inspection issues</span>}
-                      {activeDetailOrder.hasAssessmentDraft && <span className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${warningChipTone("info")}`}>Assessment draft</span>}
-                      {activeDetailOrder.hasDepositAttention && <span className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${warningChipTone("warning")}`}>Deposit unresolved</span>}
-                      {activeDetailOrder.hasDowntimeImpact && <span className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${warningChipTone("warning")}`}>Downtime overlap</span>}
-                      {activeDetailOrder.extensionNeedsAttention && <span className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${warningChipTone("info")}`}>Extension review</span>}
-                      {!activeDetailOrder.needsAttention && <span className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${warningChipTone("ok")}`}>No immediate blockers</span>}
-                    </div>
-                  </div>
-
-                  {detailDrawer.view === "deposit" && (
-                    <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                      <div className="text-sm font-semibold text-slate-900">Recent deposit activity</div>
-                      {depositPanelLoading ? (
-                        <div className="mt-3 text-sm text-slate-500">Loading deposit history...</div>
-                      ) : depositTransactions.length === 0 ? (
-                        <div className="mt-3 text-sm text-slate-500">No deposit transactions recorded.</div>
-                      ) : (
-                        <div className="mt-3 space-y-2">
-                          {depositTransactions.slice(0, 6).map((transaction) => (
-                            <div key={transaction.id} className="rounded-lg border border-slate-200 bg-white p-3 text-xs text-slate-600">
-                              <div className="flex items-center justify-between gap-3">
-                                <span className="font-semibold text-slate-900">{depositTransactionLabel(transaction.transactionType)}</span>
-                                <span>{formatMoney(transaction.amountCents / 100)}</span>
-                              </div>
-                              <div className="mt-1">{formatDateTime(transaction.createdAt)}</div>
-                              {transaction.notes && <div className="mt-1">{transaction.notes}</div>}
-                              {transaction.externalReference && <div className="mt-1">Ref: {transaction.externalReference}</div>}
-                              {transaction.damageAssessmentId && <div className="mt-1">Assessment: {transaction.damageAssessmentId}</div>}
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              </div>
+            <div className="mt-3 text-lg font-semibold text-[#2A2A2A]">{detailOrder.id}</div>
+            <div className="mt-1 text-sm text-slate-600">
+              {detailOrder.customerSnapshot?.companyName ?? "Direct customer"} · {detailOrder.equipmentTitle}
             </div>
           </div>
+
+          <button
+            type="button"
+            onClick={closeDetailDrawer}
+            className="shrink-0 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+          >
+            Close
+          </button>
         </div>
-      )}
+
+        <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-4">
+          <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+            Workflow guide
+          </div>
+
+          <div className="mt-3 flex gap-3 overflow-x-auto pb-1">
+            {drawerWorkflowSteps.map((step, index) => {
+              const tone =
+                step.state === "done"
+                  ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                  : step.state === "current"
+                    ? "border-[#F2C7C2] bg-[#FFF6F4] text-[#8A453F]"
+                    : "border-slate-200 bg-white text-slate-500";
+
+              return (
+                <div
+                  key={step.label}
+                  className={[
+                    "min-w-[180px] flex-1 rounded-2xl border px-4 py-3",
+                    tone,
+                  ].join(" ")}
+                >
+                  <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.12em]">
+                    <span className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-current text-[10px]">
+                      {index + 1}
+                    </span>
+                    {step.label}
+                  </div>
+                  <div className="mt-2 text-xs leading-5">{step.description}</div>
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="mt-3 text-xs text-slate-500">
+            Use this as a quick reference for what should happen next.
+          </div>
+        </div>
+
+        <div className="mt-4 flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => openOrderWorkspace(detailOrder, "operations")}
+            className={`rounded-lg px-3 py-2 text-sm font-medium ${
+              detailDrawer.view === "operations"
+                ? "bg-[#D24338] text-white hover:bg-[#B9382E]"
+                : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+            }`}
+          >
+            Return / inspection
+          </button>
+          <button
+            type="button"
+            onClick={() => openOrderWorkspace(detailOrder, "assessment")}
+            className={`rounded-lg px-3 py-2 text-sm font-medium ${
+              detailDrawer.view === "assessment"
+                ? "bg-[#D24338] text-white hover:bg-[#B9382E]"
+                : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+            }`}
+          >
+            Assessment
+          </button>
+          <button
+            type="button"
+            onClick={() => openOrderWorkspace(detailOrder, "deposit")}
+            className={`rounded-lg px-3 py-2 text-sm font-medium ${
+              detailDrawer.view === "deposit"
+                ? "bg-[#D24338] text-white hover:bg-[#B9382E]"
+                : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+            }`}
+          >
+            Deposit
+          </button>
+          <button
+            type="button"
+            onClick={() => openOrderWorkspace(detailOrder, "extensions")}
+            className={`rounded-lg px-3 py-2 text-sm font-medium ${
+              detailDrawer.view === "extensions"
+                ? "bg-[#D24338] text-white hover:bg-[#B9382E]"
+                : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+            }`}
+          >
+            Extensions
+          </button>
+        </div>
+      </div>
+
+      <div className="min-h-0 flex-1 overflow-y-auto p-5">
+        <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_290px]">
+          <div className="space-y-5">
+            {detailDrawer.view === "operations" && (
+              <div className="rounded-2xl border border-slate-200 bg-white p-5">
+                <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+                  <ClipboardCheck className="h-4 w-4 text-[#D24338]" />
+                  Return & inspection workflow
+                </div>
+                <div className="mt-1 text-xs text-slate-500">
+                  Record the physical return first, then finish inspection, then close the operational workflow when follow-up is done.
+                </div>
+
+                {opsBanner && (
+                  <div className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-700">
+                    {opsBanner}
+                  </div>
+                )}
+
+                {opsError && (
+                  <div className="mt-4 rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">
+                    {opsError}
+                  </div>
+                )}
+
+                {opsGuardrails.impossible.length > 0 && (
+                  <div className="mt-4 rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">
+                    <div className="font-semibold">This combination cannot be saved yet.</div>
+                    <ul className="mt-2 list-disc space-y-1 pl-5 text-xs">
+                      {opsGuardrails.impossible.map((message) => (
+                        <li key={message}>{message}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {opsGuardrails.warnings.length > 0 && (
+                  <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                    <div className="font-semibold">Before you close this workflow</div>
+                    <ul className="mt-2 list-disc space-y-1 pl-5 text-xs">
+                      {opsGuardrails.warnings.map((message) => (
+                        <li key={message}>{message}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                <div className="mt-5 grid gap-4 sm:grid-cols-2">
+                  <label className="grid gap-1 text-sm">
+                    <span className="text-slate-700">Physical return status</span>
+                    <select
+                      value={normalizeOperationalReturnStatus(opsReturnStatus)}
+                      onChange={(e) => setOpsReturnStatus(e.target.value as RentalOrderReturnStatus)}
+                      className="rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                    >
+                      <option value="out">Active / out on rent</option>
+                      <option value="returned">Returned to yard / site</option>
+                    </select>
+                    <span className="text-xs text-slate-500">{returnStatusHelp(opsReturnStatus)}</span>
+                  </label>
+
+                  <label className="grid gap-1 text-sm">
+                    <span className="text-slate-700">Inspection status</span>
+                    <select
+                      value={opsInspectionStatus}
+                      onChange={(e) => setOpsInspectionStatus(e.target.value as RentalOrderInspectionStatus)}
+                      className="rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                    >
+                      <option value="not_started">Not started</option>
+                      <option
+                        value="pending"
+                        disabled={normalizeOperationalReturnStatus(opsReturnStatus) === "out"}
+                      >
+                        Pending inspection
+                      </option>
+                      <option
+                        value="passed"
+                        disabled={normalizeOperationalReturnStatus(opsReturnStatus) === "out"}
+                      >
+                        Passed - no issues
+                      </option>
+                      <option
+                        value="issues_found"
+                        disabled={normalizeOperationalReturnStatus(opsReturnStatus) === "out"}
+                      >
+                        Issues found - follow-up needed
+                      </option>
+                    </select>
+                    <span className="text-xs text-slate-500">{inspectionStatusHelp(opsInspectionStatus)}</span>
+                  </label>
+                </div>
+
+                <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                  <label className="grid gap-1 text-sm">
+                    <span className="text-slate-700">Returned on</span>
+                    <input
+                      type="date"
+                      value={opsReturnedAt}
+                      onChange={(e) => setOpsReturnedAt(e.target.value)}
+                      className="rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                    />
+                    <span className="text-xs text-slate-500">
+                      Add the date the equipment physically came back.
+                    </span>
+                  </label>
+
+                  <label className="flex items-start gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-700">
+                    <input
+                      type="checkbox"
+                      checked={opsMarkCompleted}
+                      onChange={(e) => setOpsMarkCompleted(e.target.checked)}
+                      className="mt-0.5"
+                    />
+                    <span>
+                      <span className="font-medium text-slate-900">Close order workflow</span>
+                      <span className="mt-1 block text-xs text-slate-500">
+                        Use this only after the equipment is returned and inspection is finished. This does not resolve deposit, invoicing, or credit automatically.
+                      </span>
+                    </span>
+                  </label>
+                </div>
+
+                <label className="mt-4 grid gap-1 text-sm">
+                  <span className="text-slate-700">Return notes</span>
+                  <textarea
+                    value={opsReturnNotes}
+                    onChange={(e) => setOpsReturnNotes(e.target.value)}
+                    className="min-h-24 rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                  />
+                </label>
+
+                <label className="mt-4 grid gap-1 text-sm">
+                  <span className="text-slate-700">Inspection notes</span>
+                  <textarea
+                    value={opsInspectionNotes}
+                    onChange={(e) => setOpsInspectionNotes(e.target.value)}
+                    className="min-h-24 rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                  />
+                </label>
+
+                <div className="mt-5 flex justify-start">
+                  <button
+                    type="button"
+                    onClick={() => submitOperationsUpdate(detailOrder.id)}
+                    disabled={opsSaving || opsGuardrails.impossible.length > 0}
+                    className="rounded-lg bg-[#D24338] px-4 py-2 text-sm font-semibold text-white hover:bg-[#B9382E] disabled:bg-slate-300"
+                  >
+                    {opsSaving ? "Saving..." : "Save operational workflow"}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {detailDrawer.view === "assessment" && (
+              <OrderDamageAssessmentPanel
+                order={detailOrder}
+                summary={activeDetailOrder.assessment}
+                onSummaryChange={(summary) => handleAssessmentSummaryChange(detailOrder.id, summary)}
+              />
+            )}
+
+            {detailDrawer.view === "deposit" && (
+              <div className="rounded-2xl border border-slate-200 bg-white p-5">
+                <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+                  <Wallet className="h-4 w-4 text-[#D24338]" />
+                  Deposit resolution
+                </div>
+
+                {depositPanelBanner && (
+                  <div className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-700">
+                    {depositPanelBanner}
+                  </div>
+                )}
+
+                {depositPanelError && (
+                  <div className="mt-4 rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">
+                    {depositPanelError}
+                  </div>
+                )}
+
+                <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
+                  <div className="font-semibold text-slate-900">Damage assessment context</div>
+                  <div className="mt-1 text-xs text-slate-500">
+                    Advisory evidence only. Deposit release or retention still requires an explicit manual action below.
+                  </div>
+
+                  {!activeDetailOrder.assessment.exists && (
+                    <div className="mt-3 text-sm text-slate-600">
+                      No damage assessment recorded for this order.
+                    </div>
+                  )}
+
+                  {activeDetailOrder.assessment.exists && (
+                    <div className="mt-3 space-y-1 text-sm text-slate-600">
+                      <div>Status: {assessmentStatusLabel(activeDetailOrder.assessment.status)}</div>
+                      <div>Result: {assessmentResultLabel(activeDetailOrder.assessment.assessmentResult)}</div>
+                      <div>
+                        Issue categories:{" "}
+                        {activeDetailOrder.assessment.issueCategories.length > 0
+                          ? activeDetailOrder.assessment.issueCategories.join(", ")
+                          : "None recorded"}
+                      </div>
+                      <div>
+                        Estimated retention:{" "}
+                        {formatMoney(activeDetailOrder.assessment.estimatedRetentionCents / 100)}
+                      </div>
+                      <div>
+                        Recommended action:{" "}
+                        {recommendedAssessmentActionLabel(
+                          activeDetailOrder.assessment.recommendedDepositAction
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {activeDetailOrder.assessment.status === "finalized" &&
+                    activeDetailOrder.assessment.assessmentId && (
+                      <label className="mt-4 flex items-start gap-2 text-sm text-slate-700">
+                        <input
+                          type="checkbox"
+                          checked={linkAssessmentToDeposit}
+                          onChange={(e) => setLinkAssessmentToDeposit(e.target.checked)}
+                        />
+                        <span>
+                          Link finalized assessment{" "}
+                          <span className="font-mono text-xs">
+                            {activeDetailOrder.assessment.assessmentId}
+                          </span>{" "}
+                          to this deposit resolution.
+                        </span>
+                      </label>
+                    )}
+
+                  {activeDetailOrder.assessment.exists &&
+                    activeDetailOrder.assessment.status !== "finalized" && (
+                      <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                        Draft assessments can be reviewed here but cannot be linked as finalized deposit evidence yet.
+                      </div>
+                    )}
+                </div>
+
+                <div className="mt-4 rounded-xl border border-[#F2C7C2] bg-[#FFF6F4] p-4">
+                  <div className="text-sm font-semibold text-slate-900">Deposit resolution action</div>
+                  <div className="mt-1 text-xs text-slate-500">
+                    Record the manual release or retain decision here. This is the primary action in this tab.
+                  </div>
+
+                  <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                    <label className="grid gap-1 text-sm">
+                      <span className="text-slate-700">Action</span>
+                      <select
+                        value={depositActionType}
+                        onChange={(e) =>
+                          setDepositActionType(e.target.value as "release" | "retain" | "split")
+                        }
+                        className="rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                      >
+                        <option value="release">Release / refund record</option>
+                        <option value="retain">Retain</option>
+                        <option value="split">Split release + retain</option>
+                      </select>
+                    </label>
+
+                    {(depositActionType === "release" || depositActionType === "split") && (
+                      <label className="grid gap-1 text-sm">
+                        <span className="text-slate-700">Release amount (SGD)</span>
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={releaseAmountInput}
+                          onChange={(e) => setReleaseAmountInput(e.target.value)}
+                          className="rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                        />
+                      </label>
+                    )}
+
+                    {(depositActionType === "retain" || depositActionType === "split") && (
+                      <label className="grid gap-1 text-sm">
+                        <span className="text-slate-700">Retain amount (SGD)</span>
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={retainAmountInput}
+                          onChange={(e) => setRetainAmountInput(e.target.value)}
+                          className="rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                        />
+                      </label>
+                    )}
+                  </div>
+
+                  <label className="mt-3 grid gap-1 text-sm">
+                    <span className="text-slate-700">Reason / note</span>
+                    <textarea
+                      value={resolutionNote}
+                      onChange={(e) => setResolutionNote(e.target.value)}
+                      className="min-h-24 rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                    />
+                  </label>
+
+                  <label className="mt-3 grid gap-1 text-sm">
+                    <span className="text-slate-700">Refund / reference</span>
+                    <input
+                      type="text"
+                      value={resolutionReference}
+                      onChange={(e) => setResolutionReference(e.target.value)}
+                      className="rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                    />
+                  </label>
+
+                  <button
+                    type="button"
+                    onClick={() => submitDepositResolution(detailOrder.id)}
+                    disabled={depositSaving || depositPanelLoading}
+                    className="mt-4 rounded-lg bg-[#D24338] px-4 py-2 text-sm font-semibold text-white hover:bg-[#B9382E] disabled:bg-slate-300"
+                  >
+                    {depositSaving ? "Recording..." : "Record deposit resolution"}
+                  </button>
+                </div>
+
+                <div className="mt-5 rounded-xl border border-dashed border-slate-300 bg-slate-50 p-4">
+                  <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+                    <BadgeDollarSign className="h-4 w-4 text-[#D24338]" />
+                    Manual damage charge invoice
+                  </div>
+                  <div className="mt-1 text-xs text-slate-500">
+                    Separate finance action only. This creates a normal draft invoice and does not automate deposit, invoicing, or credit decisions.
+                  </div>
+
+                  {damageInvoiceBanner && (
+                    <div className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-700">
+                      {damageInvoiceBanner}
+                    </div>
+                  )}
+
+                  {damageInvoiceError && (
+                    <div className="mt-3 rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">
+                      {damageInvoiceError}
+                    </div>
+                  )}
+
+                  <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                    <label className="grid gap-1 text-sm sm:col-span-2">
+                      <span className="text-slate-700">Description</span>
+                      <input
+                        type="text"
+                        value={damageInvoiceDescription}
+                        onChange={(e) => setDamageInvoiceDescription(e.target.value)}
+                        className="rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                        placeholder={`Damage charge for ${detailOrder.equipmentTitle}`}
+                      />
+                    </label>
+
+                    <label className="grid gap-1 text-sm">
+                      <span className="text-slate-700">Amount (Excl GST, SGD)</span>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={damageInvoiceAmountInput}
+                        onChange={(e) => setDamageInvoiceAmountInput(e.target.value)}
+                        className="rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                      />
+                    </label>
+
+                    <label className="grid gap-1 text-sm">
+                      <span className="text-slate-700">Linked deposit decision</span>
+                      <select
+                        value={linkedDamageInvoiceDepositTransactionId}
+                        onChange={(e) => setLinkedDamageInvoiceDepositTransactionId(e.target.value)}
+                        className="rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                      >
+                        <option value="">None</option>
+                        {depositResolutionTransactions.map((transaction) => (
+                          <option key={transaction.id} value={transaction.id}>
+                            {depositTransactionLabel(transaction.transactionType)} ·{" "}
+                            {formatMoney(transaction.amountCents / 100)} · {transaction.id}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+
+                  <label className="mt-3 grid gap-1 text-sm">
+                    <span className="text-slate-700">Internal finance note</span>
+                    <textarea
+                      value={damageInvoiceNotes}
+                      onChange={(e) => setDamageInvoiceNotes(e.target.value)}
+                      className="min-h-24 rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                    />
+                  </label>
+
+                  {activeDetailOrder.assessment.status === "finalized" &&
+                    activeDetailOrder.assessment.assessmentId && (
+                      <label className="mt-4 flex items-start gap-2 text-sm text-slate-700">
+                        <input
+                          type="checkbox"
+                          checked={linkAssessmentToDamageInvoice}
+                          onChange={(e) => setLinkAssessmentToDamageInvoice(e.target.checked)}
+                        />
+                        <span>
+                          Link finalized assessment{" "}
+                          <span className="font-mono text-xs">
+                            {activeDetailOrder.assessment.assessmentId}
+                          </span>{" "}
+                          as evidence for this invoice draft.
+                        </span>
+                      </label>
+                    )}
+
+                  {activeDetailOrder.assessment.exists &&
+                    activeDetailOrder.assessment.status !== "finalized" && (
+                      <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                        Draft assessments are visible for context but cannot be linked as finalized invoice evidence yet.
+                      </div>
+                    )}
+
+                  <button
+                    type="button"
+                    onClick={() => submitDamageInvoice(detailOrder.id)}
+                    disabled={damageInvoiceSaving || depositPanelLoading}
+                    className="mt-4 rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700 disabled:bg-slate-300"
+                  >
+                    {damageInvoiceSaving ? "Creating..." : "Create damage invoice draft"}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {detailDrawer.view === "extensions" && (
+              <div className="rounded-2xl border border-slate-200 bg-white p-5">
+                <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+                  <ChevronRight className="h-4 w-4 text-[#D24338]" />
+                  Extension review
+                </div>
+                <div className="mt-1 text-xs text-slate-500">
+                  Review the note once, then work through each request card below.
+                </div>
+
+                {extensionPanelBanner && (
+                  <div className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-700">
+                    {extensionPanelBanner}
+                  </div>
+                )}
+
+                {extensionPanelError && (
+                  <div className="mt-4 rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">
+                    {extensionPanelError}
+                  </div>
+                )}
+
+                <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
+                  <label className="grid gap-1 text-sm">
+                    <span className="text-slate-700">Review note</span>
+                    <textarea
+                      value={extensionReviewNote}
+                      onChange={(e) => setExtensionReviewNote(e.target.value)}
+                      className="min-h-24 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
+                    />
+                  </label>
+                </div>
+
+                {extensionPanelLoading ? (
+                  <div className="mt-4 text-sm text-slate-500">Loading extension requests...</div>
+                ) : activeDetailOrder.knownExtensions.length === 0 ? (
+                  <div className="mt-4 text-sm text-slate-500">
+                    No extension requests recorded for this order.
+                  </div>
+                ) : (
+                  <div className="mt-4 space-y-3">
+                    {activeDetailOrder.knownExtensions.map((extension) => (
+                      <div
+                        key={extension.id}
+                        className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"
+                      >
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div>
+                            <div className="font-semibold text-slate-900">
+                              Through {extension.requestedRentalEnd}
+                            </div>
+                            <div className="mt-1 text-xs text-slate-500">
+                              Current end {extension.currentRentalEnd} · Requested{" "}
+                              {formatDateTime(extension.createdAt)}
+                            </div>
+                          </div>
+                          <span
+                            className={[
+                              "rounded-full px-2 py-1 text-[11px] font-semibold uppercase",
+                              extensionBadgeTone(extension.status),
+                            ].join(" ")}
+                          >
+                            {extensionStatusLabel(extension.status)}
+                          </span>
+                        </div>
+
+                        <div className="mt-4 grid gap-2 text-xs text-slate-600 sm:grid-cols-2">
+                          <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                            Estimated: {formatMoney(extension.extensionChargeEstimateCents / 100)}
+                          </div>
+                          <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                            Final: {formatMoney((extension.finalExtensionChargeCents ?? 0) / 100)}
+                          </div>
+                          <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                            Payment terms: {extension.paymentTermsSnapshot}
+                          </div>
+                          <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                            Availability: {extension.availabilityStatus}
+                          </div>
+                        </div>
+
+                        {(extension.availabilityMessage ||
+                          extension.customerMessage ||
+                          extension.reviewNote) && (
+                          <div className="mt-3 space-y-1 text-xs text-slate-600">
+                            {extension.availabilityMessage && (
+                              <div>Availability: {extension.availabilityMessage}</div>
+                            )}
+                            {extension.customerMessage && (
+                              <div>Customer note: {extension.customerMessage}</div>
+                            )}
+                            {extension.reviewNote && <div>Review note: {extension.reviewNote}</div>}
+                          </div>
+                        )}
+
+                        {(extension.status === "awaiting_admin_review" ||
+                          extension.status === "availability_blocked") && (
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            <button
+                              type="button"
+                              onClick={() => reviewExtension(detailOrder.id, extension.id, "approve")}
+                              disabled={extensionActingId === extension.id}
+                              className="rounded-lg bg-[#D24338] px-3 py-2 text-xs font-semibold text-white hover:bg-[#B9382E] disabled:bg-slate-300"
+                            >
+                              {extensionActingId === extension.id ? "Saving..." : "Approve"}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => reviewExtension(detailOrder.id, extension.id, "reject")}
+                              disabled={extensionActingId === extension.id}
+                              className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-100 disabled:text-slate-400"
+                            >
+                              Reject
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          <div className="space-y-4 xl:sticky xl:top-0 xl:self-start">
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <div className="text-sm font-semibold text-slate-900">Operational summary</div>
+
+              <div className="mt-4 space-y-3">
+                <div className="rounded-xl border border-slate-200 bg-white p-3">
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                    Lifecycle
+                  </div>
+                  <dl className="mt-3 grid grid-cols-[112px_minmax(0,1fr)] gap-x-3 gap-y-2 text-sm text-slate-600">
+                    <dt className="text-slate-500">Return</dt>
+                    <dd className="text-slate-900">{returnStatusLabel(detailOrder.returnStatus)}</dd>
+
+                    <dt className="text-slate-500">Inspection</dt>
+                    <dd className="text-slate-900">
+                      {inspectionStatusLabel(detailOrder.inspectionStatus)}
+                    </dd>
+
+                    <dt className="text-slate-500">Closed</dt>
+                    <dd className="text-slate-900">
+                      {detailOrder.completedAt ? formatDateTime(String(detailOrder.completedAt)) : "-"}
+                    </dd>
+
+                    <dt className="text-slate-500">Reserved</dt>
+                    <dd className="text-slate-900">{activeDetailOrder.reservedUntil}</dd>
+                  </dl>
+                </div>
+
+                <div className="rounded-xl border border-slate-200 bg-white p-3">
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                    Assessment
+                  </div>
+                  <dl className="mt-3 grid grid-cols-[112px_minmax(0,1fr)] gap-x-3 gap-y-2 text-sm text-slate-600">
+                    <dt className="text-slate-500">Status</dt>
+                    <dd className="text-slate-900">
+                      {assessmentStatusLabel(activeDetailOrder.assessment.status)}
+                    </dd>
+
+                    <dt className="text-slate-500">Result</dt>
+                    <dd className="text-slate-900">
+                      {assessmentResultLabel(activeDetailOrder.assessment.assessmentResult)}
+                    </dd>
+
+                    <dt className="text-slate-500">Action</dt>
+                    <dd className="text-slate-900">
+                      {recommendedAssessmentActionLabel(
+                        activeDetailOrder.assessment.recommendedDepositAction
+                      )}
+                    </dd>
+
+                    <dt className="text-slate-500">Estimate</dt>
+                    <dd className="text-slate-900">
+                      {formatMoney(activeDetailOrder.assessment.estimatedRetentionCents / 100)}
+                    </dd>
+                  </dl>
+                </div>
+
+                <div className="rounded-xl border border-slate-200 bg-white p-3">
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                    Deposit
+                  </div>
+                  <dl className="mt-3 grid grid-cols-[112px_minmax(0,1fr)] gap-x-3 gap-y-2 text-sm text-slate-600">
+                    <dt className="text-slate-500">Status</dt>
+                    <dd className="text-slate-900">
+                      {depositStatusLabel(activeDetailOrder.deposit.status)}
+                    </dd>
+
+                    <dt className="text-slate-500">Held</dt>
+                    <dd className="text-slate-900">
+                      {formatMoney(activeDetailOrder.deposit.heldAmountCents / 100)}
+                    </dd>
+
+                    <dt className="text-slate-500">Unresolved</dt>
+                    <dd className="text-slate-900">
+                      {formatMoney(activeDetailOrder.deposit.unresolvedAmountCents / 100)}
+                    </dd>
+                  </dl>
+                </div>
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <div className="text-sm font-semibold text-slate-900">Attention</div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {activeDetailOrder.hasInspectionIssues && (
+                  <span
+                    className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${warningChipTone("critical")}`}
+                  >
+                    Inspection issues
+                  </span>
+                )}
+                {activeDetailOrder.hasAssessmentDraft && (
+                  <span
+                    className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${warningChipTone("info")}`}
+                  >
+                    Assessment draft
+                  </span>
+                )}
+                {activeDetailOrder.hasDepositAttention && (
+                  <span
+                    className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${warningChipTone("warning")}`}
+                  >
+                    Deposit unresolved
+                  </span>
+                )}
+                {activeDetailOrder.hasDowntimeImpact && (
+                  <span
+                    className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${warningChipTone("warning")}`}
+                  >
+                    Downtime overlap
+                  </span>
+                )}
+                {activeDetailOrder.extensionNeedsAttention && (
+                  <span
+                    className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${warningChipTone("info")}`}
+                  >
+                    Extension review
+                  </span>
+                )}
+                {!activeDetailOrder.needsAttention && (
+                  <span
+                    className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${warningChipTone("ok")}`}
+                  >
+                    No immediate blockers
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {detailDrawer.view === "deposit" && (
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <div className="text-sm font-semibold text-slate-900">Recent deposit activity</div>
+
+                {depositPanelLoading ? (
+                  <div className="mt-3 text-sm text-slate-500">Loading deposit history...</div>
+                ) : depositTransactions.length === 0 ? (
+                  <div className="mt-3 text-sm text-slate-500">No deposit transactions recorded.</div>
+                ) : (
+                  <div className="mt-3 space-y-2">
+                    {depositTransactions.slice(0, 6).map((transaction) => (
+                      <div
+                        key={transaction.id}
+                        className="rounded-lg border border-slate-200 bg-white p-3 text-xs text-slate-600"
+                      >
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="font-semibold text-slate-900">
+                            {depositTransactionLabel(transaction.transactionType)}
+                          </span>
+                          <span>{formatMoney(transaction.amountCents / 100)}</span>
+                        </div>
+                        <div className="mt-1">{formatDateTime(transaction.createdAt)}</div>
+                        {transaction.notes && <div className="mt-1">{transaction.notes}</div>}
+                        {transaction.externalReference && (
+                          <div className="mt-1">Ref: {transaction.externalReference}</div>
+                        )}
+                        {transaction.damageAssessmentId && (
+                          <div className="mt-1">Assessment: {transaction.damageAssessmentId}</div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+)}
 
       {deleteDialog && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 px-4">
