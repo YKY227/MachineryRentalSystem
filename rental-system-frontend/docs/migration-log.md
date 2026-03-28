@@ -2310,3 +2310,25 @@ API / Page changes:
 Risks / follow-up notes:
 - This preserves the current query-driven checkout state cleanly, but a later lightweight checkout draft persistence layer could still improve resilience if users abandon the flow mid-auth or across devices.
 - Other public flows that use next should still be reviewed separately if they need to preserve richer query state in the same way.
+
+## 2026-03-28 | Scope: rental order drawer workflow guardrails and guidance
+Summary:
+- Refined the Rental Orders drawer so return, inspection, and workflow closure are easier to understand, with clearer wording, compact workflow guidance, and helper text aimed at reducing operational mistakes.
+- Added server-backed and UI-backed guardrails to block impossible return/inspection combinations while surfacing warnings for risky but still manual follow-up states such as unresolved deposits or draft assessments.
+
+Files changed:
+- src/app/admin/rental/orders/page.tsx
+- src/app/api/admin/rental/orders/[id]/operations/route.ts
+- docs/migration-log.md
+
+DB / Infra changes:
+- No schema changes were required.
+- Existing order operational fields remain authoritative; this pass only tightened validation and guidance around how they can be combined.
+
+API / Page changes:
+- Operations API now rejects invalid combinations such as starting or finishing inspection while the order is still marked out on rent, and it requires both return recording and finished inspection before workflow closure.
+- Admin order drawer now separates physical return state from operational closure more clearly, renames the closure action to Close order workflow, adds short helper text for return and inspection controls, shows a compact Out on rent -> Returned -> Inspected -> Closed workflow strip, and surfaces impossible-state blockers plus risky follow-up warnings in the operations tab.
+
+Risks / follow-up notes:
+- The underlying status model still uses return_status = completed to represent a closed workflow, so the UI now explains that meaning more clearly without redesigning the persistence model in this pass.
+- A later SOP panel or lightweight onboarding hint could still help occasional admins, but this change intentionally keeps guidance embedded directly in the existing drawer.

@@ -159,7 +159,7 @@ function returnStatusLabel(status: RentalOrderReturnStatus) {
     case "returned":
       return "Returned";
     case "completed":
-      return "Completed";
+      return "Operationally Closed";
     default:
       return status;
   }
@@ -178,6 +178,126 @@ function inspectionStatusLabel(status: RentalOrderInspectionStatus) {
     default:
       return status;
   }
+}
+
+function normalizeOperationalReturnStatus(status: RentalOrderReturnStatus) {
+  return status === "completed" ? "returned" : status;
+}
+
+function isInspectionFinalStatus(status: RentalOrderInspectionStatus) {
+  return status === "passed" || status === "issues_found";
+}
+
+function returnStatusHelp(status: RentalOrderReturnStatus) {
+  switch (normalizeOperationalReturnStatus(status)) {
+    case "out":
+      return "Use this while the equipment is still with the customer and no return has been recorded.";
+    case "returned":
+      return "Use this once the equipment is physically back so inspection can begin or finish.";
+    default:
+      return "Use this once the equipment is physically back so inspection can begin or finish.";
+  }
+}
+
+function inspectionStatusHelp(status: RentalOrderInspectionStatus) {
+  switch (status) {
+    case "not_started":
+      return "No return inspection has started yet.";
+    case "pending":
+      return "The equipment is back and still being checked.";
+    case "passed":
+      return "Inspection finished with no operational issues recorded.";
+    case "issues_found":
+      return "Inspection finished and follow-up is still needed.";
+    default:
+      return "No return inspection has started yet.";
+  }
+}
+
+function buildOperationalGuardrails(params: {
+  returnStatus: RentalOrderReturnStatus;
+  inspectionStatus: RentalOrderInspectionStatus;
+  closeRequested: boolean;
+  assessmentStatus?: RentalDamageAssessmentSummary["status"];
+  assessmentExists: boolean;
+  depositHeldAmountCents: number;
+  depositUnresolvedAmountCents: number;
+}) {
+  const impossible: string[] = [];
+  const warnings: string[] = [];
+  const normalizedReturnStatus = normalizeOperationalReturnStatus(params.returnStatus);
+
+  if (normalizedReturnStatus === "out" && params.inspectionStatus !== "not_started") {
+    impossible.push("Inspection can only start after the equipment has been recorded as returned.");
+  }
+
+  if (params.closeRequested && normalizedReturnStatus === "out") {
+    impossible.push("Record the equipment as returned before closing the order workflow.");
+  }
+
+  if (params.closeRequested && !isInspectionFinalStatus(params.inspectionStatus)) {
+    impossible.push("Finish the inspection before closing the order workflow.");
+  }
+
+  if (
+    params.inspectionStatus === "issues_found" &&
+    params.depositHeldAmountCents > 0 &&
+    params.depositUnresolvedAmountCents > 0
+  ) {
+    warnings.push("Inspection found issues and the deposit is still unresolved. Review the deposit decision separately.");
+  }
+
+  if (params.closeRequested && params.assessmentStatus === "draft") {
+    warnings.push("Damage assessment is still draft. Finalize it first if staff need it as evidence.");
+  }
+
+  if (params.closeRequested && params.inspectionStatus === "issues_found" && !params.assessmentExists) {
+    warnings.push("Inspection issues are recorded but no damage assessment exists yet.");
+  }
+
+  if (
+    params.closeRequested &&
+    params.depositHeldAmountCents > 0 &&
+    params.depositUnresolvedAmountCents > 0
+  ) {
+    warnings.push("A held deposit is still unresolved. Closing the workflow will not release or retain it automatically.");
+  }
+
+  return { impossible, warnings };
+}
+
+function buildWorkflowSteps(
+  returnStatus: RentalOrderReturnStatus,
+  inspectionStatus: RentalOrderInspectionStatus,
+  closeRequested: boolean
+) {
+  const normalizedReturnStatus = normalizeOperationalReturnStatus(returnStatus);
+  const isReturned = normalizedReturnStatus !== "out";
+  const inspectionFinal = isInspectionFinalStatus(inspectionStatus);
+  const closed = closeRequested || returnStatus === "completed";
+
+  return [
+    {
+      label: "Out on rent",
+      description: "Equipment is still with the customer.",
+      state: normalizedReturnStatus === "out" ? "current" : "done",
+    },
+    {
+      label: "Returned",
+      description: "Physical return has been recorded.",
+      state: !isReturned ? "upcoming" : inspectionStatus === "not_started" ? "current" : "done",
+    },
+    {
+      label: "Inspected",
+      description: "Post-return check is complete.",
+      state: !isReturned ? "upcoming" : inspectionFinal ? (closed ? "done" : "current") : "current",
+    },
+    {
+      label: "Closed",
+      description: "Operational follow-up is closed.",
+      state: closed ? "current" : "upcoming",
+    },
+  ] as const;
 }
 
 function assessmentStatusLabel(status?: RentalDamageAssessmentSummary["status"]) {
@@ -577,6 +697,18 @@ export default function AdminRentalOrdersPage() {
     [activeDetailOrderId, orderRows]
   );
   const detailOrder = activeDetailOrder?.order ?? null;
+  const opsGuardrails = activeDetailOrder
+    ? buildOperationalGuardrails({
+        returnStatus: opsReturnStatus,
+        inspectionStatus: opsInspectionStatus,
+        closeRequested: opsMarkCompleted,
+        assessmentStatus: activeDetailOrder.assessment.status,
+        assessmentExists: activeDetailOrder.assessment.exists,
+        depositHeldAmountCents: activeDetailOrder.deposit.heldAmountCents,
+        depositUnresolvedAmountCents: activeDetailOrder.deposit.unresolvedAmountCents,
+      })
+    : { impossible: [], warnings: [] };
+  const opsWorkflowSteps = buildWorkflowSteps(opsReturnStatus, opsInspectionStatus, opsMarkCompleted);
   const depositResolutionTransactions = useMemo(
     () =>
       depositTransactions.filter(
@@ -926,7 +1058,7 @@ export default function AdminRentalOrdersPage() {
     setActiveOpsOrderId(order.id);
     setOpsBanner(null);
     setOpsError(null);
-    setOpsReturnStatus(order.returnStatus);
+    setOpsReturnStatus(normalizeOperationalReturnStatus(order.returnStatus));
     setOpsReturnedAt(order.returnedAt ? order.returnedAt.slice(0, 10) : "");
     setOpsReturnNotes(order.returnNotes ?? "");
     setOpsInspectionStatus(order.inspectionStatus);
@@ -936,6 +1068,11 @@ export default function AdminRentalOrdersPage() {
 
   async function submitOperationsUpdate(orderId: string) {
     try {
+      if (opsGuardrails.impossible.length > 0) {
+        setOpsError(opsGuardrails.impossible[0]);
+        return;
+      }
+
       setOpsSaving(true);
       setOpsBanner(null);
       setOpsError(null);
@@ -2146,32 +2283,80 @@ export default function AdminRentalOrdersPage() {
                     <div className="rounded-2xl border border-slate-200 bg-white p-4">
                       <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
                         <ClipboardCheck className="h-4 w-4 text-[#D24338]" />
-                        Return & inspection
+                        Return & inspection workflow
+                      </div>
+                      <div className="mt-1 text-xs text-slate-500">
+                        Record the physical return first, then finish inspection, then close the operational workflow when follow-up is done.
+                      </div>
+                      <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
+                        <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Workflow guide</div>
+                        <div className="mt-3 grid gap-2 sm:grid-cols-4">
+                          {opsWorkflowSteps.map((step, index) => {
+                            const tone =
+                              step.state === "done"
+                                ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                                : step.state === "current"
+                                  ? "border-[#F2C7C2] bg-[#FFF6F4] text-[#8A453F]"
+                                  : "border-slate-200 bg-white text-slate-500";
+                            return (
+                              <div key={step.label} className={["rounded-xl border p-3", tone].join(" ")}>
+                                <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide">
+                                  <span className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-current text-[10px]">{index + 1}</span>
+                                  {step.label}
+                                </div>
+                                <div className="mt-2 text-[11px] leading-5">{step.description}</div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                        <div className="mt-3 text-xs text-slate-500">Use this as a quick reference for what should happen next.</div>
                       </div>
                       {opsBanner && <div className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-700">{opsBanner}</div>}
                       {opsError && <div className="mt-3 rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">{opsError}</div>}
+                      {opsGuardrails.impossible.length > 0 && (
+                        <div className="mt-3 rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">
+                          <div className="font-semibold">This combination cannot be saved yet.</div>
+                          <ul className="mt-2 list-disc space-y-1 pl-5 text-xs">
+                            {opsGuardrails.impossible.map((message) => (
+                              <li key={message}>{message}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                      {opsGuardrails.warnings.length > 0 && (
+                        <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                          <div className="font-semibold">Before you close this workflow</div>
+                          <ul className="mt-2 list-disc space-y-1 pl-5 text-xs">
+                            {opsGuardrails.warnings.map((message) => (
+                              <li key={message}>{message}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
                       <div className="mt-4 grid gap-3 sm:grid-cols-2">
                         <label className="grid gap-1 text-sm">
-                          <span className="text-slate-700">Return status</span>
-                          <select value={opsReturnStatus} onChange={(e) => setOpsReturnStatus(e.target.value as RentalOrderReturnStatus)} className="rounded-lg border border-slate-200 px-3 py-2 text-sm">
-                            <option value="out">Active / Out</option>
-                            <option value="returned">Returned</option>
-                            <option value="completed">Completed</option>
+                          <span className="text-slate-700">Physical return status</span>
+                          <select value={normalizeOperationalReturnStatus(opsReturnStatus)} onChange={(e) => setOpsReturnStatus(e.target.value as RentalOrderReturnStatus)} className="rounded-lg border border-slate-200 px-3 py-2 text-sm">
+                            <option value="out">Active / out on rent</option>
+                            <option value="returned">Returned to yard / site</option>
                           </select>
+                          <span className="text-xs text-slate-500">{returnStatusHelp(opsReturnStatus)}</span>
                         </label>
                         <label className="grid gap-1 text-sm">
                           <span className="text-slate-700">Inspection status</span>
                           <select value={opsInspectionStatus} onChange={(e) => setOpsInspectionStatus(e.target.value as RentalOrderInspectionStatus)} className="rounded-lg border border-slate-200 px-3 py-2 text-sm">
-                            <option value="not_started">Not Started</option>
-                            <option value="pending">Pending</option>
-                            <option value="passed">Passed</option>
-                            <option value="issues_found">Issues Found</option>
+                            <option value="not_started">Not started</option>
+                            <option value="pending" disabled={normalizeOperationalReturnStatus(opsReturnStatus) === "out"}>Pending inspection</option>
+                            <option value="passed" disabled={normalizeOperationalReturnStatus(opsReturnStatus) === "out"}>Passed - no issues</option>
+                            <option value="issues_found" disabled={normalizeOperationalReturnStatus(opsReturnStatus) === "out"}>Issues found - follow-up needed</option>
                           </select>
+                          <span className="text-xs text-slate-500">{inspectionStatusHelp(opsInspectionStatus)}</span>
                         </label>
                       </div>
                       <label className="mt-3 grid gap-1 text-sm">
                         <span className="text-slate-700">Returned on</span>
                         <input type="date" value={opsReturnedAt} onChange={(e) => setOpsReturnedAt(e.target.value)} className="rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+                        <span className="text-xs text-slate-500">Add the date the equipment physically came back so inspection timing is clear.</span>
                       </label>
                       <label className="mt-3 grid gap-1 text-sm">
                         <span className="text-slate-700">Return notes</span>
@@ -2181,12 +2366,15 @@ export default function AdminRentalOrdersPage() {
                         <span className="text-slate-700">Inspection notes</span>
                         <textarea value={opsInspectionNotes} onChange={(e) => setOpsInspectionNotes(e.target.value)} className="min-h-24 rounded-lg border border-slate-200 px-3 py-2 text-sm" />
                       </label>
-                      <label className="mt-3 flex items-center gap-2 text-sm text-slate-700">
+                      <label className="mt-3 flex items-start gap-2 text-sm text-slate-700">
                         <input type="checkbox" checked={opsMarkCompleted} onChange={(e) => setOpsMarkCompleted(e.target.checked)} />
-                        Mark workflow completed
+                        <span>
+                          <span className="font-medium text-slate-900">Close order workflow</span>
+                          <span className="mt-1 block text-xs text-slate-500">Use this only after the equipment is returned and inspection is finished. This does not resolve deposit, invoicing, or credit automatically.</span>
+                        </span>
                       </label>
-                      <button type="button" onClick={() => submitOperationsUpdate(detailOrder.id)} disabled={opsSaving} className="mt-4 rounded-lg bg-[#D24338] px-4 py-2 text-sm font-semibold text-white hover:bg-[#B9382E] disabled:bg-slate-300">
-                        {opsSaving ? "Saving..." : "Save return & inspection"}
+                      <button type="button" onClick={() => submitOperationsUpdate(detailOrder.id)} disabled={opsSaving || opsGuardrails.impossible.length > 0} className="mt-4 rounded-lg bg-[#D24338] px-4 py-2 text-sm font-semibold text-white hover:bg-[#B9382E] disabled:bg-slate-300">
+                        {opsSaving ? "Saving..." : "Save operational workflow"}
                       </button>
                     </div>
                   )}
@@ -2397,10 +2585,11 @@ export default function AdminRentalOrdersPage() {
                   <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
                     <div className="text-sm font-semibold text-slate-900">Operational summary</div>
                     <div className="mt-3 space-y-2 text-sm text-slate-600">
-                      <div>Return status: {returnStatusLabel(detailOrder.returnStatus)}</div>
+                      <div>Physical return: {returnStatusLabel(detailOrder.returnStatus)}</div>
                       <div>Inspection: {inspectionStatusLabel(detailOrder.inspectionStatus)}</div>
                       <div>Reserved until: {activeDetailOrder.reservedUntil}</div>
                       <div>Deposit: {depositStatusLabel(activeDetailOrder.deposit.status)}</div>
+                      <div>Workflow closed: {detailOrder.completedAt ? formatDateTime(String(detailOrder.completedAt)) : "-"}</div>
                       <div>Assessment: {assessmentStatusLabel(activeDetailOrder.assessment.status)}</div>
                       <div>Assessment result: {assessmentResultLabel(activeDetailOrder.assessment.assessmentResult)}</div>
                       <div>Recommended action: {recommendedAssessmentActionLabel(activeDetailOrder.assessment.recommendedDepositAction)}</div>
