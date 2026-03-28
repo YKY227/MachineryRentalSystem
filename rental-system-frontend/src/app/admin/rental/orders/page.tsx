@@ -2247,8 +2247,8 @@ const drawerWorkflowSteps = buildWorkflowSteps(
 
       {detailDrawer && detailOrder && activeDetailOrder && (
   <div className="fixed inset-y-0 right-0 z-40 flex w-full justify-end bg-slate-900/20">
-    <div className="flex h-full w-full md:max-w-[min(62vw,1040px)] flex-col border-l border-slate-200 bg-white shadow-2xl">
-      <div className="shrink-0 border-b border-slate-200 bg-slate-50 px-5 py-4">
+    <div className="h-full w-full md:max-w-[min(62vw,1040px)] overflow-y-auto border-l border-slate-200 bg-white shadow-2xl">
+  <div className="border-b border-slate-200 bg-slate-50 px-5 py-4">
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
             <div className="inline-flex items-center gap-2 rounded-full border border-[#F2C7C2] bg-[#FCE9E7] px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-[#B9382E]">
@@ -2357,7 +2357,7 @@ const drawerWorkflowSteps = buildWorkflowSteps(
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto p-5">
+      <div className="p-5">
         <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_290px]">
           <div className="space-y-5">
             {detailDrawer.view === "operations" && (
