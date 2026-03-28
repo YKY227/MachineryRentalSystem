@@ -2238,6 +2238,39 @@ const drawerWorkflowSteps = buildWorkflowSteps(
             </tbody>
           </table>
 
+          <div className="flex flex-col gap-3 border-t border-slate-100 bg-white px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+  <div className="text-xs text-slate-500">
+    Showing <span className="font-semibold text-slate-700">{paginatedStart}</span>-
+    <span className="font-semibold text-slate-700">{paginatedEnd}</span> of{" "}
+    <span className="font-semibold text-slate-700">{filteredOrderRows.length}</span> filtered orders
+  </div>
+
+  <div className="flex items-center gap-2">
+    <button
+      type="button"
+      onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
+      disabled={currentPage === 1}
+      className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+    >
+      Previous
+    </button>
+
+    <div className="text-sm text-slate-600">
+      Page <span className="font-semibold text-slate-900">{currentPage}</span> of{" "}
+      <span className="font-semibold text-slate-900">{totalPages}</span>
+    </div>
+
+    <button
+      type="button"
+      onClick={() => setCurrentPage((page) => Math.min(totalPages, page + 1))}
+      disabled={currentPage === totalPages}
+      className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+    >
+      Next
+    </button>
+  </div>
+</div>
+
           <div className="border-t border-slate-100 bg-slate-50 p-3 text-xs text-slate-500">
             Orders source: <span className="font-mono">Supabase Postgres</span> â€¢ Invoices source:{" "}
             <span className="font-mono">Supabase Postgres</span>.
