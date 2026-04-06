@@ -2354,3 +2354,35 @@ API / Page changes:
 Risks / follow-up notes:
 - Client-side pagination is appropriate for the current list size, but server-side pagination should still be considered later if the order volume grows significantly.
 - Some dense action groupings remain by design to keep all current workflows in one drawer, so a future pass could still consider deeper simplification or optional sub-steps without changing the current business logic.
+
+## 2026-04-07 | Scope: sendgrid transport swap for server email flows
+Summary:
+- Replaced the direct Resend transport usage with a small server-side SendGrid Mail Send API adapter while preserving the existing DB-first trigger, routing, subject, template, and audit-log behavior.
+- Kept admin Notification Routing authoritative by leaving recipient resolution in the existing settings-backed services and only swapping the delivery layer plus env handling.
+
+Files changed:
+- package.json
+- package-lock.json
+- rental-system-frontend/package.json
+- rental-system-frontend/package-lock.json
+- rental-system-frontend/src/lib/email/server-email.ts
+- rental-system-frontend/src/lib/rental/invoices/email-delivery.ts
+- rental-system-frontend/src/lib/auth/customer-password-reset.ts
+- rental-system-frontend/src/app/api/admin/settings/test-email/route.ts
+- rental-system-frontend/src/lib/rental/orders/return-reminder-service.ts
+- rental-system-frontend/src/lib/rental/orders/db-order-reminder-event-repo.ts
+- rental-system-frontend/src/lib/rental/invoices/types.ts
+- rental-system-frontend/src/lib/rental/invoices/db-invoice-repo.ts
+- docs/migration-log.md
+
+DB / Infra changes:
+- No schema or migration changes were required.
+- Server email delivery now expects `SENDGRID_API_KEY` and `MAIL_FROM`; `EMAIL_PROVIDER` now defaults to `sendgrid` and still supports `mock` for non-delivery testing.
+
+API / Page changes:
+- Existing invoice send/resend, overdue reminder, return reminder, password reset, contact enquiry, new-order notification, extension invoice email, and admin test-email flows continue to call the same server-side services and recipient resolvers.
+- The admin settings test-email route now uses the shared transport adapter instead of a provider-specific implementation.
+
+Risks / follow-up notes:
+- Historical DB/email-log rows may still contain `resend` as the stored provider value; type support remains in place for backward compatibility.
+- Single Sender testing may still limit the visible sender identity and production deliverability until a domain-authenticated SendGrid setup is introduced later.

@@ -1,5 +1,6 @@
 import "server-only";
 
+import { getConfiguredEmailProvider } from "@/lib/email/server-email";
 import { EXTENSION_REVIEW_CLARIFICATION_MESSAGE } from "@/lib/rental/extensions/customer-messages";
 import { dbRentalOrderExtensionRepo } from "@/lib/rental/extensions/db-rental-order-extension-repo";
 import { deliverRentalEmail } from "@/lib/rental/invoices/email-delivery";
@@ -13,12 +14,6 @@ import type { RentalOrder } from "@/lib/rental/orders/types";
 const DEFAULT_RETURN_REMINDER_DAYS = [3, 1] as const;
 const DEFAULT_RETURN_REMINDER_BATCH_LIMIT = 50;
 const APP_BASE_URL = process.env.APP_BASE_URL ?? "";
-
-function getConfiguredEmailProvider() {
-  const provider = (process.env.EMAIL_PROVIDER ?? "resend").toLowerCase();
-  if (provider === "mock" || provider === "ses" || provider === "postmark") return provider;
-  return "resend";
-}
 
 export type ReturnReminderReasonCode =
   | "not_active"

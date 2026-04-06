@@ -8,7 +8,7 @@ const ORDER_REMINDER_EVENTS_TABLE =
 export type RentalOrderReminderKind = "return";
 export type RentalOrderReturnReminderStage = "three_day" | "one_day" | "due_today";
 export type RentalOrderReminderEventStatus = "sent" | "failed";
-export type RentalOrderReminderProvider = "mock" | "resend" | "ses" | "postmark";
+export type RentalOrderReminderProvider = "mock" | "sendgrid" | "resend" | "ses" | "postmark";
 
 export type RentalOrderReminderEvent = {
   id: string;

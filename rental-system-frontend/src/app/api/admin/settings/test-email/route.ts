@@ -1,20 +1,14 @@
 import { NextResponse } from "next/server";
-import { Resend } from "resend";
 
 import {
   adminUnauthorizedResponse,
   assertAdmin,
   isAdminUnauthorized,
 } from "@/lib/auth/admin";
+import { sendServerEmail } from "@/lib/email/server-email";
 import { dbAdminSettingsRepo } from "@/lib/settings/db-admin-settings-repo";
 
 export const runtime = "nodejs";
-
-function mustEnv(name: string) {
-  const value = process.env[name];
-  if (!value) throw new Error(`Missing env: ${name}`);
-  return value;
-}
 
 export async function POST(req: Request) {
   try {
@@ -37,7 +31,7 @@ export async function POST(req: Request) {
       );
     }
 
-    const provider = (process.env.EMAIL_PROVIDER ?? "resend").toLowerCase();
+    const provider = (process.env.EMAIL_PROVIDER ?? "sendgrid").toLowerCase();
     const sentAt = new Date().toISOString();
 
     if (provider === "mock") {
@@ -49,16 +43,7 @@ export async function POST(req: Request) {
       });
     }
 
-    if (provider !== "resend") {
-      return NextResponse.json(
-        { error: `Unsupported EMAIL_PROVIDER for test email: ${provider}` },
-        { status: 400 }
-      );
-    }
-
-    const resend = new Resend(mustEnv("RESEND_API_KEY"));
-    const result = await resend.emails.send({
-      from: mustEnv("RESEND_FROM"),
+    const delivery = await sendServerEmail({
       to: recipient,
       subject: `Admin settings test email - ${settings.orgName || "Rental System"}`,
       html: `
@@ -70,15 +55,11 @@ export async function POST(req: Request) {
       `,
     });
 
-    if (result.error) {
-      throw new Error(result.error.message);
-    }
-
     return NextResponse.json({
       ok: true,
-      provider: "resend",
+      provider: delivery.provider,
       recipient,
-      providerMessageId: result.data?.id ?? null,
+      providerMessageId: delivery.providerMessageId,
       sentAt,
     });
   } catch (error) {

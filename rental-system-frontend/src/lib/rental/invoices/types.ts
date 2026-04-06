@@ -45,7 +45,7 @@ export type InvoiceEmailLogItem = {
   cc?: string;
   subject: string;
   sentAt: string; // ISO
-  provider: "mock" | "resend" | "ses" | "postmark";
+  provider: "mock" | "sendgrid" | "resend" | "ses" | "postmark";
   status: "sent" | "queued" | "failed";
   providerMessageId?: string;
   pdfSha256?: string;

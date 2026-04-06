@@ -94,7 +94,7 @@ type InvoiceEmailRow = {
   to: string;
   cc: string | null;
   subject: string;
-  provider: "mock" | "resend" | "ses" | "postmark";
+  provider: "mock" | "sendgrid" | "resend" | "ses" | "postmark";
   status: "sent" | "queued" | "failed";
   provider_message_id: string | null;
   pdf_sha256: string | null;
@@ -518,7 +518,7 @@ export const dbInvoiceRepo = {
     to: string;
     cc?: string;
     subject: string;
-    provider: "mock" | "resend" | "ses" | "postmark";
+    provider: "mock" | "sendgrid" | "resend" | "ses" | "postmark";
     status: "sent" | "queued" | "failed";
     providerMessageId?: string;
     pdfSha256?: string;

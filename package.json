@@ -5,8 +5,7 @@
     "dotenv": "^17.2.3",
     "ngrok": "^5.0.0-beta.2",
     "pdf-lib": "^1.17.1",
-    "pg": "^8.16.3",
-    "resend": "^6.9.2"
+    "pg": "^8.16.3"
   },
   "scripts": {
     "dev": "next dev -p 3000"
