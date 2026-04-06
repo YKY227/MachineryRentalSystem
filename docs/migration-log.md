@@ -2355,6 +2355,27 @@ Risks / follow-up notes:
 - Client-side pagination is appropriate for the current list size, but server-side pagination should still be considered later if the order volume grows significantly.
 - Some dense action groupings remain by design to keep all current workflows in one drawer, so a future pass could still consider deeper simplification or optional sub-steps without changing the current business logic.
 
+## 2026-04-07 | Scope: admin settings notification routing persistence read freshness
+Summary:
+- Audited the admin settings save/load path and confirmed the notification routing arrays were already present in the client hook, API normalization, and settings repo write path.
+- Fixed the real persistence symptom by forcing `GET /api/admin/settings` and the save response to bypass caching so freshly written notification routing values are returned immediately after save and refresh.
+
+Files changed:
+- rental-system-frontend/src/app/api/admin/settings/route.ts
+- docs/migration-log.md
+
+DB / Infra changes:
+- No schema or settings-key changes were required.
+- Existing `system_settings` rows and the current `admin_notification_settings` JSON shape remain authoritative.
+
+API / Page changes:
+- `GET /api/admin/settings` is now explicitly dynamic with zero revalidation and no-store response headers.
+- `PUT /api/admin/settings` now also returns no-store headers so the immediate post-save response cannot be reused from cache.
+
+Risks / follow-up notes:
+- If any external proxy in front of the app ignores standard no-store headers, confirm its cache policy for authenticated admin API traffic.
+- Older stored notification JSON can still omit newer optional keys, but the repo sanitizers already backfill them to safe defaults on read.
+
 ## 2026-04-07 | Scope: sendgrid transport swap for server email flows
 Summary:
 - Replaced the direct Resend transport usage with a small server-side SendGrid Mail Send API adapter while preserving the existing DB-first trigger, routing, subject, template, and audit-log behavior.

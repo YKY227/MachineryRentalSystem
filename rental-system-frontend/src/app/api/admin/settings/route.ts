@@ -14,6 +14,15 @@ import {
 } from "@/lib/settings/db-admin-settings-repo";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+export const fetchCache = "force-no-store";
+
+const NO_STORE_HEADERS = {
+  "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate",
+  Pragma: "no-cache",
+  Expires: "0",
+};
 
 type SettingsBody = {
   orgName?: string;
@@ -169,7 +178,9 @@ export async function GET(req: Request) {
   try {
     assertAdmin(req);
     const settings = await dbAdminSettingsRepo.get();
-    return NextResponse.json(settings);
+    return NextResponse.json(settings, {
+      headers: NO_STORE_HEADERS,
+    });
   } catch (error) {
     if (isAdminUnauthorized(error)) return adminUnauthorizedResponse();
     const message = error instanceof Error ? error.message : "Settings load failed";
@@ -182,7 +193,9 @@ export async function PUT(req: Request) {
     assertAdmin(req);
     const body = (await req.json()) as SettingsBody;
     const settings = await dbAdminSettingsRepo.update(normalizeSettingsBody(body));
-    return NextResponse.json(settings);
+    return NextResponse.json(settings, {
+      headers: NO_STORE_HEADERS,
+    });
   } catch (error) {
     if (isAdminUnauthorized(error)) return adminUnauthorizedResponse();
     const message = error instanceof Error ? error.message : "Settings save failed";
