@@ -1,7 +1,7 @@
 import "server-only";
 
 export type EmailLogProvider = "mock" | "sendgrid" | "resend" | "ses" | "postmark";
-type EmailTransportProvider = "mock" | "sendgrid";
+type EmailTransportProvider = "mock" | "resend";
 
 type EmailAttachment = {
   filename: string;
@@ -26,9 +26,9 @@ function mustEnv(name: string) {
 }
 
 function normalizeProvider(value: string | undefined): EmailTransportProvider {
-  const provider = (value ?? "sendgrid").trim().toLowerCase();
+  const provider = (value ?? "resend").trim().toLowerCase();
   if (provider === "mock") return "mock";
-  if (provider === "sendgrid" || provider === "") return "sendgrid";
+  if (provider === "resend" || provider === "") return "resend";
   throw new Error(`Unsupported EMAIL_PROVIDER: ${provider}`);
 }
 
@@ -54,7 +54,7 @@ function toBase64(content: Uint8Array | string) {
 }
 
 export function getConfiguredEmailProvider(): EmailLogProvider {
-  const provider = (process.env.EMAIL_PROVIDER ?? "sendgrid").trim().toLowerCase();
+  const provider = (process.env.EMAIL_PROVIDER ?? "resend").trim().toLowerCase();
   if (
     provider === "mock" ||
     provider === "sendgrid" ||
@@ -64,7 +64,7 @@ export function getConfiguredEmailProvider(): EmailLogProvider {
   ) {
     return provider;
   }
-  return "sendgrid";
+  return "resend";
 }
 
 export async function sendServerEmail(input: SendServerEmailInput) {
@@ -82,34 +82,25 @@ export async function sendServerEmail(input: SendServerEmailInput) {
     };
   }
 
-  const response = await fetch("https://api.sendgrid.com/v3/mail/send", {
+  const replyTo = input.replyTo?.trim() || process.env.MAIL_REPLY_TO?.trim() || undefined;
+  const response = await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${mustEnv("SENDGRID_API_KEY")}`,
+      Authorization: `Bearer ${mustEnv("RESEND_API_KEY")}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      personalizations: [
-        {
-          to: to.map((email) => ({ email })),
-          cc: cc.length ? cc.map((email) => ({ email })) : undefined,
-          bcc: bcc.length ? bcc.map((email) => ({ email })) : undefined,
-        },
-      ],
-      from: { email: mustEnv("MAIL_FROM") },
-      reply_to: input.replyTo ? { email: input.replyTo.trim() } : undefined,
+      from: mustEnv("MAIL_FROM"),
+      to,
+      cc: cc.length ? cc : undefined,
+      bcc: bcc.length ? bcc : undefined,
+      reply_to: replyTo,
       subject: input.subject,
-      content: [
-        {
-          type: "text/html",
-          value: input.html,
-        },
-      ],
+      html: input.html,
       attachments: (input.attachments ?? []).map((attachment) => ({
         filename: attachment.filename,
-        type: attachment.type ?? "application/octet-stream",
-        disposition: "attachment",
         content: toBase64(attachment.content),
+        content_type: attachment.type ?? "application/octet-stream",
       })),
     }),
   });
@@ -117,12 +108,14 @@ export async function sendServerEmail(input: SendServerEmailInput) {
   if (!response.ok) {
     const errorText = await response.text();
     throw new Error(
-      `SendGrid mail send failed: ${response.status} ${errorText || response.statusText}`.trim()
+      `Resend mail send failed: ${response.status} ${errorText || response.statusText}`.trim()
     );
   }
 
+  const payload = (await response.json()) as { id?: string };
+
   return {
     provider,
-    providerMessageId: response.headers.get("x-message-id") || null,
+    providerMessageId: payload.id ?? null,
   };
 }

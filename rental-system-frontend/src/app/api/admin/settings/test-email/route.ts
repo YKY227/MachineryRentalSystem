@@ -31,7 +31,7 @@ export async function POST(req: Request) {
       );
     }
 
-    const provider = (process.env.EMAIL_PROVIDER ?? "sendgrid").toLowerCase();
+    const provider = (process.env.EMAIL_PROVIDER ?? "resend").toLowerCase();
     const sentAt = new Date().toISOString();
 
     if (provider === "mock") {

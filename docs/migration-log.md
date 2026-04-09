@@ -2407,3 +2407,25 @@ API / Page changes:
 Risks / follow-up notes:
 - Historical DB/email-log rows may still contain `resend` as the stored provider value; type support remains in place for backward compatibility.
 - Single Sender testing may still limit the visible sender identity and production deliverability until a domain-authenticated SendGrid setup is introduced later.
+
+## 2026-04-10 | Scope: resend transport restore for server email flows
+Summary:
+- Replaced the shared SendGrid transport implementation with a Resend-backed server adapter while preserving the existing DB-first notification triggers, recipient routing, subjects, and HTML templates.
+- Kept Notification Routing authoritative by leaving recipient resolution in the current settings-backed services and only changing provider defaults and runtime env handling.
+
+Files changed:
+- rental-system-frontend/src/lib/email/server-email.ts
+- rental-system-frontend/src/app/api/admin/settings/test-email/route.ts
+- docs/migration-log.md
+
+DB / Infra changes:
+- No schema or settings-key changes were required.
+- Server email delivery now defaults to `EMAIL_PROVIDER=resend`, requires `RESEND_API_KEY` and `MAIL_FROM`, and optionally uses `MAIL_REPLY_TO` when a flow does not supply its own reply-to address.
+
+API / Page changes:
+- Existing invoice send/resend, overdue reminder, return reminder, contact enquiry, new-order notification, password reset, extension invoice email, and admin test-email flows continue to route through the shared server email adapter.
+- Admin Notification Routing behavior remains unchanged because recipient selection still happens in the existing server-side services before provider delivery.
+
+Risks / follow-up notes:
+- Historical DB/email-log rows may still contain `sendgrid` as the stored provider value from earlier runs; compatibility remains in place for existing records.
+- Recommended sender format for the verified Resend subdomain is `Machinery Rental <no-reply@machinery.aaaii.uk>`, with `MAIL_REPLY_TO` set to an operations mailbox when replies should not go to the no-reply sender.
