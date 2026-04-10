@@ -9,7 +9,7 @@ import {
   getAdminEmailTemplate,
   type EmailTemplateId,
 } from "@/lib/email/email-template-registry";
-import { sendServerEmail } from "@/lib/email/server-email";
+import { getEmailConfigDiagnostics, sendServerEmail } from "@/lib/email/server-email";
 
 export const runtime = "nodejs";
 
@@ -39,6 +39,7 @@ export async function POST(
 
     const template = await getAdminEmailTemplate(templateId as EmailTemplateId);
     const delivery = await sendServerEmail({
+      templateId,
       to,
       subject: `[TEST] ${template.subjectPreview}`,
       html: template.htmlPreview,
@@ -53,6 +54,15 @@ export async function POST(
   } catch (error) {
     if (isAdminUnauthorized(error)) return adminUnauthorizedResponse();
     const message = error instanceof Error ? error.message : "Email template test send failed";
-    return NextResponse.json({ error: message }, { status: 400 });
+    const config = getEmailConfigDiagnostics();
+    return NextResponse.json(
+      {
+        error: message,
+        provider: config.provider,
+        senderDomain: config.fromDomain ?? null,
+        hasResendApiKey: config.hasResendApiKey,
+      },
+      { status: 400 }
+    );
   }
 }

@@ -2468,3 +2468,49 @@ API / Page changes:
 Risks / follow-up notes:
 - Some invoice-related flows still support explicit per-send custom subject/message input from existing screens; those paths intentionally remain supported and can override the template defaults for that one send.
 - The current preview system uses server-owned sample scenarios rather than live record selection, so a later phase could add richer sample-record selection without changing the safe override model.
+
+## 2026-04-10 | Scope: resend production diagnostics for sender-domain authorization failures
+Summary:
+- Audited the shared Resend send path and confirmed the app uses `EMAIL_PROVIDER`, `RESEND_API_KEY`, `MAIL_FROM`, and optional `MAIL_REPLY_TO` directly without rewriting the configured sender address.
+- Added focused production diagnostics and safer admin-facing error surfacing so sender-domain authorization failures now clearly indicate that the configured `MAIL_FROM` domain is not permitted for the active Resend API key/workspace.
+
+Files changed:
+- rental-system-frontend/src/lib/email/server-email.ts
+- rental-system-frontend/src/app/api/admin/settings/test-email/route.ts
+- rental-system-frontend/src/app/api/admin/settings/email-templates/[templateId]/test-send/route.ts
+- docs/migration-log.md
+
+DB / Infra changes:
+- No schema or routing changes were required.
+- Existing email business logic, Notification Routing, and provider selection remain unchanged.
+
+API / Page changes:
+- Shared email adapter now logs the provider, template id, sender domain, recipient count, masked recipient sample, and provider failure status/message without logging secrets.
+- Admin test-send routes now return safe config context (`provider`, `senderDomain`, `hasResendApiKey`) together with clearer failure text for Resend 403 domain authorization problems.
+
+Risks / follow-up notes:
+- The most likely root cause for `403 not authorized to send from machinery.aaaii.uk` remains external configuration: the Resend API key and Railway production env vars must point at the same Resend workspace that verified `machinery.aaaii.uk`.
+- Manual production checks should confirm the Railway `MAIL_FROM` value, the active `RESEND_API_KEY` scope/workspace, and that `machinery.aaaii.uk` is verified in that same workspace rather than only under another team or account.
+
+## 2026-04-10 | Scope: real checkout email workflow recovery and routing diagnostics
+Summary:
+- Audited the paid booking workflow and confirmed that real booking emails were triggered only from the HitPay webhook automation path, while the public checkout status route only read stored session state.
+- Added a small server-side recovery path so the checkout status route now refreshes a pending HitPay session from the provider, reruns the existing paid checkout automation when a paid session is missing invoice/email markers, and logs which admin routing field and customer recipient were resolved.
+
+Files changed:
+- rental-system-frontend/src/app/api/public/rental/checkout/payment-status/route.ts
+- rental-system-frontend/src/lib/rental/orders/new-order-notification-service.ts
+- rental-system-frontend/src/lib/rental/invoices/checkout-invoice-automation.ts
+- docs/migration-log.md
+
+DB / Infra changes:
+- No schema or settings-store changes were required.
+- Existing Notification Routing values in `admin_notification_settings` remain authoritative for real admin recipient selection.
+
+API / Page changes:
+- `GET /api/public/rental/checkout/payment-status` now performs an idempotent provider refresh for HitPay checkout sessions and retries the existing paid checkout automation when the session is paid but invoice/email state was never completed.
+- Added targeted server logs for checkout recovery, new-order recipient routing source, recipient counts, and masked customer/admin email summaries.
+
+Risks / follow-up notes:
+- This recovery path depends on the customer returning to the checkout status page if the webhook does not complete, so Railway/HitPay webhook delivery should still be verified in production.
+- The added workflow logs are intentionally narrow and can be reduced later once production webhook reliability is confirmed.

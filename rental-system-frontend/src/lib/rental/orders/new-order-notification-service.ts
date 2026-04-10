@@ -9,8 +9,17 @@ import { dbAdminSettingsRepo } from "@/lib/settings/db-admin-settings-repo";
 const APP_BASE_URL = process.env.APP_BASE_URL ?? "";
 
 function resolveRecipients(settings: Awaited<ReturnType<typeof dbAdminSettingsRepo.get>>) {
-  if (settings.newOrderRecipients.length > 0) return settings.newOrderRecipients;
-  return settings.adminNotificationEmails;
+  if (settings.newOrderRecipients.length > 0) {
+    return {
+      recipients: settings.newOrderRecipients,
+      source: "newOrderRecipients" as const,
+    };
+  }
+
+  return {
+    recipients: settings.adminNotificationEmails,
+    source: "adminNotificationEmails" as const,
+  };
 }
 
 function buildAdminOrdersUrl(orderId: string) {
@@ -23,6 +32,14 @@ function equipmentSummary(order: RentalOrder) {
   return `${order.equipmentTitle} x${order.qty}`;
 }
 
+function maskEmail(email: string) {
+  const trimmed = email.trim();
+  const [local = "", domain = ""] = trimmed.split("@");
+  if (!local || !domain) return "invalid";
+  if (local.length <= 2) return `${local[0] ?? "*"}***@${domain}`;
+  return `${local.slice(0, 2)}***@${domain}`;
+}
+
 export async function sendNewOrderNotificationIfNeeded(orderId: string) {
   const order = await dbOrderRepo.get(orderId);
   if (!order) return { sent: false as const, reason: "order_missing" as const };
@@ -31,8 +48,14 @@ export async function sendNewOrderNotificationIfNeeded(orderId: string) {
   }
 
   const settings = await dbAdminSettingsRepo.get();
-  const recipients = resolveRecipients(settings);
+  const { recipients, source } = resolveRecipients(settings);
   if (!recipients.length) {
+    console.warn("[new-order-notification] skipped due to missing recipients", {
+      orderId,
+      routingSource: source,
+      adminNotificationCount: settings.adminNotificationEmails.length,
+      newOrderRecipientCount: settings.newOrderRecipients.length,
+    });
     return { sent: false as const, reason: "no_recipients" as const };
   }
 
@@ -55,6 +78,12 @@ export async function sendNewOrderNotificationIfNeeded(orderId: string) {
   }
 
   try {
+    console.info("[new-order-notification] sending", {
+      orderId: order.id,
+      routingSource: source,
+      recipientCount: recipients.length,
+      recipients: recipients.slice(0, 3).map(maskEmail),
+    });
     for (const recipient of recipients) {
       await deliverRentalEmail({
         to: recipient,
@@ -62,8 +91,19 @@ export async function sendNewOrderNotificationIfNeeded(orderId: string) {
         html: template.html,
       });
     }
+    console.info("[new-order-notification] sent", {
+      orderId: order.id,
+      routingSource: source,
+      recipientCount: recipients.length,
+    });
   } catch (error) {
     await dbOrderRepo.clearNewOrderNotifiedIfMatches(order.id, notifiedAt);
+    console.error("[new-order-notification] send failed", {
+      orderId: order.id,
+      routingSource: source,
+      recipientCount: recipients.length,
+      error: error instanceof Error ? error.message : "unknown error",
+    });
     throw error;
   }
 
@@ -73,4 +113,3 @@ export async function sendNewOrderNotificationIfNeeded(orderId: string) {
     recipientCount: recipients.length,
   };
 }
-

@@ -30,6 +30,14 @@ function moneyFromCents(cents: number) {
   }).format(v / 100);
 }
 
+function maskEmail(email: string) {
+  const trimmed = email.trim();
+  const [local = "", domain = ""] = trimmed.split("@");
+  if (!local || !domain) return "invalid";
+  if (local.length <= 2) return `${local[0] ?? "*"}***@${domain}`;
+  return `${local.slice(0, 2)}***@${domain}`;
+}
+
 function extractCustomerEmail(payload?: Record<string, unknown>) {
   const provider = payload?.provider as Record<string, unknown> | undefined;
   const webhook = payload?.webhook as Record<string, unknown> | undefined;
@@ -114,6 +122,16 @@ export async function processPaidCheckoutSession(
     order.customerSnapshot?.contactName?.trim() ||
     order.customerSnapshot?.companyName?.trim() ||
     "";
+
+  console.info("[checkout-invoice-automation] processing paid checkout", {
+    paymentSessionId,
+    orderId: order.id,
+    provider: session.provider,
+    providerPaymentRequestIdPresent: Boolean(session.providerPaymentRequestId),
+    invoiceAppliedAt: session.invoiceAppliedAt ?? null,
+    invoiceEmailSentAt: session.invoiceEmailSentAt ?? null,
+    customerEmail: customerEmail ? maskEmail(customerEmail) : null,
+  });
 
   if (invoice.status === "draft") {
     try {
@@ -320,6 +338,12 @@ export async function processPaidCheckoutSession(
   });
   let delivery;
   try {
+    console.info("[checkout-invoice-automation] sending checkout invoice email", {
+      paymentSessionId,
+      orderId: order.id,
+      invoiceId: invoice.id,
+      recipient: maskEmail(recipient),
+    });
     delivery = await deliverInvoiceEmail({
       invoice,
       to: recipient,
@@ -406,7 +430,7 @@ export async function processPaidCheckoutSession(
     invoiceId: invoice.id,
     invoicePaymentId: paymentResult.payment.id,
     allocationId: paymentResult.allocation.id,
-    recipient,
+    recipient: maskEmail(recipient),
   });
 
   return {

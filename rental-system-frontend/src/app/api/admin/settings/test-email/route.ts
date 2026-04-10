@@ -6,7 +6,7 @@ import {
   isAdminUnauthorized,
 } from "@/lib/auth/admin";
 import { buildAdminTestEmailTemplate } from "@/lib/email/email-template-registry";
-import { sendServerEmail } from "@/lib/email/server-email";
+import { getEmailConfigDiagnostics, sendServerEmail } from "@/lib/email/server-email";
 import { dbAdminSettingsRepo } from "@/lib/settings/db-admin-settings-repo";
 
 export const runtime = "nodejs";
@@ -49,6 +49,7 @@ export async function POST(req: Request) {
       sentAt,
     });
     const delivery = await sendServerEmail({
+      templateId: "admin_test_email",
       to: recipient,
       subject: template.subject,
       html: template.html,
@@ -64,7 +65,16 @@ export async function POST(req: Request) {
   } catch (error) {
     if (isAdminUnauthorized(error)) return adminUnauthorizedResponse();
     const message = error instanceof Error ? error.message : "Test email failed";
-    return NextResponse.json({ error: message }, { status: 400 });
+    const config = getEmailConfigDiagnostics();
+    return NextResponse.json(
+      {
+        error: message,
+        provider: config.provider,
+        senderDomain: config.fromDomain ?? null,
+        hasResendApiKey: config.hasResendApiKey,
+      },
+      { status: 400 }
+    );
   }
 }
 
