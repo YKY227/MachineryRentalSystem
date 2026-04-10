@@ -5,6 +5,7 @@ import {
   assertAdmin,
   isAdminUnauthorized,
 } from "@/lib/auth/admin";
+import { buildAdminTestEmailTemplate } from "@/lib/email/email-template-registry";
 import { sendServerEmail } from "@/lib/email/server-email";
 import { dbAdminSettingsRepo } from "@/lib/settings/db-admin-settings-repo";
 
@@ -43,16 +44,14 @@ export async function POST(req: Request) {
       });
     }
 
+    const template = await buildAdminTestEmailTemplate({
+      organisation: settings.orgName || "Rental System",
+      sentAt,
+    });
     const delivery = await sendServerEmail({
       to: recipient,
-      subject: `Admin settings test email - ${settings.orgName || "Rental System"}`,
-      html: `
-        <div style="font-family:Arial,sans-serif;line-height:1.5">
-          <p>This is a test email from the admin settings page.</p>
-          <p><strong>Organisation:</strong> ${settings.orgName || "-"}</p>
-          <p><strong>Sent At:</strong> ${sentAt}</p>
-        </div>
-      `,
+      subject: template.subject,
+      html: template.html,
     });
 
     return NextResponse.json({

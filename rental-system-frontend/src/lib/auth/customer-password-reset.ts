@@ -2,6 +2,7 @@ import "server-only";
 
 import crypto from "crypto";
 
+import { buildCustomerPasswordResetTemplate } from "@/lib/email/email-template-registry";
 import { customerPasswordResetRepo } from "@/lib/auth/customer-password-reset-repo";
 import { sendServerEmail } from "@/lib/email/server-email";
 import { dbRentalCustomerRepo } from "@/lib/rental/customers/db-rental-customer-repo";
@@ -37,22 +38,16 @@ async function sendPasswordResetEmail(input: {
   token: string;
 }) {
   const resetLink = `${deriveAppOrigin(input.req)}/rental/reset-password?token=${encodeURIComponent(input.token)}`;
-  const subject = "Reset your rental account password";
   const customerName = input.customer.contactName.trim() || input.customer.companyName.trim() || "Customer";
+  const template = await buildCustomerPasswordResetTemplate({
+    customerName,
+    resetUrl: resetLink,
+  });
 
   const delivery = await sendServerEmail({
     to: input.customer.email,
-    subject,
-    html: `
-      <div style="font-family:Arial,sans-serif; line-height:1.5">
-        <p>Dear ${customerName},</p>
-        <p>We received a request to reset your rental customer account password.</p>
-        <p>
-          <a href="${resetLink}">Reset your password</a>
-        </p>
-        <p>This link expires in 1 hour. If you did not request this reset, you can ignore this email.</p>
-      </div>
-    `,
+    subject: template.subject,
+    html: template.html,
   });
 
   return {

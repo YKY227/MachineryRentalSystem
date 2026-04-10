@@ -1,5 +1,6 @@
 import "server-only";
 
+import { buildNewOrderNotificationTemplate } from "@/lib/email/email-template-registry";
 import { deliverRentalEmail } from "@/lib/rental/invoices/email-delivery";
 import { dbOrderRepo } from "@/lib/rental/orders/db-order-repo";
 import type { RentalOrder } from "@/lib/rental/orders/types";
@@ -38,18 +39,14 @@ export async function sendNewOrderNotificationIfNeeded(orderId: string) {
   const companyName = order.customerSnapshot?.companyName?.trim() || "-";
   const customerName = order.customerSnapshot?.contactName?.trim() || "-";
   const adminUrl = buildAdminOrdersUrl(order.id);
-  const subject = `New rental order received - ${order.id}`;
-  const html = `
-    <div style="font-family:Arial,sans-serif; line-height:1.5">
-      <p>A new rental order has been received.</p>
-      <p><strong>Customer / Company:</strong> ${companyName}</p>
-      <p><strong>Contact:</strong> ${customerName}</p>
-      <p><strong>Order ID:</strong> ${order.id}</p>
-      <p><strong>Rental Period:</strong> ${order.start} to ${order.end}</p>
-      <p><strong>Equipment:</strong> ${equipmentSummary(order)}</p>
-      <p><a href="${adminUrl}">Open in admin orders</a></p>
-    </div>
-  `;
+  const template = await buildNewOrderNotificationTemplate({
+    orderId: order.id,
+    companyName,
+    customerName,
+    rentalPeriod: `${order.start} to ${order.end}`,
+    equipmentSummary: equipmentSummary(order),
+    adminUrl,
+  });
 
   const notifiedAt = new Date().toISOString();
   const claimed = await dbOrderRepo.markNewOrderNotifiedIfUnset(order.id, notifiedAt);
@@ -61,8 +58,8 @@ export async function sendNewOrderNotificationIfNeeded(orderId: string) {
     for (const recipient of recipients) {
       await deliverRentalEmail({
         to: recipient,
-        subject,
-        html,
+        subject: template.subject,
+        html: template.html,
       });
     }
   } catch (error) {

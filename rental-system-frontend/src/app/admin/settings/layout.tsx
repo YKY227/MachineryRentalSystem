@@ -3,11 +3,12 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Bell, Building2, Clock, Code, Wrench } from "lucide-react";
+import { Bell, Building2, Clock, Code, Mail, Wrench } from "lucide-react";
 
 const navItems = [
   { href: "/admin/settings/organisation", label: "Organisation", icon: Building2 },
   { href: "/admin/settings/notifications", label: "Notifications", icon: Bell },
+  { href: "/admin/settings/email-templates", label: "Email Templates", icon: Mail },
   { href: "/admin/settings/operations", label: "Operations", icon: Wrench },
   { href: "/admin/settings/reminders", label: "Reminder Automation", icon: Clock },
   { href: "/admin/settings/developer", label: "Developer Tools", icon: Code },

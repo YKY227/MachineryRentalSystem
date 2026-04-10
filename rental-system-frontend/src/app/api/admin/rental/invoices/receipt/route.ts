@@ -5,6 +5,7 @@ import {
   assertAdmin,
   isAdminUnauthorized,
 } from "@/lib/auth/admin";
+import { buildPaymentReceiptTemplate } from "@/lib/email/email-template-registry";
 import { dbInvoiceRepo } from "@/lib/rental/invoices/db-invoice-repo";
 import { deliverInvoiceEmail } from "@/lib/rental/invoices/email-delivery";
 import { dbPaymentRepo } from "@/lib/rental/invoices/db-payment-repo";
@@ -70,27 +71,22 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Invoice bill-to email is missing" }, { status: 400 });
     }
 
-    const subject = `Payment Receipt for Invoice ${invoice.invoiceNo ?? invoice.id}`;
-    const dueDateLine = invoice.dueDate ? `<p><strong>Due Date:</strong> ${formatDate(invoice.dueDate)}</p>` : "";
     const customerName = invoice.billTo?.contactName || invoice.billTo?.name || "Customer";
+    const template = await buildPaymentReceiptTemplate({
+      customerName,
+      invoiceNo: invoice.invoiceNo ?? invoice.id,
+      totalCents: paymentTotals.totalCents,
+      paidCents: paymentTotals.paidCents,
+      balanceCents: paymentTotals.balanceCents,
+      paymentStatus: paymentStatusLabel(paymentTotals.status),
+      dueDate: invoice.dueDate,
+    });
 
     const delivery = await deliverInvoiceEmail({
       invoice,
       to,
-      subject,
-      html: `
-        <div style="font-family:Arial,sans-serif; line-height:1.5">
-          <p>Dear ${customerName},</p>
-          <p>We acknowledge receipt of payment for invoice <strong>${invoice.invoiceNo ?? invoice.id}</strong>.</p>
-          <p><strong>Total Invoice Amount:</strong> ${moneyFromCents(paymentTotals.totalCents)}</p>
-          <p><strong>Amount Paid To Date:</strong> ${moneyFromCents(paymentTotals.paidCents)}</p>
-          <p><strong>Outstanding Balance:</strong> ${moneyFromCents(paymentTotals.balanceCents)}</p>
-          <p><strong>Payment Status:</strong> ${paymentStatusLabel(paymentTotals.status)}</p>
-          ${dueDateLine}
-          <p>A copy of the invoice is attached for reference.</p>
-          <p>Thank you.</p>
-        </div>
-      `,
+      subject: template.subject,
+      html: template.html,
     });
 
     const sentAt = new Date().toISOString();
@@ -99,7 +95,7 @@ export async function POST(req: Request) {
       invoiceId: invoice.id,
       type: "receipt",
       to,
-      subject,
+      subject: template.subject,
       provider: delivery.provider,
       status: "sent",
       providerMessageId: delivery.providerMessageId ?? undefined,
@@ -110,7 +106,7 @@ export async function POST(req: Request) {
     await dbInvoiceRepo.appendEmailLog(invoice.id, {
       type: "receipt",
       to,
-      subject,
+      subject: template.subject,
       provider: delivery.provider,
       status: "sent",
       providerMessageId: delivery.providerMessageId ?? undefined,

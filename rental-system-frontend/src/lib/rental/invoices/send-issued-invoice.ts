@@ -1,5 +1,6 @@
 import "server-only";
 
+import { buildInvoiceSendTemplate } from "@/lib/email/email-template-registry";
 import { dbInvoiceRepo } from "@/lib/rental/invoices/db-invoice-repo";
 import { deliverInvoiceEmail } from "@/lib/rental/invoices/email-delivery";
 
@@ -9,6 +10,7 @@ export async function sendIssuedInvoiceEmail(input: {
   cc?: string;
   subject?: string;
   message?: string;
+  html?: string;
   mode?: "send" | "resend";
 }) {
   const invoiceId = input.invoiceId.trim();
@@ -23,20 +25,27 @@ export async function sendIssuedInvoiceEmail(input: {
   if (!to) throw new Error("Missing recipient email");
 
   const cc = (input.cc ?? "").trim();
-  const subject = (input.subject ?? `Tax Invoice ${inv.invoiceNo}`).trim() || `Tax Invoice ${inv.invoiceNo}`;
-  const message =
-    input.message ??
-    `Dear Customer,\n\nPlease find attached your tax invoice ${inv.invoiceNo}.\n\nThank you.`;
   const mode = input.mode ?? (inv.emailLog?.length ? "resend" : "send");
-
-  const delivery = await deliverInvoiceEmail({
-    invoice: inv,
-    to,
-    cc: cc || undefined,
-    subject,
-    html: `
+  const template =
+    !input.html && !input.message
+      ? await buildInvoiceSendTemplate({
+          customerName: inv.billTo?.contactName || inv.billTo?.name || "Customer",
+          invoiceNo: inv.invoiceNo,
+          billTo: inv.billTo?.name ?? "-",
+        })
+      : null;
+  const subject =
+    (input.subject ?? template?.subject ?? `Tax Invoice ${inv.invoiceNo}`).trim() ||
+    `Tax Invoice ${inv.invoiceNo}`;
+  const html =
+    input.html ??
+    template?.html ??
+    `
       <div style="font-family:Arial,sans-serif; line-height:1.5">
-        <p>${String(message).replace(/\n/g, "<br/>")}</p>
+        <p>${String(
+          input.message ??
+            `Dear Customer,\n\nPlease find attached your tax invoice ${inv.invoiceNo}.\n\nThank you.`
+        ).replace(/\n/g, "<br/>")}</p>
         <hr/>
         <p style="color:#666; font-size:12px">
           Invoice: <b>${inv.invoiceNo}</b><br/>
@@ -44,7 +53,14 @@ export async function sendIssuedInvoiceEmail(input: {
           PDF attached for reference.
         </p>
       </div>
-    `,
+    `;
+
+  const delivery = await deliverInvoiceEmail({
+    invoice: inv,
+    to,
+    cc: cc || undefined,
+    subject,
+    html,
   });
 
   const emailType = mode === "resend" ? "resent" : "sent";

@@ -1,6 +1,7 @@
 ﻿//src/lib/rental/invoices/checkout-invoice-automation.ts
 import "server-only";
 
+import { buildCheckoutPaidInvoiceTemplate } from "@/lib/email/email-template-registry";
 import { dbInvoiceRepo } from "@/lib/rental/invoices/db-invoice-repo";
 import { dbPaymentRepo } from "@/lib/rental/invoices/db-payment-repo";
 import { deliverInvoiceEmail } from "@/lib/rental/invoices/email-delivery";
@@ -309,28 +310,21 @@ export async function processPaidCheckoutSession(
     };
   }
 
-  const subject = `Tax Invoice ${invoice.invoiceNo ?? invoice.id}`;
+  const emailTemplate = await buildCheckoutPaidInvoiceTemplate({
+    customerName: customerName || invoice.billTo?.name || "Customer",
+    invoiceNo: invoice.invoiceNo ?? invoice.id,
+    totalCents: invoice.totalInclGstCents,
+    paidCents: paymentResult.totals.paidCents,
+    balanceCents: paymentResult.totals.balanceCents,
+    depositCents: depositAmountCents,
+  });
   let delivery;
   try {
     delivery = await deliverInvoiceEmail({
       invoice,
       to: recipient,
-      subject,
-      html: `
-        <div style="font-family:Arial,sans-serif; line-height:1.5">
-          <p>Dear ${customerName || invoice.billTo?.name || "Customer"},</p>
-          <p>Thank you for your payment. Please find attached your tax invoice <strong>${invoice.invoiceNo ?? invoice.id}</strong>.</p>
-          <p><strong>Total Amount:</strong> ${moneyFromCents(invoice.totalInclGstCents)}</p>
-          <p><strong>Invoice Amount Paid:</strong> ${moneyFromCents(paymentResult.totals.paidCents)}</p>
-          <p><strong>Outstanding Balance:</strong> ${moneyFromCents(paymentResult.totals.balanceCents)}</p>
-          ${
-            depositAmountCents > 0
-              ? `<p><strong>Refundable Deposit Held:</strong> ${moneyFromCents(depositAmountCents)}</p>`
-              : ""
-          }
-          <p>We have attached the invoice PDF for your records.</p>
-        </div>
-      `,
+      subject: emailTemplate.subject,
+      html: emailTemplate.html,
     });
   } catch (error) {
     logAutomationFailure("invoice_email_send", { paymentSessionId, orderId: order.id, invoiceId: invoice.id }, error);
@@ -343,7 +337,7 @@ export async function processPaidCheckoutSession(
       invoiceId: invoice.id,
       type: "sent",
       to: recipient,
-      subject,
+      subject: emailTemplate.subject,
       provider: delivery.provider,
       status: "sent",
       providerMessageId: delivery.providerMessageId ?? undefined,
@@ -353,7 +347,7 @@ export async function processPaidCheckoutSession(
     await dbInvoiceRepo.appendEmailLog(invoice.id, {
       type: "sent",
       to: recipient,
-      subject,
+      subject: emailTemplate.subject,
       provider: delivery.provider,
       status: "sent",
       providerMessageId: delivery.providerMessageId ?? undefined,
@@ -424,5 +418,3 @@ export async function processPaidCheckoutSession(
     invoiceEmailSent: true,
   };
 }
-
-

@@ -2429,3 +2429,42 @@ API / Page changes:
 Risks / follow-up notes:
 - Historical DB/email-log rows may still contain `sendgrid` as the stored provider value from earlier runs; compatibility remains in place for existing records.
 - Recommended sender format for the verified Resend subdomain is `Machinery Rental <no-reply@machinery.aaaii.uk>`, with `MAIL_REPLY_TO` set to an operations mailbox when replies should not go to the no-reply sender.
+
+## 2026-04-10 | Scope: admin email templates preview + safe structured overrides v1
+Summary:
+- Added an admin Email Templates workspace page that lists the current system email templates, shows server-rendered previews with sample scenarios, supports safe structured text overrides, and allows test sends without mutating production workflow state.
+- Kept the notification system DB-first and server-authoritative by storing only limited template field overrides in `system_settings`, reusing the shared email delivery path, and preserving the existing recipient-routing and trigger rules.
+
+Files changed:
+- rental-system-frontend/src/lib/email/db-email-template-settings-repo.ts
+- rental-system-frontend/src/lib/email/email-template-registry.ts
+- rental-system-frontend/src/app/api/admin/settings/email-templates/route.ts
+- rental-system-frontend/src/app/api/admin/settings/email-templates/[templateId]/route.ts
+- rental-system-frontend/src/app/api/admin/settings/email-templates/[templateId]/test-send/route.ts
+- rental-system-frontend/src/app/admin/settings/email-templates/page.tsx
+- rental-system-frontend/src/app/admin/settings/layout.tsx
+- rental-system-frontend/src/lib/auth/customer-password-reset.ts
+- rental-system-frontend/src/lib/rental/orders/new-order-notification-service.ts
+- rental-system-frontend/src/lib/rental/contact-enquiries/contact-enquiry-service.ts
+- rental-system-frontend/src/lib/rental/orders/return-reminder-service.ts
+- rental-system-frontend/src/lib/rental/invoices/overdue-reminder-service.ts
+- rental-system-frontend/src/lib/rental/invoices/send-issued-invoice.ts
+- rental-system-frontend/src/lib/rental/invoices/checkout-invoice-automation.ts
+- rental-system-frontend/src/app/api/admin/rental/invoices/receipt/route.ts
+- rental-system-frontend/src/app/api/admin/settings/test-email/route.ts
+- rental-system-frontend/src/lib/rental/extensions/rental-extension-service.ts
+- docs/migration-log.md
+
+DB / Infra changes:
+- No schema changes were required; this pass reuses the existing `system_settings` key-value store.
+- Added DB-backed structured overrides under the new settings key `email_template_overrides_v1` for safe fields only (`subject`, `heading`, `intro`, `footer`, `ctaLabel`).
+
+API / Page changes:
+- Added `GET /api/admin/settings/email-templates` to list all registered templates with current saved copy, default copy, preview HTML, and sample scenario metadata.
+- Added `PUT` / `DELETE /api/admin/settings/email-templates/[templateId]` to save or restore safe structured overrides.
+- Added `POST /api/admin/settings/email-templates/[templateId]/test-send` for sample-data test delivery using the shared email provider path without writing reminder or invoice workflow state.
+- Added `/admin/settings/email-templates` to the existing admin settings workspace and kept the same rounded-card, brand-accent, and control styling patterns used by the rest of admin settings.
+
+Risks / follow-up notes:
+- Some invoice-related flows still support explicit per-send custom subject/message input from existing screens; those paths intentionally remain supported and can override the template defaults for that one send.
+- The current preview system uses server-owned sample scenarios rather than live record selection, so a later phase could add richer sample-record selection without changing the safe override model.

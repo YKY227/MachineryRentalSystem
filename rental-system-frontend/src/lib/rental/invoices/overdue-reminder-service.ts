@@ -1,5 +1,6 @@
 import "server-only";
 
+import { buildOverdueReminderTemplate } from "@/lib/email/email-template-registry";
 import { dbInvoiceRepo } from "@/lib/rental/invoices/db-invoice-repo";
 import { deliverInvoiceEmail } from "@/lib/rental/invoices/email-delivery";
 import { dbPaymentRepo } from "@/lib/rental/invoices/db-payment-repo";
@@ -170,7 +171,7 @@ function getStageLabel(stage: ReminderStage) {
   }
 }
 
-async function buildReminderHtml(input: {
+async function buildReminderTemplate(input: {
   invoice: Invoice;
   outstandingBalanceCents: number;
   reminderStage: ReminderStage;
@@ -178,24 +179,17 @@ async function buildReminderHtml(input: {
   const invoice = input.invoice;
   const order = await dbOrderRepo.get(invoice.orderId);
   const customerName = invoice.billTo?.contactName || invoice.billTo?.name || "Customer";
-  const dueDateLine = invoice.dueDate
-    ? `<p><strong>Due Date:</strong> ${formatDate(invoice.dueDate)}</p>`
-    : "";
-  const overdueLabel = invoice.dueDate ? formatDate(invoice.dueDate) : "the due date";
   const stageLabel = getStageLabel(input.reminderStage);
 
   return {
     customerId: order?.customerId,
-    html: `
-      <div style="font-family:Arial,sans-serif; line-height:1.5">
-        <p>Dear ${customerName},</p>
-        <p><strong>${stageLabel} reminder:</strong> invoice <strong>${invoice.invoiceNo ?? invoice.id}</strong> remains overdue as of <strong>${overdueLabel}</strong>.</p>
-        <p><strong>Outstanding Balance:</strong> ${moneyFromCents(input.outstandingBalanceCents)}</p>
-        ${dueDateLine}
-        <p>Please arrange payment and quote the invoice number as reference. A copy of the invoice is attached for convenience.</p>
-        <p>Thank you.</p>
-      </div>
-    `,
+    ...(await buildOverdueReminderTemplate({
+      stageLabel,
+      customerName,
+      invoiceNo: invoice.invoiceNo ?? invoice.id,
+      overdueDate: invoice.dueDate ?? "",
+      outstandingBalanceCents: input.outstandingBalanceCents,
+    })),
   };
 }
 
@@ -274,9 +268,7 @@ async function processSingleInvoice(input: {
   }
 
   try {
-    const stageLabel = getStageLabel(eligibleStage);
-    const subject = `${stageLabel} Overdue Reminder for Invoice ${invoice.invoiceNo ?? invoice.id}`;
-    const reminderContent = await buildReminderHtml({
+    const reminderContent = await buildReminderTemplate({
       invoice,
       outstandingBalanceCents: paymentTotals.balanceCents,
       reminderStage: eligibleStage,
@@ -284,7 +276,7 @@ async function processSingleInvoice(input: {
     const delivery = await deliverInvoiceEmail({
       invoice,
       to: recipient,
-      subject,
+      subject: reminderContent.subject,
       html: reminderContent.html,
     });
 
@@ -293,7 +285,7 @@ async function processSingleInvoice(input: {
       invoiceId: invoice.id,
       type: "reminder",
       to: recipient,
-      subject,
+      subject: reminderContent.subject,
       provider: delivery.provider,
       status: "sent",
       providerMessageId: delivery.providerMessageId ?? undefined,
@@ -303,7 +295,7 @@ async function processSingleInvoice(input: {
     await dbInvoiceRepo.appendEmailLog(invoice.id, {
       type: "reminder",
       to: recipient,
-      subject,
+      subject: reminderContent.subject,
       provider: delivery.provider,
       status: "sent",
       providerMessageId: delivery.providerMessageId ?? undefined,
