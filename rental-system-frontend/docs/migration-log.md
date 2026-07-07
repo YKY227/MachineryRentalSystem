@@ -1924,3 +1924,68 @@ Manual test checklist:
 - [ ] Confirm rental total units, rental pricing, availability checks, and checkout still behave unchanged from the Rent tab.
 - [ ] Open `/rental` and confirm cards show rent/sale badges while keeping rental pricing visible.
 - [ ] Open `/rental/[id]`, toggle Rent/Buy, and confirm Buy displays sale status, price/request quote, condition, warranty, notes, and fulfillment choices without entering checkout.
+
+## 2026-07-07 | Scope: equipment sale enquiry phase 4A
+Summary:
+- Added a manual purchase enquiry workflow for public Buy tabs so customers can submit sale interest without cart, payment, invoice, order, rental hold, or sale quantity changes.
+- Added admin Sale Enquiries review/update tooling for status and internal notes.
+
+Files changed:
+- `supabase/migrations/20260707160000_rental_equipment_sale_enquiries.sql`
+- `src/lib/rental/sale-enquiries/types.ts`
+- `src/lib/rental/sale-enquiries/db-sale-enquiry-repo.ts`
+- `src/app/api/public/rental/equipment/[id]/sale-enquiry/route.ts`
+- `src/app/api/admin/rental/sale-enquiries/route.ts`
+- `src/app/api/admin/rental/sale-enquiries/[id]/route.ts`
+- `src/app/admin/rental/sale-enquiries/page.tsx`
+- `src/app/admin/layout.tsx`
+- `src/app/rental/[id]/page.tsx`
+- `docs/migration-log.md`
+
+DB / Infra changes:
+- Added append-only migration `20260707160000_rental_equipment_sale_enquiries.sql`.
+- Added `rental_equipment_sale_enquiries` with customer contact fields, sale/equipment snapshots, admin status, admin notes, and indexes for created date, status, and equipment.
+- No sale quantity, cart, order schema, checkout, payment, invoice, extension, damage, or rental availability hold changes were introduced.
+
+API / Page changes:
+- Added public `POST /api/public/rental/equipment/[id]/sale-enquiry` for sale enquiry submission on sale-enabled published equipment with `available_for_sale` or `on_request` status.
+- Added admin sale enquiry list/update APIs and `/admin/rental/sale-enquiries`.
+- Public Buy tab now submits an enquiry form and shows confirmation/errors instead of a disabled stub.
+
+Manual test checklist:
+- [ ] Run `rental-system-frontend/supabase/migrations/20260707160000_rental_equipment_sale_enquiries.sql` in Supabase.
+- [ ] Open a sale-enabled equipment detail page with `available_for_sale` or `on_request`, submit the Buy enquiry form, and confirm a success message appears.
+- [ ] Confirm `sold` and `not_available` equipment do not show an active enquiry form.
+- [ ] Open `/admin/rental/sale-enquiries`, verify the new enquiry appears, then update status and admin notes.
+- [ ] Confirm rental checkout from the Rent tab still follows the existing one-equipment checkout flow.
+
+## 2026-07-07 | Scope: local rental and sale enquiry cart phase 4B
+Summary:
+- Added a browser localStorage cart for rental lines and sale enquiry lines using `rental_cart_v1`.
+- Added public equipment detail actions to add rental selections or sale enquiry snapshots to the cart while keeping direct one-item rental checkout unchanged.
+- Added `/rental/cart` with separate rental and sale enquiry sections, remove/clear actions, one-item rental checkout links, and sale enquiry submission through the existing Phase 4A API.
+
+Files changed:
+- `src/lib/rental/cart/types.ts`
+- `src/lib/rental/cart/local-cart.ts`
+- `src/app/rental/cart/page.tsx`
+- `src/app/rental/[id]/page.tsx`
+- `docs/migration-log.md`
+
+DB / Infra changes:
+- No migration added.
+- No DB cart table, sale quantity, checkout group, order schema, invoice, payment, or rental hold changes were introduced.
+
+API / Page changes:
+- `/rental/[id]` now offers `Add rental to cart` on the Rent tab and `Add sale enquiry to cart` on Buy for `available_for_sale` and `on_request` sale statuses.
+- `/rental/cart` lets rental lines proceed to the existing one-equipment `/rental/checkout` query-string flow.
+- `/rental/cart` lets sale enquiry lines submit the existing `POST /api/public/rental/equipment/[id]/sale-enquiry` endpoint, then stores `enquiryId` and `enquirySubmittedAt` locally.
+- Mixed checkout remains disabled/planned and sale lines do not enter payment.
+
+Manual test checklist:
+- [ ] Open a rental detail page, choose dates/quantity/fulfillment, add the rental item to cart, then confirm `/rental/cart` shows the rental estimate.
+- [ ] From `/rental/cart`, proceed with one rental line and confirm the existing `/rental/checkout` query string is populated.
+- [ ] Open a sale-enabled equipment detail page with `available_for_sale` or `on_request`, add a sale enquiry to cart, then submit the enquiry from `/rental/cart`.
+- [ ] Confirm `sold` and `not_available` sale statuses do not show a sale cart action.
+- [ ] Remove individual cart lines and clear the cart.
+- [ ] Confirm adding to cart creates no holds, orders, invoices, payment sessions, checkout groups, or sale quantity reservations.

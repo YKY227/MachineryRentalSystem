@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import {
@@ -9,6 +9,7 @@ import {
   CheckCircle2,
   Package,
   Shield,
+  ShoppingCart,
   Truck,
   Sparkles,
   Factory,
@@ -20,6 +21,11 @@ import {
   calculateAuthoritativeRentalPricing,
   calculateRentalDaysInclusive,
 } from "@/lib/rental/orders/pricing";
+import {
+  addRentalCartLine,
+  markSaleCartLinesSubmittedForEquipment,
+  upsertSaleCartLine,
+} from "@/lib/rental/cart/local-cart";
 import type { RentalCustomer } from "@/lib/rental/orders/types";
 
 type FulfillmentMode = "deliver" | "self_collect";
@@ -91,6 +97,16 @@ export default function RentalDetailPage() {
   const [availabilitySnapshot, setAvailabilitySnapshot] = useState<AvailabilitySnapshot | null>(null);
   const [availabilityLoading, setAvailabilityLoading] = useState(false);
   const [adminAuthenticated, setAdminAuthenticated] = useState(false);
+  const [saleCustomerName, setSaleCustomerName] = useState("");
+  const [saleCustomerEmail, setSaleCustomerEmail] = useState("");
+  const [saleCustomerPhone, setSaleCustomerPhone] = useState("");
+  const [saleCompanyName, setSaleCompanyName] = useState("");
+  const [saleMessage, setSaleMessage] = useState("");
+  const [saleSubmitting, setSaleSubmitting] = useState(false);
+  const [saleError, setSaleError] = useState<string | null>(null);
+  const [saleSubmitted, setSaleSubmitted] = useState(false);
+  const [cartNotice, setCartNotice] = useState<string | null>(null);
+  const [cartError, setCartError] = useState<string | null>(null);
 
   const deliveryFee = fulfillment === "deliver" ? 60 : 0;
   const collectionFee = fulfillment === "deliver" ? 60 : 0;
@@ -151,6 +167,13 @@ export default function RentalDetailPage() {
       setPurchaseFulfillment(modes[0]);
     }
   }, [equipment, purchaseFulfillment]);
+
+  useEffect(() => {
+    setSaleError(null);
+    setSaleSubmitted(false);
+    setCartNotice(null);
+    setCartError(null);
+  }, [equipmentId]);
 
   const days = useMemo(() => calculateRentalDaysInclusive(startDate, endDate), [startDate, endDate]);
   const minDays = equipment?.pricing?.minDays ?? 1;
@@ -221,6 +244,7 @@ export default function RentalDetailPage() {
   const addressValid = !addressRequired || deliveryAddress.trim().length >= 8;
 
   const canProceed = !!equipment && !adminAuthenticated && inStock && dateValid && qtyValid && addressValid;
+  const canAddRentalToCart = !!equipment && inStock && dateValid && qtyValid && addressValid;
 
   function handleProceed() {
     if (!equipment || !canProceed) return;
@@ -307,11 +331,122 @@ export default function RentalDetailPage() {
       : saleSold
         ? "border-rose-200 bg-rose-50"
         : "border-slate-200 bg-slate-50";
-  const saleCtaClass = saleEnquiryAllowed
-    ? "bg-amber-200 text-amber-900"
-    : saleSold
-      ? "bg-rose-100 text-rose-700"
-      : "bg-slate-200 text-slate-500";
+
+  function handleAddRentalToCart() {
+    if (!equipment || !canAddRentalToCart) return;
+
+    try {
+      addRentalCartLine({
+        type: "rental",
+        equipmentId: equipment.id,
+        equipmentSlug: equipment.slug,
+        titleSnapshot: equipment.title,
+        imageUrlSnapshot: heroImg || equipment.imageUrl,
+        dayRateSnapshot: equipment.pricing.dayRate,
+        weekRateSnapshot: equipment.pricing.weekRate,
+        monthRateSnapshot: equipment.pricing.monthRate,
+        depositSnapshot: equipment.pricing.deposit,
+        minDaysSnapshot: minDays,
+        qty,
+        startDate,
+        endDate,
+        fulfillment,
+        deliveryAddress: fulfillment === "deliver" ? deliveryAddress.trim() : undefined,
+        pricingPreview: {
+          days,
+          rentalSubtotal,
+          deliveryFee,
+          collectionFee,
+          deposit,
+          total,
+        },
+      });
+      setCartError(null);
+      setCartNotice("Rental item added to cart.");
+    } catch {
+      setCartNotice(null);
+      setCartError("Unable to add rental item to cart on this device.");
+    }
+  }
+
+  function handleAddSaleToCart() {
+    if (!equipment || !saleEnquiryAllowed) return;
+
+    try {
+      const result = upsertSaleCartLine({
+        type: "sale",
+        equipmentId: equipment.id,
+        equipmentSlug: equipment.slug,
+        titleSnapshot: equipment.title,
+        imageUrlSnapshot: heroImg || equipment.imageUrl,
+        saleStatusSnapshot: saleStatus,
+        salePriceModeSnapshot: sale.priceMode,
+        salePriceCentsSnapshot: sale.priceCents,
+        saleConditionSnapshot: sale.condition,
+        saleWarrantySnapshot: sale.warranty,
+        fulfillmentPreference: saleFulfillmentModes.length > 0 ? purchaseFulfillment : undefined,
+        message: saleMessage.trim() || undefined,
+      });
+      setCartError(null);
+      setCartNotice(
+        result.status === "submitted_exists"
+          ? "A sale enquiry for this equipment was already submitted from your cart."
+          : result.status === "updated"
+            ? "Existing sale enquiry cart item updated."
+            : "Sale enquiry item added to cart."
+      );
+    } catch {
+      setCartNotice(null);
+      setCartError("Unable to add sale enquiry item to cart on this device.");
+    }
+  }
+
+  async function handleSaleEnquirySubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!equipment || saleSubmitting || !saleEnquiryAllowed) return;
+
+    const customerName = saleCustomerName.trim();
+    const customerEmail = saleCustomerEmail.trim();
+    if (!customerName || !customerEmail) {
+      setSaleError("Name and email are required.");
+      return;
+    }
+
+    try {
+      setSaleSubmitting(true);
+      setSaleError(null);
+      const res = await fetch(
+        `/api/public/rental/equipment/${encodeURIComponent(equipment.id)}/sale-enquiry`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            customerName,
+            customerEmail,
+            customerPhone: saleCustomerPhone.trim() || null,
+            companyName: saleCompanyName.trim() || null,
+            fulfillmentPreference:
+              saleFulfillmentModes.length > 0 ? purchaseFulfillment : null,
+            message: saleMessage.trim() || null,
+          }),
+        }
+      );
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error ?? "Unable to submit purchase enquiry");
+      const enquiryId = typeof data?.enquiry?.id === "string" ? data.enquiry.id : undefined;
+      markSaleCartLinesSubmittedForEquipment({
+        equipmentId: equipment.id,
+        enquiryId,
+        enquirySubmittedAt: new Date().toISOString(),
+      });
+      setSaleSubmitted(true);
+      setSaleMessage("");
+    } catch (error) {
+      setSaleError(error instanceof Error ? error.message : "Unable to submit purchase enquiry");
+    } finally {
+      setSaleSubmitting(false);
+    }
+  }
 
   return (
     <div className="mx-auto max-w-6xl p-4">
@@ -761,6 +896,21 @@ export default function RentalDetailPage() {
 
             <button
               type="button"
+              onClick={handleAddRentalToCart}
+              disabled={!canAddRentalToCart}
+              className={[
+                "mt-4 inline-flex w-full items-center justify-center rounded-xl border px-4 py-3 text-sm font-semibold",
+                canAddRentalToCart
+                  ? "border-sky-200 bg-white text-sky-700 hover:bg-sky-50"
+                  : "cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400",
+              ].join(" ")}
+            >
+              <ShoppingCart className="mr-2 h-4 w-4" />
+              Add rental to cart
+            </button>
+
+            <button
+              type="button"
               onClick={handleProceed}
               disabled={!canProceed}
               className={[
@@ -773,6 +923,21 @@ export default function RentalDetailPage() {
               {adminAuthenticated ? "Customer checkout only" : "Proceed to checkout"}
               <ArrowRight className="ml-2 h-4 w-4" />
             </button>
+
+            {cartNotice && (
+              <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-800">
+                {cartNotice}{" "}
+                <Link href="/rental/cart" className="font-semibold underline">
+                  View cart
+                </Link>
+              </div>
+            )}
+
+            {cartError && (
+              <div className="mt-3 rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs text-rose-700">
+                {cartError}
+              </div>
+            )}
 
             {adminAuthenticated && (
               <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
@@ -884,20 +1049,118 @@ export default function RentalDetailPage() {
                 )}
               </div>
 
-              <button
-                type="button"
-                disabled
-                className={[
-                  "mt-4 inline-flex w-full cursor-not-allowed items-center justify-center rounded-xl px-4 py-3 text-sm font-semibold",
-                  saleCtaClass,
-                ].join(" ")}
-              >
-                {saleCtaLabel}
-              </button>
+              {saleEnquiryAllowed ? (
+                saleSubmitted ? (
+                  <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">
+                    <div className="font-semibold">Purchase enquiry submitted.</div>
+                    <p className="mt-1">
+                      Our team will confirm sale availability and final pricing before any payment can proceed.
+                    </p>
+                  </div>
+                ) : (
+                  <form className="mt-4 space-y-3" onSubmit={handleSaleEnquirySubmit}>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <label className="grid gap-1 text-xs font-medium text-slate-700">
+                        Name <span className="sr-only">required</span>
+                        <input
+                          type="text"
+                          value={saleCustomerName}
+                          onChange={(event) => setSaleCustomerName(event.target.value)}
+                          className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-normal text-slate-900 outline-none focus:border-amber-400"
+                          required
+                        />
+                      </label>
+                      <label className="grid gap-1 text-xs font-medium text-slate-700">
+                        Email <span className="sr-only">required</span>
+                        <input
+                          type="email"
+                          value={saleCustomerEmail}
+                          onChange={(event) => setSaleCustomerEmail(event.target.value)}
+                          className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-normal text-slate-900 outline-none focus:border-amber-400"
+                          required
+                        />
+                      </label>
+                      <label className="grid gap-1 text-xs font-medium text-slate-700">
+                        Phone
+                        <input
+                          type="tel"
+                          value={saleCustomerPhone}
+                          onChange={(event) => setSaleCustomerPhone(event.target.value)}
+                          className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-normal text-slate-900 outline-none focus:border-amber-400"
+                        />
+                      </label>
+                      <label className="grid gap-1 text-xs font-medium text-slate-700">
+                        Company
+                        <input
+                          type="text"
+                          value={saleCompanyName}
+                          onChange={(event) => setSaleCompanyName(event.target.value)}
+                          className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-normal text-slate-900 outline-none focus:border-amber-400"
+                        />
+                      </label>
+                    </div>
 
-              <p className="mt-3 text-xs text-slate-500">
-                Purchase enquiry submission is not connected to checkout yet.
-              </p>
+                    <label className="grid gap-1 text-xs font-medium text-slate-700">
+                      Message
+                      <textarea
+                        value={saleMessage}
+                        onChange={(event) => setSaleMessage(event.target.value)}
+                        rows={3}
+                        className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-normal text-slate-900 outline-none focus:border-amber-400"
+                        placeholder="Tell us your preferred timing, usage context, or inspection questions."
+                      />
+                    </label>
+
+                    {saleError && (
+                      <div className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs text-rose-700">
+                        {saleError}
+                      </div>
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={handleAddSaleToCart}
+                      className="inline-flex w-full items-center justify-center rounded-xl border border-amber-200 bg-white px-4 py-3 text-sm font-semibold text-amber-700 hover:bg-amber-50"
+                    >
+                      <ShoppingCart className="mr-2 h-4 w-4" />
+                      Add sale enquiry to cart
+                    </button>
+
+                    {cartNotice && (
+                      <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-800">
+                        {cartNotice}{" "}
+                        <Link href="/rental/cart" className="font-semibold underline">
+                          View cart
+                        </Link>
+                      </div>
+                    )}
+
+                    {cartError && (
+                      <div className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs text-rose-700">
+                        {cartError}
+                      </div>
+                    )}
+
+                    <button
+                      type="submit"
+                      disabled={saleSubmitting}
+                      className="inline-flex w-full items-center justify-center rounded-xl bg-amber-500 px-4 py-3 text-sm font-semibold text-white hover:bg-amber-600 disabled:cursor-not-allowed disabled:bg-slate-300"
+                    >
+                      {saleSubmitting ? "Submitting..." : saleCtaLabel}
+                    </button>
+
+                    <p className="text-xs text-slate-500">
+                      This sends an enquiry only. Sale payment is unavailable until admin confirms stock and final price.
+                    </p>
+                  </form>
+                )
+              ) : (
+                <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
+                  {saleSold
+                    ? "This equipment is sold and cannot accept purchase enquiries."
+                    : "This equipment is not available for purchase enquiries."}
+                </div>
+              )}
             </div>
             </div>
           </div>

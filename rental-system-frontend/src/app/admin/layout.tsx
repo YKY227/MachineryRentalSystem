@@ -39,6 +39,7 @@ const navItems: NavItem[] = [
   { label: "Orders", href: "/admin/rental/orders", icon: ClipboardList },
   { label: "Customers", href: "/admin/rental/customers", icon: Users },
   { label: "Invoices", href: "/admin/rental/invoices", icon: FileText },
+  { label: "Sale Enquiries", href: "/admin/rental/sale-enquiries", icon: FileText },
   { label: "Equipment Inventory", href: "/admin/rental", icon: Boxes, match: "exact" },
   {
     label: "Import Equipment",
