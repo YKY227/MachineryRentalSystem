@@ -1,12 +1,10 @@
 //rental-system-frontend/src/app/api/public/rental/payments/hitpay/webhook/route.ts
-import { confirmPaidRentalExtension } from "@/lib/rental/extensions/rental-extension-service";
-import { processPaidCheckoutSession } from "@/lib/rental/invoices/checkout-invoice-automation";
-import { processPaidCustomerInvoiceSession } from "@/lib/rental/invoices/customer-invoice-payment-automation";
 import { dbOrderPaymentSessionRepo } from "@/lib/rental/orders/db-order-payment-session-repo";
 import {
   fetchHitPayPaymentRequest,
   verifyHitPayWebhookSignature,
 } from "@/lib/rental/orders/hitpay";
+import { runPaymentSessionAutomation } from "@/lib/rental/orders/payment-session-reconciliation";
 
 export const runtime = "nodejs";
 
@@ -158,14 +156,10 @@ export async function POST(req: Request) {
 
     if (nextSession.status === "paid") {
       try {
-        const paymentMode = String(nextSession.webhookPayload?.paymentMode ?? "").trim();
-        if (paymentMode === "customer_invoice") {
-          await processPaidCustomerInvoiceSession(nextSession.id);
-        } else if (paymentMode === "order_extension") {
-          await confirmPaidRentalExtension(nextSession.id);
-        } else {
-          await processPaidCheckoutSession(nextSession.id);
-        }
+        await runPaymentSessionAutomation({
+          session: nextSession,
+          source: "hitpay_webhook",
+        });
       } catch (error) {
         const failedAt = new Date().toISOString();
         console.error("[hitpay-webhook] invoice automation failed", {

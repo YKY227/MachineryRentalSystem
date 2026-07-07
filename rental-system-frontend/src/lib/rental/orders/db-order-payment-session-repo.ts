@@ -79,7 +79,57 @@ function toSession(row: PaymentSessionRow): RentalOrderPaymentSession {
   };
 }
 
+function isCheckoutSession(row: PaymentSessionRow) {
+  const paymentMode = String(row.webhook_payload?.paymentMode ?? "").trim();
+  return !paymentMode || paymentMode === "checkout";
+}
+
 export const dbOrderPaymentSessionRepo = {
+  async listForAdminVisibility(input?: {
+    filter?: "needs_attention" | "manual_review" | "paid_unapplied" | "paid_incomplete_checkout" | "all_recent";
+    limit?: number;
+  }): Promise<RentalOrderPaymentSession[]> {
+    const supabase = supabaseAdmin();
+    const filter = input?.filter ?? "needs_attention";
+    const limit = Math.min(200, Math.max(1, Math.floor(Number(input?.limit ?? 100) || 100)));
+
+    async function runQuery(kind: "manual_review" | "paid_unapplied" | "all_recent") {
+      let query = supabase
+        .from(PAYMENT_SESSIONS_TABLE)
+        .select(SESSION_COLUMNS)
+        .order("created_at", { ascending: false })
+        .limit(limit);
+
+      if (kind === "manual_review") {
+        query = query.eq("webhook_payload->automation->>status", "manual_review");
+      } else if (kind === "paid_unapplied") {
+        query = query.eq("status", "paid").is("invoice_applied_at", null);
+      }
+
+      const { data, error } = await query;
+      if (error) throw new Error(`Payment session admin list failed: ${error.message}`);
+      return ((data ?? []) as unknown as PaymentSessionRow[]).map(toSession);
+    }
+
+    if (filter === "manual_review") return runQuery("manual_review");
+    if (filter === "paid_unapplied" || filter === "paid_incomplete_checkout") {
+      return runQuery("paid_unapplied");
+    }
+    if (filter === "all_recent") return runQuery("all_recent");
+
+    const [manualReview, paidUnapplied] = await Promise.all([
+      runQuery("manual_review"),
+      runQuery("paid_unapplied"),
+    ]);
+    const byId = new Map<string, RentalOrderPaymentSession>();
+    for (const session of [...manualReview, ...paidUnapplied]) {
+      byId.set(session.id, session);
+    }
+    return [...byId.values()]
+      .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime())
+      .slice(0, limit);
+  },
+
   async create(input: {
     orderId: string;
     provider: RentalOrderPaymentProvider;
@@ -92,6 +142,7 @@ export const dbOrderPaymentSessionRepo = {
     redirectUrl?: string;
     webhookPayload?: Record<string, unknown>;
     paidAt?: string;
+    invoiceId?: string;
   }): Promise<RentalOrderPaymentSession> {
     const supabase = supabaseAdmin();
     const now = nowIso();
@@ -109,6 +160,7 @@ export const dbOrderPaymentSessionRepo = {
         redirect_url: input.redirectUrl ?? null,
         webhook_payload: input.webhookPayload ?? null,
         paid_at: input.paidAt ?? null,
+        invoice_id: input.invoiceId ?? null,
         created_at: now,
         updated_at: now,
       })
@@ -117,6 +169,159 @@ export const dbOrderPaymentSessionRepo = {
 
     if (error) throw new Error(`Payment session create failed: ${error.message}`);
     return toSession(data);
+  },
+
+  async findPendingCustomerInvoiceSession(input: {
+    invoiceId: string;
+    amountCents: number;
+    currency: string;
+  }): Promise<RentalOrderPaymentSession | null> {
+    const supabase = supabaseAdmin();
+    const { data, error } = await supabase
+      .from(PAYMENT_SESSIONS_TABLE)
+      .select(SESSION_COLUMNS)
+      .eq("provider", "hitpay")
+      .eq("invoice_id", input.invoiceId)
+      .eq("amount_cents", input.amountCents)
+      .eq("currency", input.currency)
+      .eq("status", "pending")
+      .eq("webhook_payload->>paymentMode", "customer_invoice")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle<PaymentSessionRow>();
+
+    if (error) throw new Error(`Payment session lookup failed: ${error.message}`);
+    return data ? toSession(data) : null;
+  },
+
+  async findPendingCustomerInvoiceSessionForInvoice(input: {
+    invoiceId: string;
+    currency?: string;
+  }): Promise<RentalOrderPaymentSession | null> {
+    const supabase = supabaseAdmin();
+    let query = supabase
+      .from(PAYMENT_SESSIONS_TABLE)
+      .select(SESSION_COLUMNS)
+      .eq("provider", "hitpay")
+      .eq("invoice_id", input.invoiceId)
+      .eq("status", "pending")
+      .eq("webhook_payload->>paymentMode", "customer_invoice")
+      .order("created_at", { ascending: false })
+      .limit(1);
+
+    if (input.currency) {
+      query = query.eq("currency", input.currency);
+    }
+
+    const { data, error } = await query.maybeSingle<PaymentSessionRow>();
+
+    if (error) throw new Error(`Payment session lookup failed: ${error.message}`);
+    return data ? toSession(data) : null;
+  },
+
+  async findPendingCheckoutSession(input: {
+    orderId: string;
+    amountCents: number;
+    currency: string;
+  }): Promise<RentalOrderPaymentSession | null> {
+    const supabase = supabaseAdmin();
+    const { data, error } = await supabase
+      .from(PAYMENT_SESSIONS_TABLE)
+      .select(SESSION_COLUMNS)
+      .eq("provider", "hitpay")
+      .eq("order_id", input.orderId)
+      .eq("amount_cents", input.amountCents)
+      .eq("currency", input.currency)
+      .eq("status", "pending")
+      .order("created_at", { ascending: false })
+      .limit(20);
+
+    if (error) throw new Error(`Pending checkout payment session lookup failed: ${error.message}`);
+    const row = ((data ?? []) as unknown as PaymentSessionRow[]).find(isCheckoutSession);
+    return row ? toSession(row) : null;
+  },
+
+  async findPendingCheckoutSessionForOrder(orderId: string): Promise<RentalOrderPaymentSession | null> {
+    const supabase = supabaseAdmin();
+    const { data, error } = await supabase
+      .from(PAYMENT_SESSIONS_TABLE)
+      .select(SESSION_COLUMNS)
+      .eq("provider", "hitpay")
+      .eq("order_id", orderId)
+      .eq("status", "pending")
+      .order("created_at", { ascending: false })
+      .limit(20);
+
+    if (error) throw new Error(`Pending checkout payment session lookup failed: ${error.message}`);
+    const row = ((data ?? []) as unknown as PaymentSessionRow[]).find(isCheckoutSession);
+    return row ? toSession(row) : null;
+  },
+
+  async findPendingOrderExtensionSession(input: {
+    extensionId: string;
+    amountCents: number;
+    currency: string;
+  }): Promise<RentalOrderPaymentSession | null> {
+    const supabase = supabaseAdmin();
+    const { data, error } = await supabase
+      .from(PAYMENT_SESSIONS_TABLE)
+      .select(SESSION_COLUMNS)
+      .eq("provider", "hitpay")
+      .eq("amount_cents", input.amountCents)
+      .eq("currency", input.currency)
+      .eq("status", "pending")
+      .eq("webhook_payload->>paymentMode", "order_extension")
+      .eq("webhook_payload->>extensionId", input.extensionId)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle<PaymentSessionRow>();
+
+    if (error) throw new Error(`Pending extension payment session lookup failed: ${error.message}`);
+    return data ? toSession(data) : null;
+  },
+
+  async findPendingOrderExtensionSessionForExtension(extensionId: string): Promise<RentalOrderPaymentSession | null> {
+    const supabase = supabaseAdmin();
+    const { data, error } = await supabase
+      .from(PAYMENT_SESSIONS_TABLE)
+      .select(SESSION_COLUMNS)
+      .eq("provider", "hitpay")
+      .eq("status", "pending")
+      .eq("webhook_payload->>paymentMode", "order_extension")
+      .eq("webhook_payload->>extensionId", extensionId)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle<PaymentSessionRow>();
+
+    if (error) throw new Error(`Pending extension payment session lookup failed: ${error.message}`);
+    return data ? toSession(data) : null;
+  },
+
+  async listPaidIncompleteCheckoutOrderIds(orderIds: string[]): Promise<string[]> {
+    const normalizedOrderIds = [...new Set(orderIds.map((orderId) => orderId.trim()).filter(Boolean))];
+    if (!normalizedOrderIds.length) return [];
+
+    const supabase = supabaseAdmin();
+    const { data, error } = await supabase
+      .from(PAYMENT_SESSIONS_TABLE)
+      .select("order_id,webhook_payload,invoice_applied_at")
+      .in("order_id", normalizedOrderIds)
+      .eq("status", "paid")
+      .is("invoice_applied_at", null);
+
+    if (error) throw new Error(`Paid checkout payment session lookup failed: ${error.message}`);
+
+    return [
+      ...new Set(
+        ((data ?? []) as Array<{ order_id: string | null; webhook_payload: Record<string, unknown> | null }>)
+          .filter((row) => {
+            const paymentMode = String(row.webhook_payload?.paymentMode ?? "").trim();
+            return !paymentMode || paymentMode === "checkout";
+          })
+          .map((row) => String(row.order_id ?? "").trim())
+          .filter(Boolean)
+      ),
+    ];
   },
 
   async get(id: string): Promise<RentalOrderPaymentSession | null> {

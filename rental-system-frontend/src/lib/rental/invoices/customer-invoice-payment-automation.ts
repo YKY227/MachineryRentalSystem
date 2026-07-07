@@ -3,6 +3,7 @@ import "server-only";
 import { dbInvoiceRepo } from "@/lib/rental/invoices/db-invoice-repo";
 import { dbPaymentRepo } from "@/lib/rental/invoices/db-payment-repo";
 import { dbOrderPaymentSessionRepo } from "@/lib/rental/orders/db-order-payment-session-repo";
+import type { RentalOrderPaymentSession } from "@/lib/rental/orders/types";
 
 type CustomerInvoicePaymentAutomationResult = {
   sessionId: string;
@@ -29,6 +30,102 @@ function getWebhookString(payload: Record<string, unknown> | undefined, key: str
   return "";
 }
 
+function getStalePaymentLinkReason(payload: Record<string, unknown> | undefined) {
+  const dedupeReason = String(payload?.dedupeReason ?? "").trim();
+  if (dedupeReason.includes("customer_invoice")) {
+    return "stale_customer_invoice_payment_link";
+  }
+
+  const supersededAt = String(payload?.supersededAt ?? "").trim();
+  if (supersededAt) {
+    return "stale_customer_invoice_payment_link";
+  }
+
+  const stalePaymentLink = payload?.stalePaymentLink;
+  if (!stalePaymentLink || typeof stalePaymentLink !== "object" || Array.isArray(stalePaymentLink)) {
+    return "";
+  }
+
+  const status = String((stalePaymentLink as Record<string, unknown>).status ?? "").trim();
+  if (!status) return "stale_customer_invoice_payment_link";
+  if (
+    status === "active_pending_amount_mismatch" ||
+    status === "inactive_provider_amount_mismatch" ||
+    status === "paid_amount_mismatch" ||
+    status === "provider_status_check_failed"
+  ) {
+    return "stale_customer_invoice_payment_link";
+  }
+
+  return "";
+}
+
+async function markManualReview(input: {
+  session: RentalOrderPaymentSession;
+  invoiceId: string;
+  reason: string;
+  balanceCents: number;
+}) {
+  const existingAutomation = input.session.webhookPayload?.automation;
+  if (
+    existingAutomation &&
+    typeof existingAutomation === "object" &&
+    !Array.isArray(existingAutomation) &&
+    (existingAutomation as Record<string, unknown>).status === "manual_review" &&
+    (existingAutomation as Record<string, unknown>).reason === input.reason
+  ) {
+    return;
+  }
+
+  const reviewedAt = new Date().toISOString();
+  console.warn("[customer-invoice-payment] paid session requires manual review", {
+    invoiceId: input.invoiceId,
+    paymentSessionId: input.session.id,
+    paymentMode: "customer_invoice",
+    reason: input.reason,
+    sessionAmountCents: input.session.amountCents,
+    balanceCents: input.balanceCents,
+  });
+
+  await dbOrderPaymentSessionRepo.update(input.session.id, {
+    invoiceId: input.invoiceId,
+    webhookPayload: {
+      ...(input.session.webhookPayload ?? {}),
+      automation: {
+        status: "manual_review",
+        reason: input.reason,
+        reviewedAt,
+        sessionAmountCents: input.session.amountCents,
+        balanceCents: input.balanceCents,
+        unappliedAmountCents: input.session.amountCents,
+      },
+    },
+  });
+}
+
+async function markApplied(input: {
+  session: RentalOrderPaymentSession;
+  invoiceId: string;
+  invoicePaymentId: string;
+  appliedAmountCents: number;
+}) {
+  await dbOrderPaymentSessionRepo.update(input.session.id, {
+    invoiceId: input.invoiceId,
+    invoicePaymentId: input.invoicePaymentId,
+    invoiceAppliedAt: input.session.invoiceAppliedAt ?? new Date().toISOString(),
+    webhookPayload: {
+      ...(input.session.webhookPayload ?? {}),
+      paymentMode: "customer_invoice",
+      invoiceId: input.invoiceId,
+      automation: {
+        status: "applied",
+        appliedAmountCents: input.appliedAmountCents,
+        unappliedAmountCents: Math.max(input.session.amountCents - input.appliedAmountCents, 0),
+      },
+    },
+  });
+}
+
 export async function processPaidCustomerInvoiceSession(
   paymentSessionId: string
 ): Promise<CustomerInvoicePaymentAutomationResult | null> {
@@ -44,15 +141,68 @@ export async function processPaidCustomerInvoiceSession(
 
   const invoice = await dbInvoiceRepo.get(invoiceId);
   if (!invoice) throw new Error("Invoice not found");
+
+  const existingPayment = await dbPaymentRepo.findBySourcePaymentSessionId(session.id);
+  if (existingPayment) {
+    const paymentResult = await dbPaymentRepo.recordPaymentForCheckoutSession({
+      invoiceId: invoice.id,
+      sourcePaymentSessionId: session.id,
+      amountCents: existingPayment.amountCents,
+      paidAt: session.paidAt,
+      method: "HitPay",
+      reference:
+        getWebhookString(session.webhookPayload, "reference_number") ||
+        session.providerReferenceNumber ||
+        session.providerPaymentRequestId ||
+        session.id,
+      notes: "Customer portal invoice payment via HitPay",
+    });
+    await markApplied({
+      session,
+      invoiceId: invoice.id,
+      invoicePaymentId: paymentResult.payment.id,
+      appliedAmountCents: paymentResult.payment.amountCents,
+    });
+    return {
+      sessionId: session.id,
+      invoiceId: invoice.id,
+      invoicePaymentId: paymentResult.payment.id,
+      allocationId: paymentResult.allocation.id,
+    };
+  }
+
+  const stalePaymentLinkReason = getStalePaymentLinkReason(session.webhookPayload);
+  if (stalePaymentLinkReason) {
+    const totals = await dbPaymentRepo.getTotals(invoice.id);
+    await markManualReview({
+      session,
+      invoiceId: invoice.id,
+      reason: stalePaymentLinkReason,
+      balanceCents: totals.balanceCents,
+    });
+    return null;
+  }
+
   if (invoice.status !== "issued") throw new Error("Invoice must be issued before payment can be applied");
 
   const totals = await dbPaymentRepo.getTotals(invoice.id);
   if (totals.balanceCents <= 0) {
+    await markManualReview({
+      session,
+      invoiceId: invoice.id,
+      reason: "invoice_already_paid",
+      balanceCents: totals.balanceCents,
+    });
     return null;
   }
 
-  const amountToApplyCents = Math.min(session.amountCents, totals.balanceCents);
-  if (amountToApplyCents <= 0) {
+  if (session.amountCents !== totals.balanceCents) {
+    await markManualReview({
+      session,
+      invoiceId: invoice.id,
+      reason: "session_amount_mismatch",
+      balanceCents: totals.balanceCents,
+    });
     return null;
   }
 
@@ -61,7 +211,7 @@ export async function processPaidCustomerInvoiceSession(
     paymentResult = await dbPaymentRepo.recordPaymentForCheckoutSession({
       invoiceId: invoice.id,
       sourcePaymentSessionId: session.id,
-      amountCents: amountToApplyCents,
+      amountCents: session.amountCents,
       paidAt: session.paidAt,
       method: "HitPay",
       reference:
@@ -76,18 +226,11 @@ export async function processPaidCustomerInvoiceSession(
   }
 
   try {
-    await dbOrderPaymentSessionRepo.update(session.id, {
+    await markApplied({
+      session,
       invoiceId: invoice.id,
       invoicePaymentId: paymentResult.payment.id,
-      invoiceAppliedAt: session.invoiceAppliedAt ?? new Date().toISOString(),
-      webhookPayload: {
-        ...(session.webhookPayload ?? {}),
-        automation: {
-          status: "applied",
-          appliedAmountCents: amountToApplyCents,
-          unappliedAmountCents: Math.max(session.amountCents - amountToApplyCents, 0),
-        },
-      },
+      appliedAmountCents: session.amountCents,
     });
   } catch (error) {
     throw stageError("payment_session_update", error);
