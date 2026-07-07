@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useState, type ReactNode } from "react";
+import { Suspense, useEffect, useState, type ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
 import {
   AlertTriangle,
@@ -173,7 +173,7 @@ function portalExtensionMessage(extension: RentalCustomerPortalOverview["recentE
   return extension.customerMessage;
 }
 
-export default function RentalCustomerAccountPage() {
+function RentalCustomerAccountContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [loading, setLoading] = useState(true);
@@ -855,6 +855,14 @@ export default function RentalCustomerAccountPage() {
         )}
       </section>
     </div>
+  );
+}
+
+export default function RentalCustomerAccountPage() {
+  return (
+    <Suspense fallback={<div className="p-4 text-sm text-slate-600">Loading your account...</div>}>
+      <RentalCustomerAccountContent />
+    </Suspense>
   );
 }
 

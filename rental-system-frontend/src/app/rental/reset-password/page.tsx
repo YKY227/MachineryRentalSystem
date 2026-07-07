@@ -2,9 +2,9 @@
 
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, Suspense, useEffect, useMemo, useState } from "react";
 
-export default function RentalResetPasswordPage() {
+function RentalResetPasswordContent() {
   const searchParams = useSearchParams();
   const token = useMemo(() => searchParams?.get("token")?.trim() ?? "", [searchParams]);
 
@@ -155,5 +155,13 @@ export default function RentalResetPasswordPage() {
         )}
       </div>
     </div>
+  );
+}
+
+export default function RentalResetPasswordPage() {
+  return (
+    <Suspense fallback={<div className="p-4 text-sm text-slate-600">Loading reset password...</div>}>
+      <RentalResetPasswordContent />
+    </Suspense>
   );
 }

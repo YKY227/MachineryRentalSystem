@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, Suspense, useMemo, useState } from "react";
 import {
   AlertTriangle,
   Building2,
@@ -14,7 +14,7 @@ import {
 
 import { AuthShell } from "@/components/auth/AuthShell";
 
-export default function RentalCustomerLoginPage() {
+function RentalCustomerLoginContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const nextUrl = useMemo(() => searchParams?.get("next") || "/rental/checkout", [searchParams]);
@@ -141,5 +141,13 @@ export default function RentalCustomerLoginPage() {
         </div>
       </div>
     </AuthShell>
+  );
+}
+
+export default function RentalCustomerLoginPage() {
+  return (
+    <Suspense fallback={<div className="p-4 text-sm text-slate-600">Loading sign-in...</div>}>
+      <RentalCustomerLoginContent />
+    </Suspense>
   );
 }
