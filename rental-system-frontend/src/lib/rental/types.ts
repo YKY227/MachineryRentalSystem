@@ -10,6 +10,27 @@ export type EquipmentPricing = {
   deposit?: number; // refundable
 };
 
+export type EquipmentSaleStatus =
+  | "available_for_sale"
+  | "sold"
+  | "on_request"
+  | "not_available";
+
+export type EquipmentSalePriceMode = "fixed" | "request_quote";
+
+export type EquipmentSaleFulfillmentMode = "deliver" | "self_collect";
+
+export type EquipmentSaleSettings = {
+  enabled: boolean;
+  status: EquipmentSaleStatus;
+  priceCents?: number;
+  priceMode: EquipmentSalePriceMode;
+  condition?: string;
+  warranty?: string;
+  notes?: string;
+  fulfillmentModes?: EquipmentSaleFulfillmentMode[];
+};
+
 export type Equipment = {
   id: string;
   slug?: string;
@@ -40,6 +61,7 @@ export type Equipment = {
   maintenanceBufferDays?: number; // default 7 if undefined
 
   pricing: EquipmentPricing;
+  sale?: EquipmentSaleSettings;
   createdAt: string;
   updatedAt: string;
 };

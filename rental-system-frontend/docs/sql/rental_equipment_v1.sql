@@ -23,6 +23,17 @@ create table if not exists public.rental_equipment (
   specifications jsonb not null default '{}'::jsonb,
   is_published boolean not null default false,
   display_order integer not null default 0,
+  sale_enabled boolean not null default false,
+  sale_status text not null default 'not_available'
+    check (sale_status in ('available_for_sale', 'sold', 'on_request', 'not_available')),
+  sale_price_cents integer null check (sale_price_cents is null or sale_price_cents >= 0),
+  sale_price_mode text not null default 'request_quote'
+    check (sale_price_mode in ('fixed', 'request_quote')),
+  sale_condition text null,
+  sale_warranty text null,
+  sale_notes text null,
+  sale_fulfillment_modes jsonb null,
+  check (not sale_enabled or sale_price_mode <> 'fixed' or sale_price_cents > 0),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -32,3 +43,6 @@ create index if not exists rental_equipment_published_idx
 
 create index if not exists rental_equipment_category_idx
   on public.rental_equipment (category);
+
+create index if not exists rental_equipment_sale_status_idx
+  on public.rental_equipment (sale_enabled, sale_status);

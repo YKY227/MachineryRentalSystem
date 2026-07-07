@@ -1,7 +1,11 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import type { Equipment } from "@/lib/rental/types";
+import type {
+  Equipment,
+  EquipmentSalePriceMode,
+  EquipmentSaleStatus,
+} from "@/lib/rental/types";
 
 type TabKey = "inventory" | "orders" | "create";
 type FulfillmentMode = "deliver" | "self_collect";
@@ -42,6 +46,15 @@ type EditorState = {
   specsText: string;
   displayOrder: number;
   isPublished: boolean;
+  saleEnabled: boolean;
+  saleStatus: EquipmentSaleStatus;
+  salePriceMode: EquipmentSalePriceMode;
+  salePriceCents: number | "";
+  saleCondition: string;
+  saleWarranty: string;
+  saleNotes: string;
+  saleFulfillmentDeliver: boolean;
+  saleFulfillmentSelfCollect: boolean;
 };
 
 const ORDERS_LS_KEY = "cms_rental_orders_v1";
@@ -72,6 +85,15 @@ function emptyEditor(defaultMaintenanceBufferDays = 7): EditorState {
     specsText: "",
     displayOrder: 0,
     isPublished: false,
+    saleEnabled: false,
+    saleStatus: "not_available",
+    salePriceMode: "request_quote",
+    salePriceCents: "",
+    saleCondition: "",
+    saleWarranty: "",
+    saleNotes: "",
+    saleFulfillmentDeliver: false,
+    saleFulfillmentSelfCollect: false,
   };
 }
 
@@ -93,6 +115,24 @@ function formatMoney(n: number) {
     currency: "SGD",
     maximumFractionDigits: 0,
   }).format(n);
+}
+
+function formatCents(cents?: number) {
+  return formatMoney(Math.max(0, Number(cents ?? 0)) / 100);
+}
+
+function saleStatusLabel(status: EquipmentSaleStatus) {
+  switch (status) {
+    case "available_for_sale":
+      return "Available for sale";
+    case "sold":
+      return "Sold";
+    case "on_request":
+      return "On request";
+    case "not_available":
+    default:
+      return "Not available";
+  }
 }
 
 function listToText(items?: string[]) {
@@ -148,10 +188,24 @@ function toEditor(item?: Equipment | null, defaultMaintenanceBufferDays = 7): Ed
     specsText: specsToText(item.specs),
     displayOrder: item.displayOrder ?? 0,
     isPublished: item.isPublished,
+    saleEnabled: item.sale?.enabled ?? false,
+    saleStatus: item.sale?.status ?? "not_available",
+    salePriceMode: item.sale?.priceMode ?? "request_quote",
+    salePriceCents: item.sale?.priceCents ?? "",
+    saleCondition: item.sale?.condition ?? "",
+    saleWarranty: item.sale?.warranty ?? "",
+    saleNotes: item.sale?.notes ?? "",
+    saleFulfillmentDeliver: item.sale?.fulfillmentModes?.includes("deliver") ?? false,
+    saleFulfillmentSelfCollect: item.sale?.fulfillmentModes?.includes("self_collect") ?? false,
   };
 }
 
 function buildPayload(editor: EditorState) {
+  const saleFulfillmentModes = [
+    editor.saleFulfillmentDeliver ? "deliver" : "",
+    editor.saleFulfillmentSelfCollect ? "self_collect" : "",
+  ].filter(Boolean);
+
   return {
     title: editor.title.trim(),
     slug: editor.slug.trim() || undefined,
@@ -175,6 +229,17 @@ function buildPayload(editor: EditorState) {
     specs: textToSpecs(editor.specsText),
     displayOrder: editor.displayOrder,
     isPublished: editor.isPublished,
+    saleEnabled: editor.saleEnabled,
+    saleStatus: editor.saleEnabled ? editor.saleStatus : "not_available",
+    salePriceMode: editor.salePriceMode,
+    salePriceCents:
+      editor.salePriceMode === "fixed" && editor.salePriceCents !== ""
+        ? Math.max(0, Math.floor(Number(editor.salePriceCents)))
+        : null,
+    saleCondition: editor.saleCondition.trim() || null,
+    saleWarranty: editor.saleWarranty.trim() || null,
+    saleNotes: editor.saleNotes.trim() || null,
+    saleFulfillmentModes,
   };
 }
 
@@ -240,6 +305,14 @@ export default function AdminRentalInventoryPage() {
     setNotice(null);
     setError(null);
     try {
+      if (
+        editor.saleEnabled &&
+        editor.salePriceMode === "fixed" &&
+        (editor.salePriceCents === "" || Number(editor.salePriceCents) <= 0)
+      ) {
+        throw new Error("Sale price is required when fixed price is selected.");
+      }
+
       const method = editor.id ? "PATCH" : "POST";
       const url = editor.id
         ? `/api/admin/rental/equipment/${encodeURIComponent(editor.id)}`
@@ -287,9 +360,9 @@ export default function AdminRentalInventoryPage() {
     <div className="mx-auto max-w-6xl p-4">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold text-slate-900">Rental Inventory</h1>
+          <h1 className="text-2xl font-semibold text-slate-900">Equipment Inventory</h1>
           <p className="mt-1 text-sm text-slate-600">
-            Manage DB-backed rental equipment and publish customer-facing catalog items.
+            Manage DB-backed equipment for rental catalog listings and sale information.
           </p>
         </div>
 
@@ -325,6 +398,7 @@ export default function AdminRentalInventoryPage() {
                   <th className="px-4 py-3">Category</th>
                   <th className="px-4 py-3">Units</th>
                   <th className="px-4 py-3">Pricing</th>
+                  <th className="px-4 py-3">Sale</th>
                   <th className="px-4 py-3">Published</th>
                   <th className="px-4 py-3 text-right">Actions</th>
                 </tr>
@@ -336,11 +410,25 @@ export default function AdminRentalInventoryPage() {
                     <td className="px-4 py-3 capitalize text-slate-700">{item.category}</td>
                     <td className="px-4 py-3 text-slate-700">{item.totalUnits}</td>
                     <td className="px-4 py-3 text-slate-700">{formatMoney(item.pricing.dayRate)} / {item.pricing.weekRate ? formatMoney(item.pricing.weekRate) : "-"} / {item.pricing.monthRate ? formatMoney(item.pricing.monthRate) : "-"}</td>
+                    <td className="px-4 py-3 text-slate-700">
+                      {item.sale?.enabled ? (
+                        <div>
+                          <div className="font-medium text-slate-900">{saleStatusLabel(item.sale.status)}</div>
+                          <div className="text-xs text-slate-500">
+                            {item.sale.priceMode === "fixed" && item.sale.priceCents !== undefined
+                              ? formatCents(item.sale.priceCents)
+                              : "Request quote"}
+                          </div>
+                        </div>
+                      ) : (
+                        <span className="text-slate-400">Not for sale</span>
+                      )}
+                    </td>
                     <td className="px-4 py-3"><label className="inline-flex items-center gap-2"><input type="checkbox" checked={item.isPublished} onChange={(event) => togglePublish(item, event.target.checked)} /><span className="text-slate-700">{item.isPublished ? "Yes" : "No"}</span></label></td>
                     <td className="px-4 py-3 text-right"><button type="button" onClick={() => { setEditor(toEditor(item, defaultMaintenanceBufferDays)); setTab("create"); }} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">Edit</button></td>
                   </tr>
                 ))}
-                {items.length === 0 && <tr><td colSpan={6} className="px-4 py-6 text-sm text-slate-500">No equipment records found.</td></tr>}
+                {items.length === 0 && <tr><td colSpan={7} className="px-4 py-6 text-sm text-slate-500">No equipment records found.</td></tr>}
               </tbody>
             </table>
           </div>
@@ -384,6 +472,89 @@ export default function AdminRentalInventoryPage() {
               <input type="number" min={0} value={editor.weekRate} onChange={(e) => setEditor((prev) => ({ ...prev, weekRate: e.target.value === "" ? "" : Math.max(0, Number(e.target.value)) }))} placeholder="Week rate" className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
               <input type="number" min={0} value={editor.monthRate} onChange={(e) => setEditor((prev) => ({ ...prev, monthRate: e.target.value === "" ? "" : Math.max(0, Number(e.target.value)) }))} placeholder="Month rate" className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
               <input type="number" min={1} value={editor.minDays} onChange={(e) => setEditor((prev) => ({ ...prev, minDays: Math.max(1, Number(e.target.value || 1)) }))} placeholder="Min days" className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
+              <div className="sm:col-span-2 rounded-xl border border-slate-200 bg-slate-50 p-4">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <div className="text-sm font-semibold text-slate-900">Sales settings</div>
+                    <div className="mt-1 text-xs text-slate-500">
+                      Manual sale metadata only. Sale stock is separate from rental units and no sale quantity is tracked.
+                    </div>
+                  </div>
+                  <label className="inline-flex items-center gap-2 text-sm text-slate-700">
+                    <input
+                      type="checkbox"
+                      checked={editor.saleEnabled}
+                      onChange={(e) => setEditor((prev) => ({
+                        ...prev,
+                        saleEnabled: e.target.checked,
+                        saleStatus: e.target.checked && prev.saleStatus === "not_available"
+                          ? "on_request"
+                          : prev.saleStatus,
+                      }))}
+                    />
+                    Available for sale
+                  </label>
+                </div>
+
+                <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                  <select
+                    value={editor.saleStatus}
+                    onChange={(e) => setEditor((prev) => ({ ...prev, saleStatus: e.target.value as EquipmentSaleStatus }))}
+                    className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
+                  >
+                    <option value="available_for_sale">Available for sale</option>
+                    <option value="on_request">On request</option>
+                    <option value="sold">Sold</option>
+                    <option value="not_available">Not available</option>
+                  </select>
+                  <select
+                    value={editor.salePriceMode}
+                    onChange={(e) => setEditor((prev) => ({ ...prev, salePriceMode: e.target.value as EquipmentSalePriceMode }))}
+                    className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
+                  >
+                    <option value="request_quote">Request quote</option>
+                    <option value="fixed">Fixed price</option>
+                  </select>
+                  {editor.salePriceMode === "fixed" && (
+                    <input
+                      type="number"
+                      min={0.01}
+                      step={0.01}
+                      value={editor.salePriceCents === "" ? "" : Number(editor.salePriceCents) / 100}
+                      onChange={(e) => setEditor((prev) => ({
+                        ...prev,
+                        salePriceCents:
+                          e.target.value === ""
+                            ? ""
+                            : Math.max(0, Math.round(Number(e.target.value || 0) * 100)),
+                      }))}
+                      placeholder="Sale price"
+                      className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
+                    />
+                  )}
+                  <input value={editor.saleCondition} onChange={(e) => setEditor((prev) => ({ ...prev, saleCondition: e.target.value }))} placeholder="Condition" className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm" />
+                  <input value={editor.saleWarranty} onChange={(e) => setEditor((prev) => ({ ...prev, saleWarranty: e.target.value }))} placeholder="Warranty" className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm" />
+                  <textarea value={editor.saleNotes} onChange={(e) => setEditor((prev) => ({ ...prev, saleNotes: e.target.value }))} rows={3} placeholder="Sales notes" className="sm:col-span-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm" />
+                  <div className="sm:col-span-2 flex flex-wrap gap-3">
+                    <label className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700">
+                      <input
+                        type="checkbox"
+                        checked={editor.saleFulfillmentDeliver}
+                        onChange={(e) => setEditor((prev) => ({ ...prev, saleFulfillmentDeliver: e.target.checked }))}
+                      />
+                      Delivery
+                    </label>
+                    <label className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700">
+                      <input
+                        type="checkbox"
+                        checked={editor.saleFulfillmentSelfCollect}
+                        onChange={(e) => setEditor((prev) => ({ ...prev, saleFulfillmentSelfCollect: e.target.checked }))}
+                      />
+                      Self-collect
+                    </label>
+                  </div>
+                </div>
+              </div>
               <input value={editor.image1} onChange={(e) => setEditor((prev) => ({ ...prev, image1: e.target.value }))} placeholder="Image URL #1" className="sm:col-span-2 rounded-xl border border-slate-200 px-3 py-2 text-sm" />
               <input value={editor.image2} onChange={(e) => setEditor((prev) => ({ ...prev, image2: e.target.value }))} placeholder="Image URL #2" className="sm:col-span-2 rounded-xl border border-slate-200 px-3 py-2 text-sm" />
               <input value={editor.image3} onChange={(e) => setEditor((prev) => ({ ...prev, image3: e.target.value }))} placeholder="Image URL #3" className="sm:col-span-2 rounded-xl border border-slate-200 px-3 py-2 text-sm" />
@@ -412,6 +583,14 @@ export default function AdminRentalInventoryPage() {
                   <div className="text-lg font-semibold text-slate-900">{editor.title || "Equipment title"}</div>
                   <div className="mt-1 text-sm text-slate-600">{(editor.brand || "Brand") + (editor.model ? ` • ${editor.model}` : "")}</div>
                   <div className="mt-3 text-sm text-slate-600">Units: {editor.totalUnits} • Day rate: {formatMoney(editor.dayRate)}</div>
+                  <div className="mt-2 text-xs text-slate-500">
+                    Sale:{" "}
+                    {editor.saleEnabled
+                      ? editor.salePriceMode === "fixed" && editor.salePriceCents !== ""
+                        ? `${saleStatusLabel(editor.saleStatus)} • ${formatCents(Number(editor.salePriceCents))}`
+                        : `${saleStatusLabel(editor.saleStatus)} • Request quote`
+                      : "Not for sale"}
+                  </div>
                   {editor.description.trim() && <div className="mt-3 text-xs text-slate-500">{editor.description.trim()}</div>}
                 </div>
               </div>

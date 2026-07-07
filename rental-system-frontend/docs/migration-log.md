@@ -1889,3 +1889,38 @@ API / Page changes:
 
 Risks / follow-up notes:
 - Test data coverage still depends on the environment having suitable records for extension review, planning warnings, and invoice payment states.
+
+## 2026-07-07 | Scope: equipment sale metadata phase 1-3
+Summary:
+- Added sale metadata to equipment records and surfaced separate rental versus sale settings in admin inventory.
+- Added public Rent/Buy detail tabs and catalog rent/sale badges without changing cart, checkout, payment, invoice, order, or rental availability hold flows.
+
+Files changed:
+- `supabase/migrations/20260707090000_equipment_sale_metadata.sql`
+- `docs/sql/rental_equipment_v1.sql`
+- `src/lib/rental/types.ts`
+- `src/lib/rental/equipment/types.ts`
+- `src/lib/rental/equipment/db-rental-equipment-repo.ts`
+- `src/app/api/admin/rental/equipment/route.ts`
+- `src/app/api/admin/rental/equipment/[id]/route.ts`
+- `src/app/admin/rental/page.tsx`
+- `src/components/rental/EquipmentCard.tsx`
+- `src/app/rental/[id]/page.tsx`
+- `docs/migration-log.md`
+
+DB / Infra changes:
+- Added append-only migration `20260707090000_equipment_sale_metadata.sql`.
+- Added `rental_equipment` sale metadata fields for enabled/status, fixed/request pricing, condition, warranty, notes, and fulfillment modes.
+- No sale quantity, order schema, checkout, payment, invoice, or rental availability hold changes were introduced.
+
+API / Page changes:
+- Admin equipment create/update APIs now accept sale metadata fields.
+- `/admin/rental` is renamed to `Equipment Inventory` and has a separate Sales settings section.
+- Public equipment cards show rent/sale availability, while `/rental/[id]` exposes a Buy tab with a disabled purchase-enquiry CTA.
+
+Manual test checklist:
+- [ ] Run `rental-system-frontend/supabase/migrations/20260707090000_equipment_sale_metadata.sql` in Supabase.
+- [ ] Open `/admin/rental`, create or edit equipment, and confirm sale metadata saves and reloads.
+- [ ] Confirm rental total units, rental pricing, availability checks, and checkout still behave unchanged from the Rent tab.
+- [ ] Open `/rental` and confirm cards show rent/sale badges while keeping rental pricing visible.
+- [ ] Open `/rental/[id]`, toggle Rent/Buy, and confirm Buy displays sale status, price/request quote, condition, warranty, notes, and fulfillment choices without entering checkout.

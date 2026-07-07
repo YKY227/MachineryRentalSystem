@@ -7,6 +7,12 @@ import {
 } from "@/lib/auth/admin";
 import { dbRentalEquipmentRepo } from "@/lib/rental/equipment/db-rental-equipment-repo";
 import type { UpdateRentalEquipmentInput } from "@/lib/rental/equipment/types";
+import type {
+  Equipment,
+  EquipmentSaleFulfillmentMode,
+  EquipmentSalePriceMode,
+  EquipmentSaleStatus,
+} from "@/lib/rental/types";
 
 export const runtime = "nodejs";
 
@@ -33,7 +39,24 @@ type EquipmentPatchBody = {
   specs?: Record<string, string>;
   isPublished?: boolean;
   displayOrder?: number | string;
+  saleEnabled?: boolean;
+  saleStatus?: string;
+  salePriceCents?: number | string | null;
+  salePriceMode?: string;
+  saleCondition?: string | null;
+  saleWarranty?: string | null;
+  saleNotes?: string | null;
+  saleFulfillmentModes?: string[] | null;
 };
+
+const SALE_STATUSES = new Set<EquipmentSaleStatus>([
+  "available_for_sale",
+  "sold",
+  "on_request",
+  "not_available",
+]);
+const SALE_PRICE_MODES = new Set<EquipmentSalePriceMode>(["fixed", "request_quote"]);
+const SALE_FULFILLMENT_MODES = new Set<EquipmentSaleFulfillmentMode>(["deliver", "self_collect"]);
 
 function normalizeOptionalText(value: string | null | undefined) {
   if (value === undefined) return undefined;
@@ -70,6 +93,16 @@ function parseOptionalMoney(
   return Number(parsed.toFixed(2));
 }
 
+function parseOptionalCents(value: number | string | null | undefined, field: string) {
+  if (value === undefined) return undefined;
+  if (value === null || value === "") return null;
+  const parsed = typeof value === "string" ? Number(value.trim()) : value;
+  if (!Number.isFinite(parsed)) throw new Error(`${field} must be a valid amount`);
+  if (!Number.isInteger(parsed)) throw new Error(`${field} must be a whole number of cents`);
+  if (parsed < 0) throw new Error(`${field} cannot be less than 0`);
+  return parsed;
+}
+
 function parseStringArray(value: string[] | undefined) {
   if (!Array.isArray(value)) return undefined;
   const seen = new Set<string>();
@@ -94,6 +127,44 @@ function parseSpecs(value: EquipmentPatchBody["specs"]) {
     acc[nextKey] = nextValue;
     return acc;
   }, {});
+}
+
+function parseSaleStatus(value: string | undefined): EquipmentSaleStatus | undefined {
+  if (value === undefined) return undefined;
+  return SALE_STATUSES.has(value as EquipmentSaleStatus)
+    ? (value as EquipmentSaleStatus)
+    : "not_available";
+}
+
+function parseSalePriceMode(value: string | undefined): EquipmentSalePriceMode | undefined {
+  if (value === undefined) return undefined;
+  return SALE_PRICE_MODES.has(value as EquipmentSalePriceMode)
+    ? (value as EquipmentSalePriceMode)
+    : "request_quote";
+}
+
+function parseSaleFulfillmentModes(value: string[] | null | undefined) {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value)) return null;
+  const modes = value.filter((mode): mode is EquipmentSaleFulfillmentMode =>
+    SALE_FULFILLMENT_MODES.has(mode as EquipmentSaleFulfillmentMode)
+  );
+  return modes.length ? [...new Set(modes)] : null;
+}
+
+function assertValidSalePricing(existing: Equipment, patch: UpdateRentalEquipmentInput) {
+  const nextSaleEnabled = patch.saleEnabled ?? existing.sale?.enabled ?? false;
+  const nextSalePriceMode = patch.salePriceMode ?? existing.sale?.priceMode ?? "request_quote";
+  const nextSalePriceCents =
+    patch.salePriceCents !== undefined ? patch.salePriceCents : existing.sale?.priceCents;
+
+  if (
+    nextSaleEnabled &&
+    nextSalePriceMode === "fixed" &&
+    (!Number.isInteger(nextSalePriceCents) || Number(nextSalePriceCents) <= 0)
+  ) {
+    throw new Error("salePriceCents must be a positive integer when fixed sale pricing is enabled");
+  }
 }
 
 function normalizePatchBody(body: EquipmentPatchBody): UpdateRentalEquipmentInput {
@@ -123,6 +194,14 @@ function normalizePatchBody(body: EquipmentPatchBody): UpdateRentalEquipmentInpu
     specs: parseSpecs(body.specs),
     isPublished: typeof body.isPublished === "boolean" ? body.isPublished : undefined,
     displayOrder: parseOptionalInteger(body.displayOrder, "displayOrder", 0),
+    saleEnabled: typeof body.saleEnabled === "boolean" ? body.saleEnabled : undefined,
+    saleStatus: parseSaleStatus(body.saleStatus),
+    salePriceCents: parseOptionalCents(body.salePriceCents, "salePriceCents"),
+    salePriceMode: parseSalePriceMode(body.salePriceMode),
+    saleCondition: normalizeOptionalText(body.saleCondition),
+    saleWarranty: normalizeOptionalText(body.saleWarranty),
+    saleNotes: normalizeOptionalText(body.saleNotes),
+    saleFulfillmentModes: parseSaleFulfillmentModes(body.saleFulfillmentModes),
   };
 }
 
@@ -150,7 +229,9 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
     }
 
     const body = (await req.json()) as EquipmentPatchBody;
-    const equipment = await dbRentalEquipmentRepo.update(params.id, normalizePatchBody(body));
+    const patch = normalizePatchBody(body);
+    assertValidSalePricing(existing, patch);
+    const equipment = await dbRentalEquipmentRepo.update(params.id, patch);
     return NextResponse.json({ equipment });
   } catch (error) {
     if (isAdminUnauthorized(error)) return adminUnauthorizedResponse();

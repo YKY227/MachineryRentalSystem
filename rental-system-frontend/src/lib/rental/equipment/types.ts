@@ -1,4 +1,9 @@
-import type { Equipment } from "@/lib/rental/types";
+import type {
+  Equipment,
+  EquipmentSaleFulfillmentMode,
+  EquipmentSalePriceMode,
+  EquipmentSaleStatus,
+} from "@/lib/rental/types";
 
 export type RentalEquipment = Equipment;
 
@@ -28,6 +33,14 @@ export type UpsertRentalEquipmentInput = {
   specs?: Record<string, string>;
   isPublished?: boolean;
   displayOrder?: number;
+  saleEnabled?: boolean;
+  saleStatus?: EquipmentSaleStatus;
+  salePriceCents?: number | null;
+  salePriceMode?: EquipmentSalePriceMode;
+  saleCondition?: string;
+  saleWarranty?: string;
+  saleNotes?: string;
+  saleFulfillmentModes?: EquipmentSaleFulfillmentMode[] | null;
 };
 
 export type UpdateRentalEquipmentInput = Partial<UpsertRentalEquipmentInput>;

@@ -9,6 +9,11 @@ import {
   dbRentalEquipmentRepo,
 } from "@/lib/rental/equipment/db-rental-equipment-repo";
 import type { UpsertRentalEquipmentInput } from "@/lib/rental/equipment/types";
+import type {
+  EquipmentSaleFulfillmentMode,
+  EquipmentSalePriceMode,
+  EquipmentSaleStatus,
+} from "@/lib/rental/types";
 
 export const runtime = "nodejs";
 
@@ -35,7 +40,24 @@ type EquipmentBody = {
   specs?: Record<string, string>;
   isPublished?: boolean;
   displayOrder?: number | string;
+  saleEnabled?: boolean;
+  saleStatus?: string;
+  salePriceCents?: number | string | null;
+  salePriceMode?: string;
+  saleCondition?: string | null;
+  saleWarranty?: string | null;
+  saleNotes?: string | null;
+  saleFulfillmentModes?: string[] | null;
 };
+
+const SALE_STATUSES = new Set<EquipmentSaleStatus>([
+  "available_for_sale",
+  "sold",
+  "on_request",
+  "not_available",
+]);
+const SALE_PRICE_MODES = new Set<EquipmentSalePriceMode>(["fixed", "request_quote"]);
+const SALE_FULFILLMENT_MODES = new Set<EquipmentSaleFulfillmentMode>(["deliver", "self_collect"]);
 
 function parseInteger(value: number | string | undefined, field: string, minimum: number) {
   if (value === undefined) throw new Error(`${field} is required`);
@@ -65,6 +87,15 @@ function parseMoney(
   return Number(parsed.toFixed(2));
 }
 
+function parseOptionalCents(value: number | string | null | undefined, field: string) {
+  if (value === undefined || value === null || value === "") return null;
+  const parsed = typeof value === "string" ? Number(value.trim()) : value;
+  if (!Number.isFinite(parsed)) throw new Error(`${field} must be a valid amount`);
+  if (!Number.isInteger(parsed)) throw new Error(`${field} must be a whole number of cents`);
+  if (parsed < 0) throw new Error(`${field} cannot be less than 0`);
+  return parsed;
+}
+
 function parseStringArray(value: string[] | undefined) {
   if (!Array.isArray(value)) return [];
   const seen = new Set<string>();
@@ -92,13 +123,43 @@ function parseSpecs(value: EquipmentBody["specs"]) {
   }, {});
 }
 
+function parseSaleStatus(value: string | undefined): EquipmentSaleStatus {
+  return value && SALE_STATUSES.has(value as EquipmentSaleStatus)
+    ? (value as EquipmentSaleStatus)
+    : "not_available";
+}
+
+function parseSalePriceMode(value: string | undefined): EquipmentSalePriceMode {
+  return value && SALE_PRICE_MODES.has(value as EquipmentSalePriceMode)
+    ? (value as EquipmentSalePriceMode)
+    : "request_quote";
+}
+
+function parseSaleFulfillmentModes(value: string[] | null | undefined) {
+  if (!Array.isArray(value)) return null;
+  const modes = value.filter((mode): mode is EquipmentSaleFulfillmentMode =>
+    SALE_FULFILLMENT_MODES.has(mode as EquipmentSaleFulfillmentMode)
+  );
+  return modes.length ? [...new Set(modes)] : null;
+}
+
+function assertValidSalePricing(input: Pick<UpsertRentalEquipmentInput, "saleEnabled" | "salePriceMode" | "salePriceCents">) {
+  if (
+    input.saleEnabled &&
+    input.salePriceMode === "fixed" &&
+    (!Number.isInteger(input.salePriceCents) || Number(input.salePriceCents) <= 0)
+  ) {
+    throw new Error("salePriceCents must be a positive integer when fixed sale pricing is enabled");
+  }
+}
+
 function normalizeCreateBody(body: EquipmentBody): UpsertRentalEquipmentInput {
   const title = body.title?.trim() ?? "";
   const category = body.category?.trim() ?? "";
   if (!title) throw new Error("title is required");
   if (!category) throw new Error("category is required");
 
-  return {
+  const input: UpsertRentalEquipmentInput = {
     slug: body.slug?.trim() || undefined,
     title,
     category,
@@ -125,7 +186,17 @@ function normalizeCreateBody(body: EquipmentBody): UpsertRentalEquipmentInput {
     isPublished: Boolean(body.isPublished),
     displayOrder:
       body.displayOrder === undefined ? undefined : parseInteger(body.displayOrder, "displayOrder", 0),
+    saleEnabled: Boolean(body.saleEnabled),
+    saleStatus: parseSaleStatus(body.saleStatus),
+    salePriceCents: parseOptionalCents(body.salePriceCents, "salePriceCents"),
+    salePriceMode: parseSalePriceMode(body.salePriceMode),
+    saleCondition: body.saleCondition?.trim() || undefined,
+    saleWarranty: body.saleWarranty?.trim() || undefined,
+    saleNotes: body.saleNotes?.trim() || undefined,
+    saleFulfillmentModes: parseSaleFulfillmentModes(body.saleFulfillmentModes),
   };
+  assertValidSalePricing(input);
+  return input;
 }
 
 export async function GET(req: Request) {
