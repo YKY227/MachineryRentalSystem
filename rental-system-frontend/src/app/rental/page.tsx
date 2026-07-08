@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 
 import type { Equipment } from "@/lib/rental/types";
+import { CartBadge } from "@/components/rental/CartBadge";
 import { EquipmentCard } from "@/components/rental/EquipmentCard";
 import {
   EquipmentFilters,
@@ -75,7 +76,8 @@ export default function RentalCatalogPage() {
           </p>
         </div>
 
-        <div className="flex gap-3">
+        <div className="flex items-center gap-3">
+          <CartBadge />
           <Link
             href="/rental/account"
             className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"

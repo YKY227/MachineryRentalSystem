@@ -26,6 +26,7 @@ import {
   markSaleCartLinesSubmittedForEquipment,
   upsertSaleCartLine,
 } from "@/lib/rental/cart/local-cart";
+import { CartBadge } from "@/components/rental/CartBadge";
 import type { RentalCustomer } from "@/lib/rental/orders/types";
 
 type FulfillmentMode = "deliver" | "self_collect";
@@ -464,12 +465,15 @@ export default function RentalDetailPage() {
           </p>
         </div>
 
-        <Link
-          href="/rental"
-          className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-        >
-          Back
-        </Link>
+        <div className="flex items-center gap-3">
+          <CartBadge />
+          <Link
+            href="/rental"
+            className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+          >
+            Back
+          </Link>
+        </div>
       </div>
 
       <div className="mt-6 grid gap-6 lg:grid-cols-12">
