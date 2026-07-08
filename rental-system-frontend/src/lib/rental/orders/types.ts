@@ -48,6 +48,8 @@ export type RentalOrder = {
   inspectionStatus: RentalOrderInspectionStatus;
   inspectionNotes?: string;
   completedAt?: string;
+  checkoutGroupId?: string;
+  checkoutGroupLineId?: string;
   createdAt: string;
   updatedAt: string;
 };
@@ -70,6 +72,8 @@ export type CreateRentalOrderInput = {
   inspectionStatus?: RentalOrderInspectionStatus;
   inspectionNotes?: string;
   completedAt?: string;
+  checkoutGroupId?: string;
+  checkoutGroupLineId?: string;
 };
 
 export type RentalOrderBufferOverride = {

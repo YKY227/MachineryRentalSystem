@@ -29,6 +29,8 @@ type RentalOrderRow = {
   inspection_status: RentalOrderInspectionStatus | null;
   inspection_notes: string | null;
   completed_at: string | null;
+  checkout_group_id: string | null;
+  checkout_group_line_id: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -51,6 +53,8 @@ const ORDER_COLUMNS = [
   "inspection_status",
   "inspection_notes",
   "completed_at",
+  "checkout_group_id",
+  "checkout_group_line_id",
   "created_at",
   "updated_at",
 ].join(",");
@@ -90,6 +94,8 @@ function toOrder(row: RentalOrderRow): RentalOrder {
     inspectionStatus: row.inspection_status ?? "not_started",
     inspectionNotes: row.inspection_notes ?? undefined,
     completedAt: row.completed_at ?? undefined,
+    checkoutGroupId: row.checkout_group_id ?? undefined,
+    checkoutGroupLineId: row.checkout_group_line_id ?? undefined,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -115,6 +121,8 @@ function toInsert(input: CreateRentalOrderInput, maintenanceBufferDaysApplied: n
     inspection_status: input.inspectionStatus ?? "not_started",
     inspection_notes: input.inspectionNotes?.trim() || null,
     completed_at: input.completedAt ?? null,
+    checkout_group_id: input.checkoutGroupId ?? null,
+    checkout_group_line_id: input.checkoutGroupLineId ?? null,
     created_at: now,
     updated_at: now,
   };

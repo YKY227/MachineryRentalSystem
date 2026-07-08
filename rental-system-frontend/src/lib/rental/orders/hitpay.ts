@@ -67,6 +67,12 @@ export function getCheckoutOrderStatusPageUrl(orderId: string) {
   return `${baseUrl}/rental/checkout/status?orderId=${encodeURIComponent(orderId)}`;
 }
 
+export function getCheckoutGroupStatusPageUrl(groupId: string) {
+  const baseUrl = appBaseUrl();
+  if (!baseUrl) throw new Error("Missing env: APP_BASE_URL");
+  return `${baseUrl}/rental/checkout-groups/${encodeURIComponent(groupId)}`;
+}
+
 export async function createHitPayPaymentRequest(input: {
   amountCents: number;
   currency: string;

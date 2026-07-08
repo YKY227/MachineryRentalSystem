@@ -1989,3 +1989,95 @@ Manual test checklist:
 - [ ] Confirm `sold` and `not_available` sale statuses do not show a sale cart action.
 - [ ] Remove individual cart lines and clear the cart.
 - [ ] Confirm adding to cart creates no holds, orders, invoices, payment sessions, checkout groups, or sale quantity reservations.
+
+## 2026-07-07 | Scope: multi-rental checkout groups phase 5B-5D
+Summary:
+- Added checkout group and checkout group line storage for multi-rental cart checkout attempts using Strategy B.
+- Added atomic grouped rental hold acquisition without creating rental orders, invoices, payment sessions, sale payments, sale invoices, or sale quantity reservations.
+- Added `/rental/cart` selection UI for grouped rental hold acquisition and a read-only `/rental/checkout-groups/[id]` status page.
+
+Files changed:
+- `supabase/migrations/20260707200000_rental_checkout_groups.sql`
+- `src/lib/rental/checkout-groups/types.ts`
+- `src/lib/rental/checkout-groups/db-checkout-group-repo.ts`
+- `src/app/api/public/rental/checkout-groups/route.ts`
+- `src/app/api/public/rental/checkout-groups/[id]/route.ts`
+- `src/app/rental/cart/page.tsx`
+- `src/app/rental/checkout-groups/[id]/page.tsx`
+- `docs/migration-log.md`
+
+DB / Infra changes:
+- Added append-only migration `20260707200000_rental_checkout_groups.sql`.
+- Added `rental_checkout_groups` and `rental_checkout_group_lines`.
+- Added nullable checkout group linkage columns and indexes on `rental_availability_holds`.
+- Added `acquire_rental_checkout_group_holds(checkout_group_id)` to re-read group lines, validate equipment/date/quantity/availability, acquire all holds atomically, and return line-level errors.
+- No `rental_orders`, payment session, invoice, extension, damage invoice, sale payment, sale invoice, cart DB table, or sale quantity schema changes were introduced.
+
+API / Page changes:
+- Added public `POST /api/public/rental/checkout-groups` for customer-authenticated grouped rental hold acquisition from selected cart lines.
+- Added public customer-scoped `GET /api/public/rental/checkout-groups/[id]`.
+- `/rental/cart` can select rental lines, acquire temporary grouped holds, display line-level failures, and keep the existing one-item checkout fallback.
+- `/rental/checkout-groups/[id]` displays group status, rental lines, hold expiry, and totals with no payment button.
+
+Manual test checklist:
+- [ ] Run `rental-system-frontend/supabase/migrations/20260707200000_rental_checkout_groups.sql` in Supabase.
+- [ ] Log in as a rental customer, add two rental lines to `/rental/cart`, select both, and click `Checkout selected rental items`.
+- [ ] Confirm successful grouped checkout creates one `rental_checkout_groups` row, one line per selected rental item, and active holds linked by `checkout_group_id` and `checkout_group_line_id`.
+- [ ] Confirm `/rental/checkout-groups/[id]` shows status, hold expiry, line estimates, and no payment button.
+- [ ] Try an over-capacity grouped checkout and confirm line-level errors appear and no active holds remain for that failed group.
+- [ ] Confirm each cart rental line can still use the existing one-item `/rental/checkout` query-string fallback.
+- [ ] Confirm sale enquiry lines remain excluded from grouped rental checkout and still submit sale enquiries only.
+
+## 2026-07-08 | Scope: checkout group payment and post-payment conversion phase 5E
+Summary:
+- Added checkout group payment sessions for grouped rental checkout without reusing the existing one-order `rental_order_payment_sessions` flow.
+- Added group HitPay payment link creation, group payment status refresh, webhook routing, and post-payment conversion to child rental orders.
+- Added one base rental invoice per child rental order plus line-level group payment allocation and per-order deposit collection markers.
+
+Files changed:
+- `supabase/migrations/20260708090000_rental_checkout_group_payments.sql`
+- `src/lib/rental/checkout-groups/payment-session-types.ts`
+- `src/lib/rental/checkout-groups/db-checkout-group-payment-session-repo.ts`
+- `src/lib/rental/checkout-groups/group-payment-service.ts`
+- `src/lib/rental/checkout-groups/types.ts`
+- `src/lib/rental/checkout-groups/db-checkout-group-repo.ts`
+- `src/lib/rental/orders/types.ts`
+- `src/lib/rental/orders/db-order-repo.ts`
+- `src/lib/rental/orders/hitpay.ts`
+- `src/app/api/public/rental/checkout-groups/[id]/pay/route.ts`
+- `src/app/api/public/rental/checkout-groups/[id]/payment-status/route.ts`
+- `src/app/api/public/rental/payments/hitpay/webhook/route.ts`
+- `src/app/rental/cart/page.tsx`
+- `src/app/rental/checkout-groups/[id]/page.tsx`
+- `docs/migration-log.md`
+
+DB / Infra changes:
+- Added append-only migration `20260708090000_rental_checkout_group_payments.sql`.
+- Added `rental_checkout_group_payment_sessions` with a unique active pending payment session per checkout group/provider/currency.
+- Added payment/conversion fields to checkout groups and child order/invoice/payment links to checkout group lines.
+- Added nullable checkout group links to `rental_orders`.
+- Added group payment source linkage to invoice payments and deposit transactions.
+- Added `rental_checkout_group_payment_allocations` for line-level allocation audit.
+
+API / Page changes:
+- Added `POST /api/public/rental/checkout-groups/[id]/pay` to create or reuse a HitPay link while group holds are active.
+- Added `GET /api/public/rental/checkout-groups/[id]/payment-status` to refresh provider status and run paid conversion when safe.
+- HitPay webhook now checks group payment sessions before falling back to the existing one-item/customer-invoice/extension payment session flow.
+- `/rental/checkout-groups/[id]` now shows group payment state, Pay now/Continue payment action, manual-review messaging, and child order links after conversion.
+- `/rental/cart` routes to the checkout group page after grouped holds are acquired.
+
+Safety notes:
+- Child rental orders are created only after provider-verified paid group payment.
+- Existing one-item `/rental/checkout`, checkout start-payment, checkout payment-status, order payment session model, one-item invoice automation, extension payment/invoice flow, sale enquiry flow, sale payment, sale invoice, and sale quantity remain unchanged.
+- Paid groups with expired/missing holds, amount mismatch, or partial conversion failures are marked manual review.
+
+Manual test checklist:
+- [ ] Run `rental-system-frontend/supabase/migrations/20260708090000_rental_checkout_group_payments.sql` after the Phase 5B-D migration.
+- [ ] Create grouped holds from `/rental/cart` and confirm the browser routes to `/rental/checkout-groups/[id]`.
+- [ ] Click Pay now while holds are active and confirm a HitPay redirect URL is created.
+- [ ] Refresh the group page while payment is pending and confirm the existing payment link is reused.
+- [ ] Complete HitPay payment and confirm webhook/status reconciliation creates one child rental order per group line.
+- [ ] Confirm one base rental invoice exists per child order and invoice payments are recorded from the group payment session.
+- [ ] Confirm deposits are held per child order and group allocation rows exist.
+- [ ] Confirm expired holds plus paid webhook moves the group/session to manual review instead of creating orders.
+- [ ] Confirm existing one-item rental checkout, extension payments, customer invoice payments, sale enquiries, and sale cart behaviour still work.

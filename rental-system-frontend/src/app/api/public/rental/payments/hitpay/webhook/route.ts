@@ -1,4 +1,6 @@
 //rental-system-frontend/src/app/api/public/rental/payments/hitpay/webhook/route.ts
+import { dbCheckoutGroupPaymentSessionRepo } from "@/lib/rental/checkout-groups/db-checkout-group-payment-session-repo";
+import { refreshAndReconcileCheckoutGroupPayment } from "@/lib/rental/checkout-groups/group-payment-service";
 import { dbOrderPaymentSessionRepo } from "@/lib/rental/orders/db-order-payment-session-repo";
 import {
   fetchHitPayPaymentRequest,
@@ -106,6 +108,29 @@ export async function POST(req: Request) {
         contentType,
       });
       return new Response("Missing payment request id", { status: 400 });
+    }
+
+    const groupSession = await dbCheckoutGroupPaymentSessionRepo.findByProviderPaymentRequestId(paymentRequestId);
+    if (groupSession) {
+      try {
+        await refreshAndReconcileCheckoutGroupPayment({
+          session: groupSession,
+          source: "webhook",
+          webhookPayload: payload,
+        });
+      } catch (error) {
+        console.error("[hitpay-webhook] checkout group reconciliation failed", {
+          stage: "checkout_group_reconciliation",
+          paymentRequestId,
+          sessionId: groupSession.id,
+          checkoutGroupId: groupSession.checkoutGroupId,
+          contentType,
+          error: describeError(error),
+        });
+        return new Response("Webhook processing failed", { status: 400 });
+      }
+
+      return new Response("ok", { status: 200 });
     }
 
     const session = await dbOrderPaymentSessionRepo.findByProviderPaymentRequestId(paymentRequestId);
