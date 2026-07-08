@@ -1,10 +1,15 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type KeyboardEvent, type MouseEvent } from "react";
 import Link from "next/link";
-import { ShoppingCart } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { ShoppingCart, Trash2 } from "lucide-react";
 
-import { readRentalCart, subscribeToRentalCart } from "@/lib/rental/cart/local-cart";
+import {
+  readRentalCart,
+  removeRentalCartLine,
+  subscribeToRentalCart,
+} from "@/lib/rental/cart/local-cart";
 import type { RentalCartLine } from "@/lib/rental/cart/types";
 
 function formatDate(value: string) {
@@ -41,6 +46,7 @@ function CartLinePreview({ line }: { line: RentalCartLine }) {
 }
 
 export function CartBadge() {
+  const router = useRouter();
   const [lines, setLines] = useState<RentalCartLine[]>([]);
 
   useEffect(() => {
@@ -64,6 +70,23 @@ export function CartBadge() {
     [lines]
   );
   const badgeText = itemCount > 99 ? "99+" : String(itemCount);
+
+  function openLine(line: RentalCartLine) {
+    router.push(`/rental/${encodeURIComponent(line.equipmentId)}`);
+  }
+
+  function handleLineKeyDown(event: KeyboardEvent<HTMLDivElement>, line: RentalCartLine) {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    openLine(line);
+  }
+
+  function handleRemoveLine(event: MouseEvent<HTMLButtonElement>, lineId: string) {
+    event.preventDefault();
+    event.stopPropagation();
+    const nextCart = removeRentalCartLine(lineId);
+    setLines(nextCart.lines);
+  }
 
   return (
     <div className="group relative">
@@ -105,7 +128,14 @@ export function CartBadge() {
 
               <div className="mt-3 space-y-3">
                 {recentLines.map((line) => (
-                  <div key={line.id} className="flex gap-3">
+                  <div
+                    key={line.id}
+                    role="link"
+                    tabIndex={0}
+                    onClick={() => openLine(line)}
+                    onKeyDown={(event) => handleLineKeyDown(event, line)}
+                    className="flex cursor-pointer items-center gap-3 rounded-lg p-2 transition-colors hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-100"
+                  >
                     <div className="h-10 w-12 flex-shrink-0 overflow-hidden rounded-md bg-slate-100">
                       {line.imageUrlSnapshot ? (
                         <img
@@ -120,7 +150,18 @@ export function CartBadge() {
                         </div>
                       )}
                     </div>
-                    <CartLinePreview line={line} />
+                    <div className="min-w-0 flex-1">
+                      <CartLinePreview line={line} />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={(event) => handleRemoveLine(event, line.id)}
+                      title="Remove from cart"
+                      aria-label={`Remove ${line.titleSnapshot} from cart`}
+                      className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md text-slate-400 hover:bg-white hover:text-red-600 focus:outline-none focus:ring-2 focus:ring-red-100"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
                   </div>
                 ))}
               </div>
