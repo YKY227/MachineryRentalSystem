@@ -52,6 +52,10 @@ type GroupCheckoutState = {
   message?: string;
 };
 
+type AuthStatusResponse = {
+  customer?: unknown | null;
+};
+
 function formatMoney(value?: number) {
   return new Intl.NumberFormat("en-SG", {
     style: "currency",
@@ -139,8 +143,11 @@ export default function RentalCartPage() {
   const [saleSubmitState, setSaleSubmitState] = useState<SaleSubmitState>({});
   const [selectedRentalLineIds, setSelectedRentalLineIds] = useState<string[]>([]);
   const [groupCheckout, setGroupCheckout] = useState<GroupCheckoutState>({ loading: false });
+  const [customerLoggedIn, setCustomerLoggedIn] = useState<boolean | null>(null);
   const selectionInitializedRef = useRef(false);
   const knownRentalLineIdsRef = useRef<Set<string>>(new Set());
+  const loginHref = `/rental/account/login?next=${encodeURIComponent("/rental/cart")}`;
+  const registerHref = `/rental/account/register?next=${encodeURIComponent("/rental/cart")}`;
 
   function refreshCart() {
     const cart = readRentalCart();
@@ -165,6 +172,27 @@ export default function RentalCartPage() {
     refreshCart();
     setLoaded(true);
     return subscribeToRentalCart(refreshCart);
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+
+    fetch("/api/public/rental/auth/me", {
+      cache: "no-store",
+      credentials: "include",
+    })
+      .then(async (res) => {
+        const data = (await res.json().catch(() => ({}))) as AuthStatusResponse;
+        if (!active) return;
+        setCustomerLoggedIn(Boolean(res.ok && data.customer));
+      })
+      .catch(() => {
+        if (active) setCustomerLoggedIn(false);
+      });
+
+    return () => {
+      active = false;
+    };
   }, []);
 
   const rentalLines = useMemo(
@@ -328,6 +356,13 @@ export default function RentalCartPage() {
 
   async function handleGroupedCheckout() {
     if (selectedRentalLines.length === 0 || groupCheckout.loading) return;
+    if (!customerLoggedIn) {
+      setGroupCheckout({
+        loading: false,
+        error: "Grouped rental checkout requires a customer account.",
+      });
+      return;
+    }
 
     try {
       setGroupCheckout({ loading: true });
@@ -400,8 +435,8 @@ export default function RentalCartPage() {
           </Link>
           <h1 className="mt-3 text-2xl font-semibold text-slate-900">Rental cart</h1>
           <p className="mt-1 max-w-2xl text-sm text-slate-600">
-            Cart items are saved on this device. Rental checkout remains one item at a time for now,
-            and sale items require admin confirmation before any payment.
+            Cart items are saved on this device. Rental items can be checked out together, and
+            sale items require admin confirmation before any payment.
           </p>
         </div>
 
@@ -846,6 +881,10 @@ export default function RentalCartPage() {
                 <span className="text-slate-600">Sale enquiry items</span>
                 <span className="font-semibold text-slate-900">{saleLines.length}</span>
               </div>
+              <div className="flex items-center justify-between">
+                <span className="text-slate-600">Selected rentals</span>
+                <span className="font-semibold text-slate-900">{selectedRentalLines.length}</span>
+              </div>
               <div className="border-t border-slate-200 pt-3">
                 <div className="flex items-center justify-between">
                   <span className="font-semibold text-slate-700">Rental estimate total</span>
@@ -853,23 +892,93 @@ export default function RentalCartPage() {
                     {formatMoney(rentalEstimateTotal)}
                   </span>
                 </div>
+                <div className="mt-2 flex items-center justify-between">
+                  <span className="font-semibold text-slate-700">Selected rental estimate</span>
+                  <span className="font-semibold text-slate-900">
+                    {formatMoney(selectedRentalEstimateTotal)}
+                  </span>
+                </div>
                 <p className="mt-2 text-xs text-slate-500">
-                  Estimates only. Existing checkout remains authoritative and processes one rental
-                  item at a time.
+                  Estimates only. Final pricing and availability are revalidated when checkout begins.
                 </p>
               </div>
             </div>
 
-            <button
-              type="button"
-              disabled
-              className="mt-5 inline-flex w-full cursor-not-allowed items-center justify-center rounded-xl bg-slate-200 px-4 py-3 text-sm font-semibold text-slate-500"
-            >
-              Mixed checkout planned
-            </button>
-            <p className="mt-2 text-xs text-slate-500">
-              Combined rental and sale checkout will be introduced in a later phase.
-            </p>
+            {selectedRentalLines.length === 0 ? (
+              <div className="mt-5">
+                <button
+                  type="button"
+                  disabled
+                  className="inline-flex w-full cursor-not-allowed items-center justify-center rounded-xl bg-slate-200 px-4 py-3 text-sm font-semibold text-slate-500"
+                >
+                  Select rental items to checkout
+                </button>
+                <p className="mt-2 text-xs text-slate-500">
+                  Select one or more rental items to start grouped rental checkout.
+                </p>
+              </div>
+            ) : customerLoggedIn === null ? (
+              <div className="mt-5">
+                <button
+                  type="button"
+                  disabled
+                  className="inline-flex w-full cursor-not-allowed items-center justify-center rounded-xl bg-slate-200 px-4 py-3 text-sm font-semibold text-slate-500"
+                >
+                  Checking account...
+                </button>
+                <p className="mt-2 text-xs text-slate-500">
+                  Grouped rental checkout requires a customer account.
+                </p>
+              </div>
+            ) : customerLoggedIn ? (
+              <div className="mt-5">
+                <button
+                  type="button"
+                  onClick={handleGroupedCheckout}
+                  disabled={groupCheckout.loading}
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-sky-700 px-4 py-3 text-sm font-semibold text-white hover:bg-sky-800 disabled:cursor-not-allowed disabled:bg-slate-300"
+                >
+                  {groupCheckout.loading ? "Checking availability..." : "Checkout selected rental items"}
+                  <ArrowRight className="h-4 w-4" />
+                </button>
+                <p className="mt-2 text-xs text-slate-500">
+                  Creates temporary holds, then opens the checkout group payment page.
+                </p>
+              </div>
+            ) : (
+              <div className="mt-5 rounded-xl border border-slate-200 bg-slate-50 p-4">
+                <div className="text-sm font-semibold text-slate-900">
+                  Grouped rental checkout requires a customer account.
+                </div>
+                <p className="mt-1 text-xs text-slate-500">
+                  Sign in or create an account to continue with selected rental items.
+                </p>
+                <div className="mt-3 grid gap-2">
+                  <Link
+                    href={loginHref}
+                    className="inline-flex items-center justify-center rounded-xl bg-sky-700 px-4 py-2.5 text-sm font-semibold text-white hover:bg-sky-800"
+                  >
+                    Log in to checkout
+                  </Link>
+                  <Link
+                    href={registerHref}
+                    className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                  >
+                    Create account
+                  </Link>
+                </div>
+              </div>
+            )}
+
+            <div className="mt-5 rounded-xl border border-amber-200 bg-amber-50 p-4">
+              <div className="text-sm font-semibold text-amber-900">
+                Sale items require admin confirmation
+              </div>
+              <p className="mt-1 text-xs text-amber-800">
+                Rental items can be checked out together. Sale enquiry items are submitted separately
+                and require admin confirmation before payment.
+              </p>
+            </div>
           </aside>
         </div>
       )}
