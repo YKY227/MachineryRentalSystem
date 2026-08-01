@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { type FormEvent, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import {
@@ -16,17 +16,23 @@ import {
   Sparkles,
   Factory,
   MapPin,
+  ShoppingCart,
 } from "lucide-react";
 
-import type { Equipment } from "@/lib/rental/types";
+import type { Equipment, EquipmentSaleSettings, EquipmentSaleStatus } from "@/lib/rental/types";
 import { toSafeHttpResourceUrl } from "@/lib/rental/equipment/resource-urls";
 import {
   calculateAuthoritativeRentalPricing,
   calculateRentalDaysInclusive,
 } from "@/lib/rental/orders/pricing";
+import {
+  markSaleCartLinesSubmittedForEquipment,
+  upsertSaleCartLine,
+} from "@/lib/rental/cart/local-cart";
 import type { RentalCustomer } from "@/lib/rental/orders/types";
 
 type FulfillmentMode = "deliver" | "self_collect";
+type DetailTab = "rent" | "buy";
 type AvailabilitySnapshot = {
   totalUnits: number;
   committedQty: number;
@@ -45,6 +51,29 @@ function formatMoney(n: number) {
     currency: "SGD",
     maximumFractionDigits: 0,
   }).format(n);
+}
+
+function formatCents(cents?: number) {
+  return formatMoney(Math.max(0, Number(cents ?? 0)) / 100);
+}
+
+const defaultSaleSettings: EquipmentSaleSettings = {
+  enabled: false,
+  status: "not_available",
+  priceMode: "request_quote",
+};
+
+function saleStatusLabel(status?: EquipmentSaleStatus) {
+  switch (status) {
+    case "available_for_sale":
+      return "Available for sale";
+    case "sold":
+      return "Sold";
+    case "on_request":
+      return "On request";
+    default:
+      return "Not available";
+  }
 }
 
 function todayLocalIso() {
@@ -73,10 +102,22 @@ export default function RentalDetailPage() {
     return d.toISOString().slice(0, 10);
   });
   const [fulfillment, setFulfillment] = useState<FulfillmentMode>("deliver");
+  const [activeTab, setActiveTab] = useState<DetailTab>("rent");
+  const [purchaseFulfillment, setPurchaseFulfillment] = useState<FulfillmentMode>("deliver");
   const [deliveryAddress, setDeliveryAddress] = useState("");
   const [availabilitySnapshot, setAvailabilitySnapshot] = useState<AvailabilitySnapshot | null>(null);
   const [availabilityLoading, setAvailabilityLoading] = useState(false);
   const [adminAuthenticated, setAdminAuthenticated] = useState(false);
+  const [saleCustomerName, setSaleCustomerName] = useState("");
+  const [saleCustomerEmail, setSaleCustomerEmail] = useState("");
+  const [saleCustomerPhone, setSaleCustomerPhone] = useState("");
+  const [saleCompanyName, setSaleCompanyName] = useState("");
+  const [saleMessage, setSaleMessage] = useState("");
+  const [saleSubmitting, setSaleSubmitting] = useState(false);
+  const [saleError, setSaleError] = useState<string | null>(null);
+  const [saleSubmitted, setSaleSubmitted] = useState(false);
+  const [cartNotice, setCartNotice] = useState<string | null>(null);
+  const [cartError, setCartError] = useState<string | null>(null);
 
   const deliveryFee = fulfillment === "deliver" ? 60 : 0;
   const collectionFee = fulfillment === "deliver" ? 60 : 0;
@@ -130,6 +171,20 @@ export default function RentalDetailPage() {
       setDeliveryAddress("");
     }
   }, [deliveryAddress, fulfillment]);
+
+  useEffect(() => {
+    const modes = equipment?.sale?.fulfillmentModes ?? [];
+    if (modes.length > 0 && !modes.includes(purchaseFulfillment)) {
+      setPurchaseFulfillment(modes[0]);
+    }
+  }, [equipment, purchaseFulfillment]);
+
+  useEffect(() => {
+    setSaleError(null);
+    setSaleSubmitted(false);
+    setCartNotice(null);
+    setCartError(null);
+  }, [equipmentId]);
 
   useEffect(() => {
     if (startDate < todayIso) {
@@ -273,6 +328,120 @@ export default function RentalDetailPage() {
   const safeCatalogueUrl = toSafeHttpResourceUrl(equipment.catalogueUrl);
   const safeTrainingUrl = toSafeHttpResourceUrl(equipment.trainingVideoUrl);
   const showGalleryControls = equipment.images.length >= 5;
+  const sale = equipment.sale ?? defaultSaleSettings;
+  const saleFulfillmentModes = sale.fulfillmentModes ?? [];
+  const saleStatus = sale.enabled ? sale.status : "not_available";
+  const saleAvailable = saleStatus === "available_for_sale";
+  const saleOnRequest = saleStatus === "on_request";
+  const saleSold = saleStatus === "sold";
+  const saleEnquiryAllowed = saleAvailable || saleOnRequest;
+  const salePriceLabel =
+    saleSold
+      ? "Sold"
+      : sale.priceMode === "fixed" && sale.priceCents !== undefined
+        ? formatCents(sale.priceCents)
+        : "Request quote";
+  const salePriceDisplay = saleEnquiryAllowed || saleSold ? salePriceLabel : "Not available";
+  const saleCtaLabel = saleAvailable
+    ? "Request purchase confirmation"
+    : saleOnRequest
+      ? "Submit purchase enquiry"
+      : saleSold
+        ? "Sold"
+        : "Purchase unavailable";
+  const saleAccentClass = saleAvailable
+    ? "text-amber-700"
+    : saleOnRequest
+      ? "text-orange-700"
+      : saleSold
+        ? "text-rose-700"
+        : "text-slate-500";
+  const salePanelClass = saleAvailable
+    ? "border-amber-200 bg-amber-50"
+    : saleOnRequest
+      ? "border-orange-200 bg-orange-50"
+      : saleSold
+        ? "border-rose-200 bg-rose-50"
+        : "border-slate-200 bg-slate-50";
+
+  function handleAddSaleToCart() {
+    if (!equipment || !saleEnquiryAllowed) return;
+
+    try {
+      const result = upsertSaleCartLine({
+        type: "sale",
+        equipmentId: equipment.id,
+        equipmentSlug: equipment.slug,
+        titleSnapshot: equipment.title,
+        imageUrlSnapshot: heroImg || equipment.imageUrl,
+        saleStatusSnapshot: saleStatus,
+        salePriceModeSnapshot: sale.priceMode,
+        salePriceCentsSnapshot: sale.priceCents,
+        saleConditionSnapshot: sale.condition,
+        saleWarrantySnapshot: sale.warranty,
+        fulfillmentPreference: saleFulfillmentModes.length > 0 ? purchaseFulfillment : undefined,
+        message: saleMessage.trim() || undefined,
+      });
+      setCartError(null);
+      setCartNotice(
+        result.status === "submitted_exists"
+          ? "A sale enquiry for this equipment was already submitted from your cart."
+          : result.status === "updated"
+            ? "Existing sale enquiry cart item updated."
+            : "Sale enquiry item added to cart."
+      );
+    } catch {
+      setCartNotice(null);
+      setCartError("Unable to add sale enquiry item to cart on this device.");
+    }
+  }
+
+  async function handleSaleEnquirySubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!equipment || saleSubmitting || !saleEnquiryAllowed) return;
+
+    const customerName = saleCustomerName.trim();
+    const customerEmail = saleCustomerEmail.trim();
+    if (!customerName || !customerEmail) {
+      setSaleError("Name and email are required.");
+      return;
+    }
+
+    try {
+      setSaleSubmitting(true);
+      setSaleError(null);
+      const res = await fetch(
+        `/api/public/rental/equipment/${encodeURIComponent(equipment.id)}/sale-enquiry`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            customerName,
+            customerEmail,
+            customerPhone: saleCustomerPhone.trim() || null,
+            companyName: saleCompanyName.trim() || null,
+            fulfillmentPreference:
+              saleFulfillmentModes.length > 0 ? purchaseFulfillment : null,
+            message: saleMessage.trim() || null,
+          }),
+        }
+      );
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error ?? "Unable to submit purchase enquiry");
+      const enquiryId = typeof data?.enquiry?.id === "string" ? data.enquiry.id : undefined;
+      markSaleCartLinesSubmittedForEquipment({
+        equipmentId: equipment.id,
+        enquiryId,
+        enquirySubmittedAt: new Date().toISOString(),
+      });
+      setSaleSubmitted(true);
+      setSaleMessage("");
+    } catch (error) {
+      setSaleError(error instanceof Error ? error.message : "Unable to submit purchase enquiry");
+    } finally {
+      setSaleSubmitting(false);
+    }
+  }
 
   return (
     <div className="mx-auto max-w-6xl p-4">
@@ -525,6 +694,26 @@ export default function RentalDetailPage() {
 
         <div className="lg:col-span-5">
           <div className="sticky top-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="grid grid-cols-2 rounded-xl border border-slate-200 bg-slate-50 p-1">
+              {(["rent", "buy"] as DetailTab[]).map((tab) => (
+                <button
+                  key={tab}
+                  type="button"
+                  onClick={() => setActiveTab(tab)}
+                  aria-pressed={activeTab === tab}
+                  className={[
+                    "rounded-lg px-3 py-2 text-sm font-semibold transition-all duration-200",
+                    activeTab === tab
+                      ? "bg-white text-slate-900 shadow-sm"
+                      : "text-slate-500 hover:text-slate-800",
+                  ].join(" ")}
+                >
+                  {tab === "rent" ? "Rent" : "Buy"}
+                </button>
+              ))}
+            </div>
+
+            <div className={activeTab === "rent" ? "mt-4" : "mt-4 hidden"}>
             <h2 className="text-sm font-semibold text-[#2A2A2A]">
               Create rental booking
             </h2>
@@ -752,6 +941,90 @@ export default function RentalDetailPage() {
                 This equipment is currently out of stock.
               </p>
             )}
+            </div>
+
+            <div className={activeTab === "buy" ? "mt-4" : "mt-4 hidden"}>
+              <h2 className="text-sm font-semibold text-[#2A2A2A]">Purchase enquiry</h2>
+              <p className="mt-1 text-xs text-slate-500">
+                Sale stock is manually confirmed by our team before any purchase can proceed.
+              </p>
+
+              <div className={["mt-4 rounded-xl border p-4", salePanelClass].join(" ")}>
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className={["text-xs font-semibold uppercase tracking-wide", saleAccentClass].join(" ")}>Sale status</div>
+                    <div className="mt-1 text-lg font-semibold text-slate-900">{saleStatusLabel(saleStatus)}</div>
+                  </div>
+                  <div className="text-right">
+                    <div className={["text-xs", saleAccentClass].join(" ")}>Price</div>
+                    <div className="mt-1 text-lg font-semibold text-slate-900">{salePriceDisplay}</div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-4 space-y-3 text-sm">
+                <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                  <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Condition</div>
+                  <div className="mt-1 text-slate-800">{sale.condition ?? "To be confirmed"}</div>
+                </div>
+                <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                  <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Warranty</div>
+                  <div className="mt-1 text-slate-800">{sale.warranty ?? "To be confirmed"}</div>
+                </div>
+                {sale.notes && (
+                  <div className="rounded-xl border border-slate-200 bg-white p-3">
+                    <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Sales notes</div>
+                    <div className="mt-1 text-slate-700">{sale.notes}</div>
+                  </div>
+                )}
+                {saleEnquiryAllowed && saleFulfillmentModes.length > 0 && (
+                  <div>
+                    <label className="text-xs font-medium text-slate-700">Fulfillment</label>
+                    <div className="mt-2 grid grid-cols-2 gap-2">
+                      {saleFulfillmentModes.includes("deliver") && (
+                        <button type="button" onClick={() => setPurchaseFulfillment("deliver")} className={["inline-flex items-center justify-center gap-2 rounded-xl border px-3 py-2 text-sm font-semibold", purchaseFulfillment === "deliver" ? "border-amber-500 bg-amber-500 text-white" : "border-slate-200 bg-white text-slate-700 hover:bg-amber-50"].join(" ")}>
+                          <Truck className="h-4 w-4" />Delivery
+                        </button>
+                      )}
+                      {saleFulfillmentModes.includes("self_collect") && (
+                        <button type="button" onClick={() => setPurchaseFulfillment("self_collect")} className={["inline-flex items-center justify-center gap-2 rounded-xl border px-3 py-2 text-sm font-semibold", purchaseFulfillment === "self_collect" ? "border-amber-500 bg-amber-500 text-white" : "border-slate-200 bg-white text-slate-700 hover:bg-amber-50"].join(" ")}>
+                          <Package className="h-4 w-4" />Self-collect
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {saleEnquiryAllowed ? (
+                saleSubmitted ? (
+                  <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">
+                    <div className="font-semibold">Purchase enquiry submitted.</div>
+                    <p className="mt-1">Our team will confirm sale availability and final pricing before any payment can proceed.</p>
+                  </div>
+                ) : (
+                  <form className="mt-4 space-y-3" onSubmit={handleSaleEnquirySubmit}>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <label className="grid gap-1 text-xs font-medium text-slate-700">Name <span className="sr-only">required</span><input type="text" value={saleCustomerName} onChange={(event) => setSaleCustomerName(event.target.value)} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-normal text-slate-900 outline-none focus:border-amber-400" required /></label>
+                      <label className="grid gap-1 text-xs font-medium text-slate-700">Email <span className="sr-only">required</span><input type="email" value={saleCustomerEmail} onChange={(event) => setSaleCustomerEmail(event.target.value)} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-normal text-slate-900 outline-none focus:border-amber-400" required /></label>
+                      <label className="grid gap-1 text-xs font-medium text-slate-700">Phone<input type="tel" value={saleCustomerPhone} onChange={(event) => setSaleCustomerPhone(event.target.value)} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-normal text-slate-900 outline-none focus:border-amber-400" /></label>
+                      <label className="grid gap-1 text-xs font-medium text-slate-700">Company<input type="text" value={saleCompanyName} onChange={(event) => setSaleCompanyName(event.target.value)} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-normal text-slate-900 outline-none focus:border-amber-400" /></label>
+                    </div>
+                    <label className="grid gap-1 text-xs font-medium text-slate-700">Message<textarea value={saleMessage} onChange={(event) => setSaleMessage(event.target.value)} rows={3} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-normal text-slate-900 outline-none focus:border-amber-400" placeholder="Tell us your preferred timing, usage context, or inspection questions." /></label>
+                    {saleError && <div className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs text-rose-700">{saleError}</div>}
+                    <button type="button" onClick={handleAddSaleToCart} className="inline-flex w-full items-center justify-center rounded-xl border border-amber-200 bg-white px-4 py-3 text-sm font-semibold text-amber-700 hover:bg-amber-50"><ShoppingCart className="mr-2 h-4 w-4" />Add sale enquiry to cart</button>
+                    {cartNotice && <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-800">{cartNotice} <Link href="/rental/cart" className="font-semibold underline">View cart</Link></div>}
+                    {cartError && <div className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs text-rose-700">{cartError}</div>}
+                    <button type="submit" disabled={saleSubmitting} className="inline-flex w-full items-center justify-center rounded-xl bg-amber-500 px-4 py-3 text-sm font-semibold text-white hover:bg-amber-600 disabled:cursor-not-allowed disabled:bg-slate-300">{saleSubmitting ? "Submitting..." : saleCtaLabel}</button>
+                    <p className="text-xs text-slate-500">This sends an enquiry only. Sale payment is unavailable until admin confirms stock and final price.</p>
+                  </form>
+                )
+              ) : (
+                <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
+                  {saleSold ? "This equipment is sold and cannot accept purchase enquiries." : "This equipment is not available for purchase enquiries."}
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </div>
