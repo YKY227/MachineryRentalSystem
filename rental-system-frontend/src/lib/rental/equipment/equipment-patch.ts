@@ -1,6 +1,7 @@
 import type { UpdateRentalEquipmentInput } from './types';
 import { normalizeEquipmentImageUrls } from './equipment-images.ts';
 import { normalizeHttpResourceUrl } from './resource-urls.ts';
+import { isEquipmentCatalogueStoragePath } from './catalogue-pdfs.ts';
 import type {
   EquipmentSaleFulfillmentMode,
   EquipmentSalePriceMode,
@@ -24,6 +25,8 @@ export type EquipmentPatchBody = {
   depositAmount?: number | string | null;
   imageUrls?: string[];
   catalogueUrl?: string | null;
+  catalogueStoragePath?: string | null;
+  catalogueFileName?: string | null;
   trainingVideoUrl?: string | null;
   keyFeatures?: string[];
   applications?: string[];
@@ -190,6 +193,16 @@ export function normalizeEquipmentPatchBody(body: EquipmentPatchBody) {
   }
   if (hasOwn(body, 'catalogueUrl')) {
     patch.catalogueUrl = normalizeHttpResourceUrl(body.catalogueUrl, 'Catalogue URL');
+  }
+  if (hasOwn(body, 'catalogueStoragePath')) {
+    const path = normalizeOptionalText(body.catalogueStoragePath);
+    if (path && !isEquipmentCatalogueStoragePath(path)) {
+      throw new Error('Invalid equipment catalogue storage path');
+    }
+    patch.catalogueStoragePath = path;
+  }
+  if (hasOwn(body, 'catalogueFileName')) {
+    patch.catalogueFileName = normalizeOptionalText(body.catalogueFileName);
   }
   if (hasOwn(body, 'trainingVideoUrl')) {
     patch.trainingVideoUrl = normalizeHttpResourceUrl(

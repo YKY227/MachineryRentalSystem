@@ -17,6 +17,11 @@ import {
   getHttpResourceUrlError,
   toSafeHttpResourceUrl,
 } from '../src/lib/rental/equipment/resource-urls.ts';
+import {
+  getEquipmentCataloguePdfValidationError,
+  hasExpectedEquipmentCataloguePdfSignature,
+  isEquipmentCatalogueStoragePath,
+} from '../src/lib/rental/equipment/catalogue-pdfs.ts';
 
 test('publish-only PATCH does not emit unrelated equipment fields', () => {
   const patch = normalizeEquipmentPatchBody({ isPublished: true });
@@ -245,4 +250,26 @@ test('equipment upload validation rejects unsupported, oversized, and spoofed fi
     ),
     true
   );
+});
+
+test('catalogue uploads require a bounded PDF and use a scoped storage path', () => {
+  assert.equal(
+    getEquipmentCataloguePdfValidationError({ name: 'catalogue.pdf', type: 'application/pdf', size: 1024 }),
+    null
+  );
+  assert.match(
+    getEquipmentCataloguePdfValidationError({ name: 'catalogue.docx', type: 'application/pdf', size: 1024 }) ?? '',
+    /PDF/
+  );
+  assert.match(
+    getEquipmentCataloguePdfValidationError({ name: 'catalogue.pdf', type: 'application/pdf', size: 21 * 1024 * 1024 }) ?? '',
+    /20 MB/
+  );
+  assert.equal(hasExpectedEquipmentCataloguePdfSignature(new TextEncoder().encode('%PDF-1.7')), true);
+  assert.equal(hasExpectedEquipmentCataloguePdfSignature(new TextEncoder().encode('not a PDF')), false);
+  assert.equal(
+    isEquipmentCatalogueStoragePath('equipment-catalogues/scissor-lift/11111111-1111-1111-1111-111111111111.pdf'),
+    true
+  );
+  assert.equal(isEquipmentCatalogueStoragePath('invoices/secret.pdf'), false);
 });

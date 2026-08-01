@@ -37,6 +37,8 @@ type RentalEquipmentRow = {
   image_url: string | null;
   image_urls: unknown;
   catalogue_url: string | null;
+  catalogue_storage_path: string | null;
+  catalogue_file_name: string | null;
   training_video_url: string | null;
   key_features: unknown;
   applications: unknown;
@@ -74,6 +76,8 @@ const EQUIPMENT_COLUMNS = [
   "image_url",
   "image_urls",
   "catalogue_url",
+  "catalogue_storage_path",
+  "catalogue_file_name",
   "training_video_url",
   "key_features",
   "applications",
@@ -202,6 +206,8 @@ function toEquipment(row: RentalEquipmentRow): RentalEquipment {
     },
     imageUrl: imageUrls[0] ?? undefined,
     catalogueUrl: row.catalogue_url ?? undefined,
+    catalogueStoragePath: row.catalogue_storage_path ?? undefined,
+    catalogueFileName: row.catalogue_file_name ?? undefined,
     trainingVideoUrl: row.training_video_url ?? undefined,
     displayOrder: Number(row.display_order ?? 0),
     sale: {

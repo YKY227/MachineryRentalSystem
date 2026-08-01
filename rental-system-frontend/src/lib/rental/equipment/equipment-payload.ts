@@ -76,6 +76,12 @@ export function buildRentalEquipmentPayload(
   if (input.catalogueUrl !== undefined) {
     payload.catalogue_url = trimOrNull(input.catalogueUrl);
   }
+  if (input.catalogueStoragePath !== undefined) {
+    payload.catalogue_storage_path = trimOrNull(input.catalogueStoragePath);
+  }
+  if (input.catalogueFileName !== undefined) {
+    payload.catalogue_file_name = trimOrNull(input.catalogueFileName);
+  }
   if (input.trainingVideoUrl !== undefined) {
     payload.training_video_url = trimOrNull(input.trainingVideoUrl);
   }

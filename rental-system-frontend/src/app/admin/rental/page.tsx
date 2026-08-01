@@ -25,9 +25,17 @@ import {
   shouldDiscardCompletedEquipmentUpload,
 } from "@/lib/rental/equipment/equipment-images";
 import { getHttpResourceUrlError } from "@/lib/rental/equipment/resource-urls";
+import { getEquipmentCataloguePdfValidationError } from "@/lib/rental/equipment/catalogue-pdfs";
 
 type TabKey = "inventory" | "orders" | "create";
 type FulfillmentMode = "deliver" | "self_collect";
+type CatalogueDraft = {
+  storagePath?: string;
+  fileName?: string;
+  isNewUpload?: boolean;
+  isPersisted?: boolean;
+};
+type ManagedCatalogueDraft = CatalogueDraft & { storagePath: string };
 
 type LocalRentalOrder = {
   id: string;
@@ -62,6 +70,11 @@ type PendingEquipmentUpload = {
   equipmentKey: string;
 };
 
+type TrackedCatalogueUpload = {
+  sessionId: number;
+  catalogue: ManagedCatalogueDraft;
+};
+
 type EditorState = {
   id: string | null;
   title: string;
@@ -79,6 +92,7 @@ type EditorState = {
   depositAmount: number;
   images: EquipmentImageDraft[];
   catalogueUrl: string;
+  catalogue: CatalogueDraft;
   trainingVideoUrl: string;
   keyFeaturesText: string;
   applicationsText: string;
@@ -116,6 +130,7 @@ function emptyEditor(defaultMaintenanceBufferDays = 7): EditorState {
     depositAmount: 0,
     images: [{ url: "" }],
     catalogueUrl: "",
+    catalogue: {},
     trainingVideoUrl: "",
     keyFeaturesText: "",
     applicationsText: "",
@@ -212,6 +227,13 @@ function toEditor(item?: Equipment | null, defaultMaintenanceBufferDays = 7): Ed
         })
       : [{ url: "" }],
     catalogueUrl: item.catalogueUrl ?? "",
+    catalogue: item.catalogueStoragePath
+      ? {
+          storagePath: item.catalogueStoragePath,
+          fileName: item.catalogueFileName,
+          isPersisted: true,
+        }
+      : {},
     trainingVideoUrl: item.trainingVideoUrl ?? "",
     keyFeaturesText: listToText(item.keyFeatures),
     applicationsText: listToText(item.applications),
@@ -253,6 +275,8 @@ function buildPayload(editor: EditorState) {
     depositAmount: editor.depositAmount,
     imageUrls: editor.images.map((item) => item.url.trim()).filter(Boolean),
     catalogueUrl: editor.catalogueUrl.trim() || null,
+    catalogueStoragePath: editor.catalogue.storagePath ?? null,
+    catalogueFileName: editor.catalogue.fileName ?? null,
     trainingVideoUrl: editor.trainingVideoUrl.trim() || null,
     keyFeatures: textToList(editor.keyFeaturesText),
     applications: textToList(editor.applicationsText),
@@ -334,6 +358,7 @@ export default function AdminRentalInventoryPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [uploadingImages, setUploadingImages] = useState(false);
+  const [uploadingCatalogue, setUploadingCatalogue] = useState(false);
   const [draftUploadKey, setDraftUploadKey] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
   const [warning, setWarning] = useState<string | null>(null);
@@ -344,6 +369,8 @@ export default function AdminRentalInventoryPage() {
   const pendingUploadsRef = useRef(new Map<string, PendingEquipmentUpload>());
   const unsavedUploadsRef = useRef(new Map<string, TrackedEquipmentImage>());
   const removedPersistedImagesRef = useRef(new Map<string, TrackedEquipmentImage>());
+  const unsavedCatalogueRef = useRef<TrackedCatalogueUpload | null>(null);
+  const removedPersistedCatalogueRef = useRef<TrackedCatalogueUpload | null>(null);
 
   const orderRevenue = useMemo(
     () => orders.reduce((sum, order) => sum + (order.pricingSnapshot?.total ?? 0), 0),
@@ -554,9 +581,135 @@ export default function AdminRentalInventoryPage() {
     }
   }
 
+  async function deleteEquipmentCatalogue(catalogue: CatalogueDraft, context: string) {
+    if (!catalogue.storagePath) return;
+    try {
+      const response = await fetch("/api/admin/rental/equipment/catalogue", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ path: catalogue.storagePath }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data?.error ?? "Catalogue deletion failed");
+    } catch (nextError) {
+      const message = nextError instanceof Error ? nextError.message : "Catalogue deletion failed";
+      console.warn(`Catalogue cleanup failed during ${context}`, { path: catalogue.storagePath, message });
+      setWarning(`Catalogue cleanup failed after ${context}. The editor change was kept, but the PDF may need manual cleanup.`);
+    }
+  }
+
+  async function discardNewCatalogueForSession(sessionId: number, context: string) {
+    const tracked = unsavedCatalogueRef.current;
+    if (!tracked || tracked.sessionId !== sessionId) return;
+    await deleteEquipmentCatalogue(tracked.catalogue, context);
+    if (unsavedCatalogueRef.current?.sessionId === sessionId) {
+      unsavedCatalogueRef.current = null;
+    }
+  }
+
+  function queueRemovedPersistedCatalogue(catalogue: CatalogueDraft) {
+    if (!catalogue.isPersisted || !catalogue.storagePath) return;
+    removedPersistedCatalogueRef.current = {
+      sessionId: editorSessionRef.current,
+      catalogue: { ...catalogue, storagePath: catalogue.storagePath },
+    };
+  }
+
+  async function clearCatalogueUpload() {
+    const catalogue = editor.catalogue;
+    setWarning(null);
+    if (catalogue.isNewUpload) {
+      unsavedCatalogueRef.current = null;
+      await deleteEquipmentCatalogue(catalogue, "removing an unsaved catalogue PDF");
+    } else {
+      queueRemovedPersistedCatalogue(catalogue);
+    }
+    setEditor((current) => ({ ...current, catalogue: {} }));
+  }
+
+  async function changeCatalogueUrl(value: string) {
+    const catalogue = editor.catalogue;
+    if (catalogue.isNewUpload) {
+      unsavedCatalogueRef.current = null;
+      await deleteEquipmentCatalogue(catalogue, "replacing an unsaved catalogue PDF");
+    } else {
+      queueRemovedPersistedCatalogue(catalogue);
+    }
+    setEditor((current) => ({ ...current, catalogueUrl: value, catalogue: {} }));
+  }
+
+  async function uploadCataloguePdf(file: File | null) {
+    if (!file) return;
+    const validationError = getEquipmentCataloguePdfValidationError(file);
+    if (validationError) {
+      setError(validationError);
+      return;
+    }
+
+    const sessionId = editorSessionRef.current;
+    const existingCatalogue = editor.catalogue;
+    const equipmentKey = editor.id ?? (draftUploadKey || crypto.randomUUID());
+    if (!editor.id && !draftUploadKey) setDraftUploadKey(equipmentKey);
+    setError(null);
+    setWarning(null);
+    setUploadingCatalogue(true);
+
+    try {
+      const formData = new FormData();
+      formData.set("file", file);
+      formData.set("equipmentKey", equipmentKey);
+      const response = await fetch("/api/admin/rental/equipment/catalogue", {
+        method: "POST",
+        credentials: "include",
+        body: formData,
+      });
+      const data = (await response.json().catch(() => ({}))) as {
+        path?: unknown;
+        fileName?: unknown;
+        error?: unknown;
+      };
+      if (!response.ok || typeof data.path !== "string") {
+        throw new Error(typeof data.error === "string" ? data.error : "Catalogue upload failed");
+      }
+
+      const uploadedCatalogue: ManagedCatalogueDraft = {
+        storagePath: data.path,
+        fileName: typeof data.fileName === "string" ? data.fileName : file.name,
+        isNewUpload: true,
+      };
+      if (editorSessionRef.current !== sessionId) {
+        await deleteEquipmentCatalogue(uploadedCatalogue, "discarding a catalogue upload from a previous editor");
+        return;
+      }
+
+      if (existingCatalogue.isNewUpload) {
+        await deleteEquipmentCatalogue(existingCatalogue, "replacing an unsaved catalogue PDF");
+      } else {
+        queueRemovedPersistedCatalogue(existingCatalogue);
+      }
+      unsavedCatalogueRef.current = { sessionId, catalogue: uploadedCatalogue };
+      setEditor((current) =>
+        editorSessionRef.current === sessionId
+          ? { ...current, catalogueUrl: "", catalogue: uploadedCatalogue }
+          : current
+      );
+      setNotice("Catalogue PDF uploaded. Save equipment to publish it.");
+    } catch (nextError) {
+      if (editorSessionRef.current === sessionId) {
+        setError(nextError instanceof Error ? nextError.message : "Catalogue upload failed");
+      } else {
+        console.warn("Catalogue upload failed after its editor session changed", nextError);
+      }
+    } finally {
+      if (editorSessionRef.current === sessionId) setUploadingCatalogue(false);
+    }
+  }
+
   function startNewEditorSession() {
     const previousSessionId = editorSessionRef.current;
     editorSessionRef.current += 1;
+    setUploadingCatalogue(false);
 
     // Persisted removals are intentionally abandoned with their old editor session:
     // the DB may still reference them when no successful save occurred.
@@ -564,6 +717,9 @@ export default function AdminRentalInventoryPage() {
       if (tracked.sessionId === previousSessionId) {
         removedPersistedImagesRef.current.delete(key);
       }
+    }
+    if (removedPersistedCatalogueRef.current?.sessionId === previousSessionId) {
+      removedPersistedCatalogueRef.current = null;
     }
 
     return previousSessionId;
@@ -577,6 +733,7 @@ export default function AdminRentalInventoryPage() {
     setInventoryProtection(null);
     setTab("create");
     await discardNewUploadsForSession(previousSessionId, "resetting the editor");
+    await discardNewCatalogueForSession(previousSessionId, "resetting the editor");
   }
 
   async function openEquipmentForEdit(item: Equipment) {
@@ -587,6 +744,7 @@ export default function AdminRentalInventoryPage() {
     setInventoryProtection(null);
     setTab("create");
     await discardNewUploadsForSession(previousSessionId, "opening another equipment record");
+    await discardNewCatalogueForSession(previousSessionId, "opening another equipment record");
   }
 
   async function removeImage(index: number) {
@@ -722,8 +880,8 @@ export default function AdminRentalInventoryPage() {
   }
 
   async function saveEquipment() {
-    if (uploadingImages) {
-      setError("Wait for equipment image uploads to finish before saving.");
+    if (uploadingImages || uploadingCatalogue) {
+      setError("Wait for equipment uploads to finish before saving.");
       return;
     }
 
@@ -785,12 +943,22 @@ export default function AdminRentalInventoryPage() {
             savedImageUrls
           )
         : [];
+      const catalogueCleanupCandidates = saved
+        ? [removedPersistedCatalogueRef.current, unsavedCatalogueRef.current]
+            .filter((tracked): tracked is TrackedCatalogueUpload => Boolean(tracked))
+            .filter((tracked) => tracked.sessionId === sessionId)
+            .map((tracked) => tracked.catalogue)
+            .filter((catalogue) => catalogue.storagePath !== saved.catalogueStoragePath)
+        : [];
       setInventoryProtection((data?.inventoryProtection ?? null) as EquipmentInventoryProtection | null);
       await refreshInventory();
       await cleanupEquipmentImages(
         [...removedPersistedImages, ...unreferencedNewUploads],
         "saving equipment changes"
       );
+      for (const catalogue of catalogueCleanupCandidates) {
+        await deleteEquipmentCatalogue(catalogue, "saving equipment changes");
+      }
       if (saved) {
         for (const [key, tracked] of removedPersistedImagesRef.current) {
           if (tracked.sessionId === sessionId) {
@@ -801,6 +969,12 @@ export default function AdminRentalInventoryPage() {
           if (tracked.sessionId === sessionId) {
             unsavedUploadsRef.current.delete(key);
           }
+        }
+        if (removedPersistedCatalogueRef.current?.sessionId === sessionId) {
+          removedPersistedCatalogueRef.current = null;
+        }
+        if (unsavedCatalogueRef.current?.sessionId === sessionId) {
+          unsavedCatalogueRef.current = null;
         }
         startNewEditorSession();
       }
@@ -1378,12 +1552,45 @@ export default function AdminRentalInventoryPage() {
                   description="Optional HTTP(S) catalogue and training links shown on the public equipment page."
                 />
                 <div className="grid gap-4 sm:grid-cols-2">
-                  <FieldBlock id="equipment-catalogue-url" label="Catalogue URL">
-                    <input value={editor.catalogueUrl} onChange={(e) => setEditor((prev) => ({ ...prev, catalogueUrl: e.target.value }))} placeholder="https://..." className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
+                  <FieldBlock id="equipment-catalogue-url" label="Catalogue URL" hint="Use an HTTPS link, or upload a private PDF below.">
+                    <input value={editor.catalogueUrl} onChange={(e) => { void changeCatalogueUrl(e.target.value); }} placeholder="https://..." className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
                   </FieldBlock>
                   <FieldBlock id="equipment-training-video-url" label="Training video URL">
                     <input value={editor.trainingVideoUrl} onChange={(e) => setEditor((prev) => ({ ...prev, trainingVideoUrl: e.target.value }))} placeholder="https://..." className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
                   </FieldBlock>
+                  <div className="sm:col-span-2 rounded-xl border border-slate-200 bg-slate-50 p-3">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                      <div>
+                        <div className="text-sm font-medium text-slate-800">Upload catalogue PDF</div>
+                        <p className="mt-1 text-xs text-slate-500">PDF only, up to 20 MB. Uploaded catalogues stay private and are previewed with a temporary link.</p>
+                        {editor.catalogue.storagePath ? (
+                          <p className="mt-1 text-xs font-medium text-slate-700">Attached: {editor.catalogue.fileName || "catalogue.pdf"}</p>
+                        ) : null}
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        <label className="inline-flex cursor-pointer items-center justify-center rounded-xl bg-slate-900 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-800">
+                          {uploadingCatalogue ? "Uploading..." : "Upload catalogue PDF"}
+                          <input
+                            type="file"
+                            accept="application/pdf,.pdf"
+                            disabled={uploadingCatalogue || saving}
+                            className="sr-only"
+                            onChange={(event) => {
+                              const input = event.currentTarget;
+                              void uploadCataloguePdf(input.files?.[0] ?? null).finally(() => {
+                                input.value = "";
+                              });
+                            }}
+                          />
+                        </label>
+                        {editor.catalogue.storagePath ? (
+                          <button type="button" onClick={() => { void clearCatalogueUpload(); }} disabled={uploadingCatalogue || saving} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300">
+                            Remove uploaded PDF
+                          </button>
+                        ) : null}
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </section>
 
@@ -1425,7 +1632,7 @@ export default function AdminRentalInventoryPage() {
             </div>
 
             <div className="mt-5 flex flex-col gap-2 sm:flex-row">
-              <button type="button" onClick={saveEquipment} disabled={saving || uploadingImages} className="inline-flex items-center justify-center rounded-xl bg-sky-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-sky-700 disabled:cursor-not-allowed disabled:bg-slate-300">{saving ? "Saving..." : uploadingImages ? "Waiting for uploads..." : editor.id ? "Save changes" : "Create equipment"}</button>
+              <button type="button" onClick={saveEquipment} disabled={saving || uploadingImages || uploadingCatalogue} className="inline-flex items-center justify-center rounded-xl bg-sky-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-sky-700 disabled:cursor-not-allowed disabled:bg-slate-300">{saving ? "Saving..." : uploadingImages || uploadingCatalogue ? "Waiting for uploads..." : editor.id ? "Save changes" : "Create equipment"}</button>
               <button type="button" onClick={() => { void resetEquipmentEditor(); }} disabled={saving} className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-900 hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300">New entry</button>
             </div>
           </div>

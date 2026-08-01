@@ -9,6 +9,7 @@ import {
   dbRentalEquipmentRepo,
 } from "@/lib/rental/equipment/db-rental-equipment-repo";
 import { normalizeEquipmentImageUrls } from "@/lib/rental/equipment/equipment-images";
+import { isEquipmentCatalogueStoragePath } from "@/lib/rental/equipment/catalogue-pdfs";
 import { normalizeHttpResourceUrl } from "@/lib/rental/equipment/resource-urls";
 import type { UpsertRentalEquipmentInput } from "@/lib/rental/equipment/types";
 import type {
@@ -36,6 +37,8 @@ type EquipmentBody = {
   depositAmount?: number | string | null;
   imageUrls?: string[];
   catalogueUrl?: string | null;
+  catalogueStoragePath?: string | null;
+  catalogueFileName?: string | null;
   trainingVideoUrl?: string | null;
   keyFeatures?: string[];
   applications?: string[];
@@ -125,6 +128,14 @@ function parseSpecs(value: EquipmentBody["specs"]) {
   }, {});
 }
 
+function parseCatalogueStoragePath(value: string | null | undefined) {
+  const path = value?.trim() || null;
+  if (path && !isEquipmentCatalogueStoragePath(path)) {
+    throw new Error("Invalid equipment catalogue storage path");
+  }
+  return path;
+}
+
 function parseSaleStatus(value: string | undefined): EquipmentSaleStatus {
   return value && SALE_STATUSES.has(value as EquipmentSaleStatus)
     ? (value as EquipmentSaleStatus)
@@ -181,6 +192,8 @@ function normalizeCreateBody(body: EquipmentBody): UpsertRentalEquipmentInput {
     depositAmount: parseMoney(body.depositAmount ?? 0, "depositAmount") ?? 0,
     imageUrls: normalizeEquipmentImageUrls(body.imageUrls),
     catalogueUrl: normalizeHttpResourceUrl(body.catalogueUrl, "Catalogue URL"),
+    catalogueStoragePath: parseCatalogueStoragePath(body.catalogueStoragePath),
+    catalogueFileName: typeof body.catalogueFileName === "string" ? body.catalogueFileName.trim() || null : null,
     trainingVideoUrl: normalizeHttpResourceUrl(body.trainingVideoUrl, "Training video URL"),
     keyFeatures: parseStringArray(body.keyFeatures),
     applications: parseStringArray(body.applications),

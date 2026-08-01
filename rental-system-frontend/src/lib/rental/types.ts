@@ -53,6 +53,8 @@ export type Equipment = {
   totalUnits: number;
   isPublished: boolean;
   catalogueUrl?: string;
+  catalogueStoragePath?: string;
+  catalogueFileName?: string;
   trainingVideoUrl?: string;
   displayOrder?: number;
 
