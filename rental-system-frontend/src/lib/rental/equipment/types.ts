@@ -27,6 +27,8 @@ export type UpsertRentalEquipmentInput = {
   depositAmount?: number;
   imageUrls?: string[];
   catalogueUrl?: string;
+  catalogueStoragePath?: string | null;
+  catalogueFileName?: string | null;
   trainingVideoUrl?: string;
   keyFeatures?: string[];
   applications?: string[];

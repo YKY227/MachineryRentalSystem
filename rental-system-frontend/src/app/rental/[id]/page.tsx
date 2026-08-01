@@ -17,6 +17,9 @@ import {
   Factory,
   MapPin,
   ShoppingCart,
+  Download,
+  ExternalLink,
+  X,
 } from "lucide-react";
 
 import type { Equipment, EquipmentSaleSettings, EquipmentSaleStatus } from "@/lib/rental/types";
@@ -84,6 +87,25 @@ function todayLocalIso() {
   return `${year}-${month}-${day}`;
 }
 
+function toYouTubeEmbedUrl(value: string) {
+  try {
+    const url = new URL(value);
+    const host = url.hostname.toLowerCase().replace(/^www\./, "");
+    let videoId = "";
+    if (host === "youtu.be") videoId = url.pathname.split("/").filter(Boolean)[0] ?? "";
+    if (host === "youtube.com") {
+      videoId = url.pathname.startsWith("/embed/")
+        ? url.pathname.split("/")[2] ?? ""
+        : url.searchParams.get("v") ?? "";
+    }
+    return /^[A-Za-z0-9_-]{6,}$/.test(videoId)
+      ? `https://www.youtube.com/embed/${encodeURIComponent(videoId)}`
+      : "";
+  } catch {
+    return "";
+  }
+}
+
 export default function RentalDetailPage() {
   const params = useParams();
   const router = useRouter();
@@ -118,6 +140,12 @@ export default function RentalDetailPage() {
   const [saleSubmitted, setSaleSubmitted] = useState(false);
   const [cartNotice, setCartNotice] = useState<string | null>(null);
   const [cartError, setCartError] = useState<string | null>(null);
+  const [catalogueModalOpen, setCatalogueModalOpen] = useState(false);
+  const [cataloguePreviewUrl, setCataloguePreviewUrl] = useState("");
+  const [catalogueDownloadUrl, setCatalogueDownloadUrl] = useState("");
+  const [cataloguePreviewLoading, setCataloguePreviewLoading] = useState(false);
+  const [cataloguePreviewError, setCataloguePreviewError] = useState<string | null>(null);
+  const [videoModalOpen, setVideoModalOpen] = useState(false);
 
   const deliveryFee = fulfillment === "deliver" ? 60 : 0;
   const collectionFee = fulfillment === "deliver" ? 60 : 0;
@@ -287,6 +315,57 @@ export default function RentalDetailPage() {
     setSelectedImg((current) => (current - 1 + imageCount) % imageCount);
   }
 
+  async function openCatalogueModal() {
+    if (!equipment) return;
+    setCatalogueModalOpen(true);
+    setCataloguePreviewError(null);
+    setCataloguePreviewUrl("");
+    setCatalogueDownloadUrl("");
+    if (!equipment.catalogueStoragePath) return;
+
+    setCataloguePreviewLoading(true);
+    try {
+      const response = await fetch(
+        `/api/public/rental/equipment/${encodeURIComponent(equipment.id)}/catalogue`,
+        { credentials: "include" }
+      );
+      const data = (await response.json().catch(() => ({}))) as { signedUrl?: unknown; downloadUrl?: unknown; error?: unknown };
+      if (!response.ok || typeof data.signedUrl !== "string" || typeof data.downloadUrl !== "string") {
+        throw new Error(typeof data.error === "string" ? data.error : "Catalogue preview is unavailable.");
+      }
+      setCataloguePreviewUrl(data.signedUrl);
+      setCatalogueDownloadUrl(data.downloadUrl);
+    } catch (error) {
+      setCataloguePreviewError(
+        error instanceof Error ? error.message : "Catalogue preview is unavailable."
+      );
+    } finally {
+      setCataloguePreviewLoading(false);
+    }
+  }
+
+  function closeCatalogueModal() {
+    setCatalogueModalOpen(false);
+    setCataloguePreviewUrl("");
+    setCatalogueDownloadUrl("");
+    setCataloguePreviewError(null);
+  }
+
+  function closeVideoModal() {
+    setVideoModalOpen(false);
+  }
+
+  useEffect(() => {
+    if (!catalogueModalOpen && !videoModalOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      closeCatalogueModal();
+      closeVideoModal();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [catalogueModalOpen, videoModalOpen]);
+
   function selectNextImage() {
     const imageCount = equipment?.images?.length ?? 0;
     if (!imageCount) return;
@@ -326,7 +405,10 @@ export default function RentalDetailPage() {
 
   const heroImg = equipment.images?.[selectedImg] ?? equipment.images?.[0] ?? "";
   const safeCatalogueUrl = toSafeHttpResourceUrl(equipment.catalogueUrl);
+  const hasCatalogue = Boolean(safeCatalogueUrl || equipment.catalogueStoragePath);
+  const catalogueModalUrl = cataloguePreviewUrl || safeCatalogueUrl;
   const safeTrainingUrl = toSafeHttpResourceUrl(equipment.trainingVideoUrl);
+  const youTubeEmbedUrl = safeTrainingUrl ? toYouTubeEmbedUrl(safeTrainingUrl) : "";
   const showGalleryControls = equipment.images.length >= 5;
   const sale = equipment.sale ?? defaultSaleSettings;
   const saleFulfillmentModes = sale.fulfillmentModes ?? [];
@@ -599,16 +681,15 @@ export default function RentalDetailPage() {
             </div>
 
             <div className="mt-4 grid gap-3 sm:grid-cols-2">
-              {safeCatalogueUrl ? (
-                <a
-                  href={safeCatalogueUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
+              {hasCatalogue ? (
+                <button
+                  type="button"
+                  onClick={() => { void openCatalogueModal(); }}
                   className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-900 hover:bg-slate-50"
                 >
                   <Package className="h-4 w-4 text-slate-700" />
                   Open catalogue
-                </a>
+                </button>
               ) : (
                 <button
                   type="button"
@@ -621,15 +702,14 @@ export default function RentalDetailPage() {
               )}
 
               {safeTrainingUrl ? (
-                <a
-                  href={safeTrainingUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
+                <button
+                  type="button"
+                  onClick={() => setVideoModalOpen(true)}
                   className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-900 hover:bg-slate-50"
                 >
                   <Sparkles className="h-4 w-4 text-slate-700" />
                   Watch training video
-                </a>
+                </button>
               ) : (
                 <button
                   type="button"
@@ -1028,6 +1108,86 @@ export default function RentalDetailPage() {
           </div>
         </div>
       </div>
+      {catalogueModalOpen ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) closeCatalogueModal();
+          }}
+        >
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="catalogue-modal-title"
+            className="flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl"
+          >
+            <div className="flex items-center justify-between gap-4 border-b border-slate-200 px-5 py-4">
+              <div>
+                <h2 id="catalogue-modal-title" className="text-base font-semibold text-slate-900">Equipment catalogue</h2>
+                <p className="mt-1 text-xs text-slate-500">Preview the catalogue, or open it in a new tab if your browser blocks embedding.</p>
+              </div>
+              <button type="button" onClick={closeCatalogueModal} aria-label="Close catalogue preview" className="rounded-lg p-2 text-slate-600 hover:bg-slate-100">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="min-h-[22rem] flex-1 bg-slate-100 p-4">
+              {cataloguePreviewLoading ? (
+                <div className="flex h-full min-h-[22rem] items-center justify-center gap-2 text-sm text-slate-600"><LoaderCircle className="h-5 w-5 animate-spin" />Loading catalogue preview…</div>
+              ) : cataloguePreviewError ? (
+                <div className="flex h-full min-h-[22rem] items-center justify-center text-center text-sm text-slate-600">{cataloguePreviewError}</div>
+              ) : catalogueModalUrl ? (
+                <div className="space-y-2">
+                  <iframe src={catalogueModalUrl} title="Equipment catalogue PDF preview" className="h-[65vh] min-h-[22rem] w-full rounded-lg border border-slate-200 bg-white" />
+                  <p className="text-xs text-slate-500">If this external catalogue does not display in the preview, use Open in new tab below.</p>
+                </div>
+              ) : (
+                <div className="flex h-full min-h-[22rem] items-center justify-center text-center text-sm text-slate-600">This external catalogue cannot be previewed here. Open it in a new tab instead.</div>
+              )}
+            </div>
+            <div className="flex flex-wrap justify-end gap-2 border-t border-slate-200 px-5 py-4">
+              {catalogueModalUrl ? (
+                <>
+                  <a href={catalogueDownloadUrl || catalogueModalUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"><Download className="h-4 w-4" />Download PDF</a>
+                  <a href={catalogueModalUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-800"><ExternalLink className="h-4 w-4" />Open in new tab</a>
+                </>
+              ) : null}
+              <button type="button" onClick={closeCatalogueModal} className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">Close</button>
+            </div>
+          </section>
+        </div>
+      ) : null}
+
+      {videoModalOpen ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) closeVideoModal();
+          }}
+        >
+          <section role="dialog" aria-modal="true" aria-labelledby="training-video-modal-title" className="flex w-full max-w-4xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+            <div className="flex items-center justify-between gap-4 border-b border-slate-200 px-5 py-4">
+              <div>
+                <h2 id="training-video-modal-title" className="text-base font-semibold text-slate-900">Training video</h2>
+                <p className="mt-1 text-xs text-slate-500">Close this window to stop playback.</p>
+              </div>
+              <button type="button" onClick={closeVideoModal} aria-label="Close training video" className="rounded-lg p-2 text-slate-600 hover:bg-slate-100"><X className="h-5 w-5" /></button>
+            </div>
+            <div className="bg-slate-950 p-4">
+              {youTubeEmbedUrl ? (
+                <iframe src={youTubeEmbedUrl} title="Equipment training video" className="aspect-video w-full" allow="accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture" allowFullScreen />
+              ) : (
+                <div className="flex aspect-video items-center justify-center p-8 text-center text-sm text-slate-200">This training video is not hosted on YouTube, so it cannot be embedded here.</div>
+              )}
+            </div>
+            <div className="flex flex-wrap justify-end gap-2 border-t border-slate-200 px-5 py-4">
+              {safeTrainingUrl ? <a href={safeTrainingUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-800"><ExternalLink className="h-4 w-4" />Open in new tab</a> : null}
+              <button type="button" onClick={closeVideoModal} className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">Close</button>
+            </div>
+          </section>
+        </div>
+      ) : null}
     </div>
   );
 }
