@@ -24,7 +24,7 @@ Machinery Rental System is a web application for managing rental inventory, cust
 
 ### Data / Infra
 - Supabase Postgres (primary DB)
-- Supabase Storage (PDF object storage)
+- Supabase Storage (private invoice PDFs and public equipment images)
 
 ### Email
 - Resend (invoice send/resend)
@@ -82,6 +82,12 @@ Machinery Rental System is a web application for managing rental inventory, cust
   - If invoice has `pdf_storage.path` and hash matches → download/reuse
   - Else generate server-side → upload → save pdf_storage
 
+### Equipment Image Storage (Supabase Storage)
+- Public bucket: `SUPABASE_EQUIPMENT_IMAGES_BUCKET` (defaults to `equipment-images`).
+- Stored file path: `equipment/{equipmentId-or-draftKey}/{uuid}.{jpg|png|webp}`.
+- Uploads are accepted only by the server-authenticated admin API; the service-role key remains server-only and no anonymous write policy is created.
+- Public URLs are stored in `rental_equipment.image_urls`; the first URL continues to mirror into legacy `image_url`.
+
 ---
 
 ## Implemented Features (High-Level)
@@ -123,6 +129,7 @@ Machinery Rental System is a web application for managing rental inventory, cust
   - PDF metadata
 - Supabase Storage is the source of truth for:
   - Invoice PDF files
+  - Public equipment image files uploaded through the admin inventory editor
 - LocalStorage:
   - May still exist in public checkout for temporary compatibility only
   - `localInvoiceRepo` is legacy (no longer relied upon for DB-first flows)
@@ -174,6 +181,7 @@ Supabase:
 - `SUPABASE_URL`
 - `SUPABASE_SERVICE_ROLE_KEY`
 - `SUPABASE_STORAGE_BUCKET`
+- `SUPABASE_EQUIPMENT_IMAGES_BUCKET` (optional, defaults to `equipment-images`)
 - `SUPABASE_INVOICES_TABLE` (optional override)
 - (orders table env override optional if added)
 

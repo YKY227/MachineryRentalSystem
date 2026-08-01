@@ -5,6 +5,10 @@ import type {
   UpdateRentalEquipmentInput,
   UpsertRentalEquipmentInput,
 } from "@/lib/rental/equipment/types";
+import {
+  buildRentalEquipmentPayload,
+  uniqueEquipmentStrings,
+} from "@/lib/rental/equipment/equipment-payload";
 import { supabaseAdmin } from "@/lib/supabase/server";
 
 const EQUIPMENT_TABLE = process.env.SUPABASE_RENTAL_EQUIPMENT_TABLE ?? "rental_equipment";
@@ -92,26 +96,6 @@ function toSpecs(value: unknown): Record<string, string> {
   }, {});
 }
 
-function trimOrNull(value?: string | null) {
-  const trimmed = value?.trim();
-  return trimmed ? trimmed : null;
-}
-
-function uniqueStrings(values?: string[]) {
-  const seen = new Set<string>();
-  const next: string[] = [];
-
-  for (const value of values ?? []) {
-    const trimmed = value.trim();
-    const key = trimmed.toLowerCase();
-    if (!trimmed || seen.has(key)) continue;
-    seen.add(key);
-    next.push(trimmed);
-  }
-
-  return next;
-}
-
 function sanitizeIdSegment(value: string) {
   return value
     .trim()
@@ -132,13 +116,13 @@ function buildId(title: string, slug?: string) {
 }
 
 function toEquipment(row: RentalEquipmentRow): RentalEquipment {
-  const imageUrls = uniqueStrings([
+  const imageUrls = uniqueEquipmentStrings([
     ...toStringArray(row.image_urls),
     ...(row.image_url ? [row.image_url] : []),
   ]);
 
-  const shortDesc = trimOrNull(row.short_description) ?? trimOrNull(row.description) ?? "";
-  const description = trimOrNull(row.description) ?? shortDesc;
+  const shortDesc = row.short_description?.trim() || row.description?.trim() || "";
+  const description = row.description?.trim() || shortDesc;
 
   return {
     id: row.id,
@@ -173,62 +157,6 @@ function toEquipment(row: RentalEquipmentRow): RentalEquipment {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
-}
-
-function toPayload(input: UpsertRentalEquipmentInput | UpdateRentalEquipmentInput) {
-  const payload: Record<string, unknown> = {
-    updated_at: new Date().toISOString(),
-  };
-
-  if ("title" in input && input.title !== undefined) payload.title = input.title.trim();
-  if ("slug" in input && input.slug !== undefined) payload.slug = buildSlug(input.slug || input.title || "");
-  if ("category" in input && input.category !== undefined) payload.category = input.category.trim();
-  if ("brand" in input) payload.brand = trimOrNull(input.brand);
-  if ("model" in input) payload.model = trimOrNull(input.model);
-  if ("description" in input) payload.description = trimOrNull(input.description);
-  if ("shortDesc" in input) payload.short_description = trimOrNull(input.shortDesc);
-  if ("totalUnits" in input && input.totalUnits !== undefined) {
-    payload.total_units = Math.max(0, Math.floor(Number(input.totalUnits)));
-  }
-  if ("maintenanceBufferDays" in input && input.maintenanceBufferDays !== undefined) {
-    payload.maintenance_buffer_days = Math.max(0, Math.floor(Number(input.maintenanceBufferDays)));
-  }
-  if ("dayRate" in input && input.dayRate !== undefined) {
-    payload.day_rate = Number(Number(input.dayRate).toFixed(2));
-  }
-  if ("weekRate" in input) {
-    payload.week_rate = input.weekRate === null || input.weekRate === undefined ? null : Number(Number(input.weekRate).toFixed(2));
-  }
-  if ("monthRate" in input) {
-    payload.month_rate =
-      input.monthRate === null || input.monthRate === undefined ? null : Number(Number(input.monthRate).toFixed(2));
-  }
-  if ("minDays" in input && input.minDays !== undefined) {
-    payload.min_rental_days = Math.max(1, Math.floor(Number(input.minDays)));
-  }
-  if ("depositAmount" in input && input.depositAmount !== undefined) {
-    payload.deposit_amount = Number(Number(input.depositAmount).toFixed(2));
-  }
-  if ("imageUrls" in input && input.imageUrls !== undefined) {
-    const imageUrls = uniqueStrings(input.imageUrls);
-    payload.image_urls = imageUrls;
-    payload.image_url = imageUrls[0] ?? null;
-  }
-  if ("catalogueUrl" in input) payload.catalogue_url = trimOrNull(input.catalogueUrl);
-  if ("trainingVideoUrl" in input) payload.training_video_url = trimOrNull(input.trainingVideoUrl);
-  if ("keyFeatures" in input && input.keyFeatures !== undefined) {
-    payload.key_features = uniqueStrings(input.keyFeatures);
-  }
-  if ("applications" in input && input.applications !== undefined) {
-    payload.applications = uniqueStrings(input.applications);
-  }
-  if ("specs" in input && input.specs !== undefined) payload.specifications = input.specs;
-  if ("isPublished" in input && input.isPublished !== undefined) payload.is_published = input.isPublished;
-  if ("displayOrder" in input && input.displayOrder !== undefined) {
-    payload.display_order = Math.floor(Number(input.displayOrder) || 0);
-  }
-
-  return payload;
 }
 
 async function getBy(column: "id" | "slug", value: string, scope: "admin" | "public") {
@@ -291,7 +219,7 @@ export const dbRentalEquipmentRepo = {
       id,
       slug: buildSlug(input.slug || input.title),
       created_at: new Date().toISOString(),
-      ...toPayload(input),
+      ...buildRentalEquipmentPayload(input),
     };
 
     const supabase = supabaseAdmin();
@@ -309,7 +237,10 @@ export const dbRentalEquipmentRepo = {
     const supabase = supabaseAdmin();
     const { data, error } = await supabase
       .from(EQUIPMENT_TABLE)
-      .update(toPayload(input))
+      .update({
+        ...(input.slug !== undefined ? { slug: buildSlug(input.slug || input.title || "") } : {}),
+        ...buildRentalEquipmentPayload(input),
+      })
       .eq("id", id)
       .select(EQUIPMENT_COLUMNS)
       .single<RentalEquipmentRow>();

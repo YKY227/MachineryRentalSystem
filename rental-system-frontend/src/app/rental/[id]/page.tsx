@@ -7,6 +7,8 @@ import {
   ArrowRight,
   CalendarDays,
   CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
   LoaderCircle,
   Package,
   Shield,
@@ -17,6 +19,7 @@ import {
 } from "lucide-react";
 
 import type { Equipment } from "@/lib/rental/types";
+import { toSafeHttpResourceUrl } from "@/lib/rental/equipment/resource-urls";
 import {
   calculateAuthoritativeRentalPricing,
   calculateRentalDaysInclusive,
@@ -223,6 +226,18 @@ export default function RentalDetailPage() {
     router.push(`/rental/checkout?${qp.toString()}`);
   }
 
+  function selectPreviousImage() {
+    const imageCount = equipment?.images?.length ?? 0;
+    if (!imageCount) return;
+    setSelectedImg((current) => (current - 1 + imageCount) % imageCount);
+  }
+
+  function selectNextImage() {
+    const imageCount = equipment?.images?.length ?? 0;
+    if (!imageCount) return;
+    setSelectedImg((current) => (current + 1) % imageCount);
+  }
+
   if (loading) {
     return (
       <div className="mx-auto max-w-6xl p-4">
@@ -255,10 +270,9 @@ export default function RentalDetailPage() {
   }
 
   const heroImg = equipment.images?.[selectedImg] ?? equipment.images?.[0] ?? "";
-  const catalogueUrl = equipment.catalogueUrl?.trim() ?? "";
-  const trainingVideoUrl = equipment.trainingVideoUrl?.trim() ?? "";
-  const safeCatalogueUrl = /^https?:\/\//i.test(catalogueUrl) ? catalogueUrl : "";
-  const safeTrainingUrl = /^https?:\/\//i.test(trainingVideoUrl) ? trainingVideoUrl : "";
+  const safeCatalogueUrl = toSafeHttpResourceUrl(equipment.catalogueUrl);
+  const safeTrainingUrl = toSafeHttpResourceUrl(equipment.trainingVideoUrl);
+  const showGalleryControls = equipment.images.length >= 5;
 
   return (
     <div className="mx-auto max-w-6xl p-4">
@@ -299,10 +313,35 @@ export default function RentalDetailPage() {
                   <Package className="h-10 w-10" />
                 </div>
               )}
+
+              {showGalleryControls && (
+                <>
+                  <button
+                    type="button"
+                    onClick={selectPreviousImage}
+                    aria-label="Show previous equipment image"
+                    className="absolute left-3 top-1/2 inline-flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full bg-white/90 text-slate-900 shadow ring-1 ring-slate-200 hover:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900"
+                  >
+                    <ChevronLeft className="h-5 w-5" aria-hidden="true" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={selectNextImage}
+                    aria-label="Show next equipment image"
+                    className="absolute right-3 top-1/2 inline-flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full bg-white/90 text-slate-900 shadow ring-1 ring-slate-200 hover:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900"
+                  >
+                    <ChevronRight className="h-5 w-5" aria-hidden="true" />
+                  </button>
+                </>
+              )}
             </div>
 
             {equipment.images?.length > 1 && (
-              <div className="flex gap-2 overflow-x-auto border-t border-slate-200 p-3">
+              <div
+                className="flex gap-2 overflow-x-auto border-t border-slate-200 p-3"
+                role="group"
+                aria-label="Equipment image thumbnails"
+              >
                 {equipment.images.map((url, idx) => {
                   const active = idx === selectedImg;
                   return (
@@ -310,9 +349,12 @@ export default function RentalDetailPage() {
                       key={`${url}-${idx}`}
                       type="button"
                       onClick={() => setSelectedImg(idx)}
+                      aria-pressed={active}
                       className={[
-                        "h-16 w-24 flex-shrink-0 overflow-hidden rounded-lg border",
-                        active ? "border-slate-900" : "border-slate-200 hover:border-slate-300",
+                        "h-16 w-24 flex-shrink-0 overflow-hidden rounded-lg border focus:outline-none focus:ring-2 focus:ring-slate-900 focus:ring-offset-2",
+                        active
+                          ? "border-slate-900 ring-2 ring-slate-900 ring-offset-2"
+                          : "border-slate-200 hover:border-slate-300",
                       ].join(" ")}
                       aria-label={`Select image ${idx + 1}`}
                     >
@@ -392,7 +434,7 @@ export default function RentalDetailPage() {
                 <a
                   href={safeCatalogueUrl}
                   target="_blank"
-                  rel="noreferrer"
+                  rel="noopener noreferrer"
                   className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-900 hover:bg-slate-50"
                 >
                   <Package className="h-4 w-4 text-slate-700" />
@@ -413,7 +455,7 @@ export default function RentalDetailPage() {
                 <a
                   href={safeTrainingUrl}
                   target="_blank"
-                  rel="noreferrer"
+                  rel="noopener noreferrer"
                   className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-900 hover:bg-slate-50"
                 >
                   <Sparkles className="h-4 w-4 text-slate-700" />

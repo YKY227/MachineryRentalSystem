@@ -7,6 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
+    "test:equipment-media": "node --experimental-strip-types --test tests/equipment-media-regression.test.mts",
     "backfill:rental-equipment": "node scripts/import-rental-equipment-seed.mjs",
     "check:backend": "node -e \"fetch('http://localhost:3000/api/backend/health').then(r=>{console.log('status',r.status); return r.text()}).then(t=>console.log(t)).catch(e=>{console.error(e); process.exit(1)})\"",
     "log:migration": "node scripts/append-migration-log.mjs",

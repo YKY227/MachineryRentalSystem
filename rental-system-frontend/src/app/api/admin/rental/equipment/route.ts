@@ -8,6 +8,8 @@ import {
 import {
   dbRentalEquipmentRepo,
 } from "@/lib/rental/equipment/db-rental-equipment-repo";
+import { normalizeEquipmentImageUrls } from "@/lib/rental/equipment/equipment-images";
+import { normalizeHttpResourceUrl } from "@/lib/rental/equipment/resource-urls";
 import type { UpsertRentalEquipmentInput } from "@/lib/rental/equipment/types";
 
 export const runtime = "nodejs";
@@ -116,9 +118,9 @@ function normalizeCreateBody(body: EquipmentBody): UpsertRentalEquipmentInput {
     monthRate: parseMoney(body.monthRate, "monthRate", { allowNull: true }),
     minDays: parseInteger(body.minDays, "minDays", 1),
     depositAmount: parseMoney(body.depositAmount ?? 0, "depositAmount") ?? 0,
-    imageUrls: parseStringArray(body.imageUrls),
-    catalogueUrl: body.catalogueUrl?.trim() || undefined,
-    trainingVideoUrl: body.trainingVideoUrl?.trim() || undefined,
+    imageUrls: normalizeEquipmentImageUrls(body.imageUrls),
+    catalogueUrl: normalizeHttpResourceUrl(body.catalogueUrl, "Catalogue URL"),
+    trainingVideoUrl: normalizeHttpResourceUrl(body.trainingVideoUrl, "Training video URL"),
     keyFeatures: parseStringArray(body.keyFeatures),
     applications: parseStringArray(body.applications),
     specs: parseSpecs(body.specs),
