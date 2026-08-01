@@ -121,6 +121,8 @@ function toInsert(input: CreateRentalOrderInput, maintenanceBufferDaysApplied: n
     inspection_status: input.inspectionStatus ?? "not_started",
     inspection_notes: input.inspectionNotes?.trim() || null,
     completed_at: input.completedAt ?? null,
+    checkout_group_id: input.checkoutGroupId ?? null,
+    checkout_group_line_id: input.checkoutGroupLineId ?? null,
     new_order_notified_at: null,
     new_order_acknowledged_at: null,
     created_at: now,

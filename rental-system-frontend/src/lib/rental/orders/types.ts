@@ -72,6 +72,8 @@ export type CreateRentalOrderInput = {
   inspectionStatus?: RentalOrderInspectionStatus;
   inspectionNotes?: string;
   completedAt?: string;
+  checkoutGroupId?: string | null;
+  checkoutGroupLineId?: string | null;
 };
 
 export type RentalOrderBufferOverride = {
