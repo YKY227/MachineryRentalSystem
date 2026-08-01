@@ -1,34 +1,47 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
 import {
   adminUnauthorizedResponse,
   assertAdmin,
   isAdminUnauthorized,
 } from "@/lib/auth/admin";
+import {
+  supabaseAdmin,
+  supabaseBucket,
+  supabaseEquipmentImagesBucket,
+} from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
-
-function mustEnv(name: string) {
-  const v = process.env[name];
-  if (!v) throw new Error(`Missing env: ${name}`);
-  return v;
-}
 
 export async function GET(req: Request) {
   try {
     assertAdmin(req);
-    const url = mustEnv("SUPABASE_URL");
-    const key = mustEnv("SUPABASE_SERVICE_ROLE_KEY");
-    const bucket = mustEnv("SUPABASE_STORAGE_BUCKET");
+    const supabase = supabaseAdmin();
+    const bucket = supabaseBucket();
+    const equipmentImagesBucket = supabaseEquipmentImagesBucket();
 
-    const supabase = createClient(url, key, { auth: { persistSession: false } });
+    const [pdfListResult, equipmentBucketResult, equipmentListResult] = await Promise.all([
+      supabase.storage.from(bucket).list("", { limit: 1 }),
+      supabase.storage.getBucket(equipmentImagesBucket),
+      supabase.storage.from(equipmentImagesBucket).list("equipment", { limit: 1 }),
+    ]);
 
-    // list bucket objects (root)
-    const { data, error } = await supabase.storage.from(bucket).list("", { limit: 1 });
+    if (pdfListResult.error) throw new Error(pdfListResult.error.message);
+    if (equipmentBucketResult.error) throw new Error(equipmentBucketResult.error.message);
+    if (equipmentListResult.error) throw new Error(equipmentListResult.error.message);
+    if (!equipmentBucketResult.data.public) {
+      throw new Error(`Equipment image bucket ${equipmentImagesBucket} must be public`);
+    }
 
-    if (error) throw new Error(error.message);
-
-    return NextResponse.json({ ok: true, bucket, sampleCount: data?.length ?? 0 });
+    return NextResponse.json({
+      ok: true,
+      bucket,
+      sampleCount: pdfListResult.data?.length ?? 0,
+      equipmentImages: {
+        bucket: equipmentImagesBucket,
+        public: equipmentBucketResult.data.public,
+        sampleCount: equipmentListResult.data?.length ?? 0,
+      },
+    });
   } catch (e) {
     if (isAdminUnauthorized(e)) return adminUnauthorizedResponse();
     return NextResponse.json(

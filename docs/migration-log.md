@@ -2514,3 +2514,58 @@ API / Page changes:
 Risks / follow-up notes:
 - This recovery path depends on the customer returning to the checkout status page if the webhook does not complete, so Railway/HitPay webhook delivery should still be verified in production.
 - The added workflow logs are intentionally narrow and can be reduced later once production webhook reliability is confirmed.
+
+## 2026-08-01 | Scope: equipment media uploads, resources, and gallery safety
+Summary:
+- Fixed presence-aware equipment PATCH updates, added HTTP(S)-validated catalogue/video links, replaced the three-slot image editor with an ordered multi-image editor, and added admin-only Supabase image uploads plus accessible public gallery controls.
+
+Files changed:
+- rental-system-frontend/src/app/admin/rental/page.tsx
+- rental-system-frontend/src/app/api/admin/rental/equipment/route.ts
+- rental-system-frontend/src/app/api/admin/rental/equipment/[id]/route.ts
+- rental-system-frontend/src/app/api/admin/rental/equipment/images/route.ts
+- rental-system-frontend/src/app/api/admin/rental/storage/health/route.ts
+- rental-system-frontend/src/app/rental/[id]/page.tsx
+- rental-system-frontend/src/lib/rental/equipment/equipment-images.ts
+- rental-system-frontend/src/lib/rental/equipment/equipment-patch.ts
+- rental-system-frontend/src/lib/rental/equipment/equipment-payload.ts
+- rental-system-frontend/src/lib/rental/equipment/resource-urls.ts
+- rental-system-frontend/src/lib/rental/equipment/db-rental-equipment-repo.ts
+- rental-system-frontend/src/lib/supabase/server.ts
+- rental-system-frontend/supabase/migrations/20260801090000_equipment_images_bucket.sql
+- rental-system-frontend/tests/equipment-media-regression.test.mts
+- rental-system-frontend/package.json
+- rental-system-frontend/tsconfig.json
+- docs/architecture.md
+- docs/migration-log.md
+
+DB / Infra changes:
+- Added a public `equipment-images` Supabase Storage bucket with an 8 MB object limit and JPEG, PNG, and WebP MIME allow-list.
+- Added optional `SUPABASE_EQUIPMENT_IMAGES_BUCKET`; it defaults to `equipment-images`. Upload writes remain server-only through the protected admin API and service-role client.
+- No `rental_equipment` table migration was needed; ordered URLs continue to use `image_urls`, with the first URL mirrored into legacy `image_url`.
+
+API / Page changes:
+- Publish-only and other partial equipment PATCH requests no longer clear omitted optional fields; explicit empty resource values still clear their columns.
+- Added authenticated `POST` and path-restricted `DELETE /api/admin/rental/equipment/images` endpoints for validated multipart uploads and safe Storage cleanup.
+- Extended the protected storage health response with public equipment-image bucket status while preserving the existing invoice-PDF fields.
+- Admin inventory now preserves all image URLs, supports append/remove/reorder and manual URLs, tracks removed persisted uploads until their successful save, and only then deletes no-longer-referenced managed objects.
+- Upload completions are bound to an editor session. A completion from a reset or previously opened record is never appended to the active editor and is cleaned up using its returned Storage path.
+- Replacing a persisted managed image URL now records its original object for deferred cleanup, clears managed metadata from the edited manual entry, and restores that metadata without deletion when the original URL is put back before save.
+- Image URL normalization now trims and de-duplicates before enforcing the shared maximum of ten images for both create and PATCH requests.
+- Public detail resources use safe external links, while five-image galleries add previous/next controls and active accessible thumbnails. Public list cards remain first-image-only.
+
+Manual test checklist:
+- [ ] Apply `20260801090000_equipment_images_bucket.sql`, then upload five valid equipment images and confirm all five persist in order after admin reload.
+- [ ] Remove an unsaved upload or start a new entry and confirm its public Storage object is deleted; remove a saved uploaded image and confirm deletion occurs only after saving.
+- [ ] Remove a saved uploaded image then abandon the edit or re-add its same URL before saving; confirm it remains accessible and is not deleted. Confirm a failed save also leaves it untouched.
+- [ ] Replace a saved uploaded URL with a manual URL and save; confirm the old object is deleted. Repeat with a failed/abandoned save and with the original URL restored before save; confirm the old object remains.
+- [ ] Start an upload then reset or open another equipment record before it completes; confirm it cannot appear in the new editor and its Storage object is cleaned up.
+- [ ] Submit create and PATCH requests with eleven image URLs and confirm each receives a clear 400 response; confirm a publish-only PATCH preserves images and resources.
+- [ ] Reorder the images and confirm the first image becomes the public list-card cover and detail-page main image.
+- [ ] Save catalogue and YouTube watch URLs, toggle publish from the inventory row, and confirm all resource and optional equipment fields remain unchanged.
+- [ ] Confirm invalid resource URLs, unsupported image types, spoofed image contents, and files above 8 MB show clear admin errors.
+- [ ] Confirm public resources enable only for valid HTTP(S) URLs and five-image galleries support thumbnails, keyboard focus, and previous/next controls.
+- [ ] Confirm checkout, payment, invoice, order, hold, cart, grouped-checkout, and sale-enquiry behavior is unchanged.
+
+Rollback notes:
+- Revert the listed equipment media/resource files and remove the `equipment-images` bucket only after confirming no stored equipment URL still references it. The migration intentionally does not alter checkout, payment, order, hold, invoice, cart, or sale-enquiry schemas.
