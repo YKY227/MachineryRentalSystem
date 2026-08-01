@@ -1,6 +1,11 @@
 import type { UpdateRentalEquipmentInput } from './types';
 import { normalizeEquipmentImageUrls } from './equipment-images.ts';
 import { normalizeHttpResourceUrl } from './resource-urls.ts';
+import type {
+  EquipmentSaleFulfillmentMode,
+  EquipmentSalePriceMode,
+  EquipmentSaleStatus,
+} from '../types.ts';
 
 export type EquipmentPatchBody = {
   slug?: string | null;
@@ -25,7 +30,27 @@ export type EquipmentPatchBody = {
   specs?: Record<string, string>;
   isPublished?: boolean;
   displayOrder?: number | string;
+  saleEnabled?: boolean;
+  saleStatus?: string;
+  salePriceCents?: number | string | null;
+  salePriceMode?: string;
+  saleCondition?: string | null;
+  saleWarranty?: string | null;
+  saleNotes?: string | null;
+  saleFulfillmentModes?: string[] | null;
 };
+
+const SALE_STATUSES = new Set<EquipmentSaleStatus>([
+  'available_for_sale',
+  'sold',
+  'on_request',
+  'not_available',
+]);
+const SALE_PRICE_MODES = new Set<EquipmentSalePriceMode>(['fixed', 'request_quote']);
+const SALE_FULFILLMENT_MODES = new Set<EquipmentSaleFulfillmentMode>([
+  'deliver',
+  'self_collect',
+]);
 
 function hasOwn(body: EquipmentPatchBody, key: keyof EquipmentPatchBody) {
   return Object.prototype.hasOwnProperty.call(body, key);
@@ -61,6 +86,37 @@ function parseOptionalMoney(
   const minimum = opts.minimum ?? 0;
   if (parsed < minimum) throw new Error(`${field} cannot be less than ${minimum}`);
   return Number(parsed.toFixed(2));
+}
+
+function parseOptionalCents(value: number | string | null | undefined) {
+  if (value === undefined) return undefined;
+  if (value === null || value === '') return null;
+  const parsed = typeof value === 'string' ? Number(value.trim()) : value;
+  if (!Number.isFinite(parsed) || !Number.isInteger(parsed) || parsed < 0) {
+    throw new Error('salePriceCents must be a whole number of cents greater than or equal to 0');
+  }
+  return parsed;
+}
+
+function parseSaleStatus(value: string | undefined): EquipmentSaleStatus {
+  return value && SALE_STATUSES.has(value as EquipmentSaleStatus)
+    ? (value as EquipmentSaleStatus)
+    : 'not_available';
+}
+
+function parseSalePriceMode(value: string | undefined): EquipmentSalePriceMode {
+  return value && SALE_PRICE_MODES.has(value as EquipmentSalePriceMode)
+    ? (value as EquipmentSalePriceMode)
+    : 'request_quote';
+}
+
+function parseSaleFulfillmentModes(value: string[] | null | undefined) {
+  if (value === null) return null;
+  if (!Array.isArray(value)) return undefined;
+  const modes = value.filter((mode): mode is EquipmentSaleFulfillmentMode =>
+    SALE_FULFILLMENT_MODES.has(mode as EquipmentSaleFulfillmentMode)
+  );
+  return modes.length ? [...new Set(modes)] : null;
 }
 
 function parseStringArray(value: string[] | undefined) {
@@ -149,6 +205,22 @@ export function normalizeEquipmentPatchBody(body: EquipmentPatchBody) {
   }
   if (hasOwn(body, 'displayOrder')) {
     patch.displayOrder = parseOptionalInteger(body.displayOrder, 'displayOrder', 0);
+  }
+  if (hasOwn(body, 'saleEnabled') && typeof body.saleEnabled === 'boolean') {
+    patch.saleEnabled = body.saleEnabled;
+  }
+  if (hasOwn(body, 'saleStatus')) patch.saleStatus = parseSaleStatus(body.saleStatus);
+  if (hasOwn(body, 'salePriceCents')) {
+    patch.salePriceCents = parseOptionalCents(body.salePriceCents);
+  }
+  if (hasOwn(body, 'salePriceMode')) {
+    patch.salePriceMode = parseSalePriceMode(body.salePriceMode);
+  }
+  if (hasOwn(body, 'saleCondition')) patch.saleCondition = normalizeOptionalText(body.saleCondition);
+  if (hasOwn(body, 'saleWarranty')) patch.saleWarranty = normalizeOptionalText(body.saleWarranty);
+  if (hasOwn(body, 'saleNotes')) patch.saleNotes = normalizeOptionalText(body.saleNotes);
+  if (hasOwn(body, 'saleFulfillmentModes')) {
+    patch.saleFulfillmentModes = parseSaleFulfillmentModes(body.saleFulfillmentModes);
   }
 
   return patch;

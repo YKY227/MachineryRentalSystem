@@ -3,6 +3,12 @@ import type {
   UpsertRentalEquipmentInput,
 } from './types';
 import { normalizeEquipmentImageUrls } from './equipment-images.ts';
+import type { EquipmentSaleFulfillmentMode } from '../types.ts';
+
+const SALE_FULFILLMENT_MODES = new Set<EquipmentSaleFulfillmentMode>([
+  'deliver',
+  'self_collect',
+]);
 
 function trimOrNull(value?: string | null) {
   const trimmed = value?.trim();
@@ -83,6 +89,19 @@ export function buildRentalEquipmentPayload(
   if (input.isPublished !== undefined) payload.is_published = input.isPublished;
   if (input.displayOrder !== undefined) {
     payload.display_order = Math.floor(Number(input.displayOrder) || 0);
+  }
+  if (input.saleEnabled !== undefined) payload.sale_enabled = input.saleEnabled;
+  if (input.saleStatus !== undefined) payload.sale_status = input.saleStatus;
+  if (input.salePriceCents !== undefined) payload.sale_price_cents = input.salePriceCents;
+  if (input.salePriceMode !== undefined) payload.sale_price_mode = input.salePriceMode;
+  if (input.saleCondition !== undefined) payload.sale_condition = trimOrNull(input.saleCondition);
+  if (input.saleWarranty !== undefined) payload.sale_warranty = trimOrNull(input.saleWarranty);
+  if (input.saleNotes !== undefined) payload.sale_notes = trimOrNull(input.saleNotes);
+  if (input.saleFulfillmentModes !== undefined) {
+    const modes = (input.saleFulfillmentModes ?? []).filter(
+      (mode): mode is EquipmentSaleFulfillmentMode => SALE_FULFILLMENT_MODES.has(mode)
+    );
+    payload.sale_fulfillment_modes = modes.length ? [...new Set(modes)] : null;
   }
 
   return payload;
