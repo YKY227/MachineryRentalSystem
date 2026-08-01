@@ -9,7 +9,11 @@ import {
   useRef,
   useState,
 } from "react";
-import type { Equipment } from "@/lib/rental/types";
+import type {
+  Equipment,
+  EquipmentSalePriceMode,
+  EquipmentSaleStatus,
+} from "@/lib/rental/types";
 import {
   type EquipmentImageDraft,
   changeEquipmentImageDraftUrl,
@@ -81,6 +85,15 @@ type EditorState = {
   specsText: string;
   displayOrder: number;
   isPublished: boolean;
+  saleEnabled: boolean;
+  saleStatus: EquipmentSaleStatus;
+  salePriceMode: EquipmentSalePriceMode;
+  salePriceCents: number | "";
+  saleCondition: string;
+  saleWarranty: string;
+  saleNotes: string;
+  saleFulfillmentDeliver: boolean;
+  saleFulfillmentSelfCollect: boolean;
 };
 
 const ORDERS_LS_KEY = "cms_rental_orders_v1";
@@ -109,6 +122,15 @@ function emptyEditor(defaultMaintenanceBufferDays = 7): EditorState {
     specsText: "",
     displayOrder: 0,
     isPublished: false,
+    saleEnabled: false,
+    saleStatus: "not_available",
+    salePriceMode: "request_quote",
+    salePriceCents: "",
+    saleCondition: "",
+    saleWarranty: "",
+    saleNotes: "",
+    saleFulfillmentDeliver: false,
+    saleFulfillmentSelfCollect: false,
   };
 }
 
@@ -196,10 +218,24 @@ function toEditor(item?: Equipment | null, defaultMaintenanceBufferDays = 7): Ed
     specsText: specsToText(item.specs),
     displayOrder: item.displayOrder ?? 0,
     isPublished: item.isPublished,
+    saleEnabled: item.sale?.enabled ?? false,
+    saleStatus: item.sale?.status ?? "not_available",
+    salePriceMode: item.sale?.priceMode ?? "request_quote",
+    salePriceCents: item.sale?.priceCents ?? "",
+    saleCondition: item.sale?.condition ?? "",
+    saleWarranty: item.sale?.warranty ?? "",
+    saleNotes: item.sale?.notes ?? "",
+    saleFulfillmentDeliver: item.sale?.fulfillmentModes?.includes("deliver") ?? false,
+    saleFulfillmentSelfCollect: item.sale?.fulfillmentModes?.includes("self_collect") ?? false,
   };
 }
 
 function buildPayload(editor: EditorState) {
+  const saleFulfillmentModes = [
+    editor.saleFulfillmentDeliver ? "deliver" : "",
+    editor.saleFulfillmentSelfCollect ? "self_collect" : "",
+  ].filter(Boolean);
+
   return {
     title: editor.title.trim(),
     slug: editor.slug.trim() || undefined,
@@ -223,6 +259,17 @@ function buildPayload(editor: EditorState) {
     specs: textToSpecs(editor.specsText),
     displayOrder: editor.displayOrder,
     isPublished: editor.isPublished,
+    saleEnabled: editor.saleEnabled,
+    saleStatus: editor.saleEnabled ? editor.saleStatus : "not_available",
+    salePriceMode: editor.salePriceMode,
+    salePriceCents:
+      editor.salePriceMode === "fixed" && editor.salePriceCents !== ""
+        ? Math.max(0, Math.floor(Number(editor.salePriceCents)))
+        : null,
+    saleCondition: editor.saleCondition.trim() || null,
+    saleWarranty: editor.saleWarranty.trim() || null,
+    saleNotes: editor.saleNotes.trim() || null,
+    saleFulfillmentModes,
   };
 }
 
@@ -689,6 +736,14 @@ export default function AdminRentalInventoryPage() {
       setError(resourceError);
       return;
     }
+    if (
+      editor.saleEnabled &&
+      editor.salePriceMode === "fixed" &&
+      (editor.salePriceCents === "" || Number(editor.salePriceCents) <= 0)
+    ) {
+      setError("Sale price is required when fixed price is selected.");
+      return;
+    }
 
     setSaving(true);
     setNotice(null);
@@ -1045,6 +1100,174 @@ export default function AdminRentalInventoryPage() {
                   <FieldBlock id="equipment-min-days" label="Minimum rental days">
                     <input type="number" min={1} value={editor.minDays} onChange={(e) => setEditor((prev) => ({ ...prev, minDays: Math.max(1, Number(e.target.value || 1)) }))} placeholder="e.g. 1" className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
                   </FieldBlock>
+                </div>
+              </section>
+
+              <section>
+                <SectionHeader
+                  title="Sales settings"
+                  description="Configure whether this equipment can be bought. Sale availability remains separate from rental inventory."
+                />
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <label className="flex items-start gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3 sm:col-span-2">
+                    <input
+                      id="equipment-sale-enabled"
+                      type="checkbox"
+                      checked={editor.saleEnabled}
+                      onChange={(event) =>
+                        setEditor((previous) => ({
+                          ...previous,
+                          saleEnabled: event.target.checked,
+                          saleStatus:
+                            event.target.checked && previous.saleStatus === "not_available"
+                              ? "available_for_sale"
+                              : previous.saleStatus,
+                        }))
+                      }
+                      className="mt-0.5 h-4 w-4 rounded border-slate-300"
+                    />
+                    <span>
+                      <span className="block text-sm font-medium text-slate-800">Available for sale</span>
+                      <span className="mt-0.5 block text-xs text-slate-500">
+                        Enable the Buy option on the public equipment detail page.
+                      </span>
+                    </span>
+                  </label>
+
+                  <FieldBlock id="equipment-sale-status" label="Sale status">
+                    <select
+                      value={editor.saleStatus}
+                      onChange={(event) =>
+                        setEditor((previous) => ({
+                          ...previous,
+                          saleStatus: event.target.value as EquipmentSaleStatus,
+                        }))
+                      }
+                      className="rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                    >
+                      <option value="available_for_sale">Available for sale</option>
+                      <option value="on_request">On request</option>
+                      <option value="sold">Sold</option>
+                      <option value="not_available">Not available</option>
+                    </select>
+                  </FieldBlock>
+
+                  <FieldBlock id="equipment-sale-price-mode" label="Sale price mode">
+                    <select
+                      value={editor.salePriceMode}
+                      onChange={(event) =>
+                        setEditor((previous) => ({
+                          ...previous,
+                          salePriceMode: event.target.value as EquipmentSalePriceMode,
+                        }))
+                      }
+                      className="rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                    >
+                      <option value="fixed">Fixed price</option>
+                      <option value="request_quote">Request a quote</option>
+                    </select>
+                  </FieldBlock>
+
+                  {editor.salePriceMode === "fixed" ? (
+                    <FieldBlock
+                      id="equipment-sale-price"
+                      label="Sale price (SGD)"
+                      hint="Required when sales are enabled with a fixed price."
+                    >
+                      <input
+                        type="number"
+                        min={0}
+                        step="0.01"
+                        value={editor.salePriceCents === "" ? "" : editor.salePriceCents / 100}
+                        onChange={(event) => {
+                          const value = event.target.value;
+                          setEditor((previous) => ({
+                            ...previous,
+                            salePriceCents:
+                              value === "" ? "" : Math.max(0, Math.round(Number(value) * 100)),
+                          }));
+                        }}
+                        placeholder="e.g. 25000.00"
+                        className="rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                      />
+                    </FieldBlock>
+                  ) : null}
+
+                  <FieldBlock id="equipment-sale-condition" label="Sale condition">
+                    <input
+                      value={editor.saleCondition}
+                      onChange={(event) =>
+                        setEditor((previous) => ({ ...previous, saleCondition: event.target.value }))
+                      }
+                      placeholder="e.g. Used - excellent condition"
+                      className="rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                    />
+                  </FieldBlock>
+
+                  <FieldBlock id="equipment-sale-warranty" label="Sale warranty">
+                    <input
+                      value={editor.saleWarranty}
+                      onChange={(event) =>
+                        setEditor((previous) => ({ ...previous, saleWarranty: event.target.value }))
+                      }
+                      placeholder="e.g. 3-month dealer warranty"
+                      className="rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                    />
+                  </FieldBlock>
+
+                  <FieldBlock
+                    id="equipment-sale-notes"
+                    label="Sales notes"
+                    hint="Optional details shown with the Buy option."
+                    className="sm:col-span-2"
+                  >
+                    <textarea
+                      value={editor.saleNotes}
+                      onChange={(event) =>
+                        setEditor((previous) => ({ ...previous, saleNotes: event.target.value }))
+                      }
+                      rows={3}
+                      placeholder="e.g. Inspection available by appointment."
+                      className="rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                    />
+                  </FieldBlock>
+
+                  <fieldset className="rounded-xl border border-slate-200 p-3 sm:col-span-2">
+                    <legend className="px-1 text-sm font-medium text-slate-700">Sale fulfilment modes</legend>
+                    <p className="mt-1 text-xs text-slate-500">Choose how a buyer can receive this equipment.</p>
+                    <div className="mt-3 flex flex-wrap gap-4">
+                      <label className="inline-flex items-center gap-2 text-sm text-slate-700">
+                        <input
+                          id="equipment-sale-fulfillment-deliver"
+                          type="checkbox"
+                          checked={editor.saleFulfillmentDeliver}
+                          onChange={(event) =>
+                            setEditor((previous) => ({
+                              ...previous,
+                              saleFulfillmentDeliver: event.target.checked,
+                            }))
+                          }
+                          className="h-4 w-4 rounded border-slate-300"
+                        />
+                        Delivery
+                      </label>
+                      <label className="inline-flex items-center gap-2 text-sm text-slate-700">
+                        <input
+                          id="equipment-sale-fulfillment-self-collect"
+                          type="checkbox"
+                          checked={editor.saleFulfillmentSelfCollect}
+                          onChange={(event) =>
+                            setEditor((previous) => ({
+                              ...previous,
+                              saleFulfillmentSelfCollect: event.target.checked,
+                            }))
+                          }
+                          className="h-4 w-4 rounded border-slate-300"
+                        />
+                        Self-collect
+                      </label>
+                    </div>
+                  </fieldset>
                 </div>
               </section>
 

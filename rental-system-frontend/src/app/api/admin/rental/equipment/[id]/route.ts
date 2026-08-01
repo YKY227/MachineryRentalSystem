@@ -11,8 +11,25 @@ import {
   type EquipmentPatchBody,
 } from "@/lib/rental/equipment/equipment-patch";
 import { getRentalEquipmentInventoryProtection } from "@/lib/rental/equipment/equipment-inventory-protection-service";
+import type { UpdateRentalEquipmentInput } from "@/lib/rental/equipment/types";
+import type { Equipment } from "@/lib/rental/types";
 
 export const runtime = "nodejs";
+
+function assertValidSalePricing(existing: Equipment, patch: UpdateRentalEquipmentInput) {
+  const saleEnabled = patch.saleEnabled ?? existing.sale?.enabled ?? false;
+  const salePriceMode = patch.salePriceMode ?? existing.sale?.priceMode ?? "request_quote";
+  const salePriceCents =
+    patch.salePriceCents !== undefined ? patch.salePriceCents : existing.sale?.priceCents;
+
+  if (
+    saleEnabled &&
+    salePriceMode === "fixed" &&
+    (!Number.isInteger(salePriceCents) || Number(salePriceCents) <= 0)
+  ) {
+    throw new Error("salePriceCents must be a positive integer when fixed sale pricing is enabled");
+  }
+}
 
 export async function GET(req: Request, { params }: { params: { id: string } }) {
   try {
@@ -40,6 +57,7 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
 
     const body = (await req.json()) as EquipmentPatchBody;
     const patch = normalizeEquipmentPatchBody(body);
+    assertValidSalePricing(existing, patch);
     const inventoryProtection = await getRentalEquipmentInventoryProtection(params.id);
 
     if (

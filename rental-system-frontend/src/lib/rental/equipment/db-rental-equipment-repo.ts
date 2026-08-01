@@ -9,6 +9,11 @@ import {
   buildRentalEquipmentPayload,
   uniqueEquipmentStrings,
 } from "@/lib/rental/equipment/equipment-payload";
+import type {
+  EquipmentSaleFulfillmentMode,
+  EquipmentSalePriceMode,
+  EquipmentSaleStatus,
+} from "@/lib/rental/types";
 import { supabaseAdmin } from "@/lib/supabase/server";
 
 const EQUIPMENT_TABLE = process.env.SUPABASE_RENTAL_EQUIPMENT_TABLE ?? "rental_equipment";
@@ -38,6 +43,14 @@ type RentalEquipmentRow = {
   specifications: unknown;
   is_published: boolean;
   display_order: number | null;
+  sale_enabled: boolean | null;
+  sale_status: string | null;
+  sale_price_cents: number | null;
+  sale_price_mode: string | null;
+  sale_condition: string | null;
+  sale_warranty: string | null;
+  sale_notes: string | null;
+  sale_fulfillment_modes: unknown;
   created_at: string;
   updated_at: string;
 };
@@ -67,6 +80,14 @@ const EQUIPMENT_COLUMNS = [
   "specifications",
   "is_published",
   "display_order",
+  "sale_enabled",
+  "sale_status",
+  "sale_price_cents",
+  "sale_price_mode",
+  "sale_condition",
+  "sale_warranty",
+  "sale_notes",
+  "sale_fulfillment_modes",
   "created_at",
   "updated_at",
 ].join(",");
@@ -82,6 +103,35 @@ function toStringArray(value: unknown): string[] {
   return value
     .map((item) => (typeof item === "string" ? item.trim() : ""))
     .filter(Boolean);
+}
+
+const SALE_STATUSES = new Set<EquipmentSaleStatus>([
+  "available_for_sale",
+  "sold",
+  "on_request",
+  "not_available",
+]);
+const SALE_PRICE_MODES = new Set<EquipmentSalePriceMode>(["fixed", "request_quote"]);
+const SALE_FULFILLMENT_MODES = new Set<EquipmentSaleFulfillmentMode>(["deliver", "self_collect"]);
+
+function toSaleStatus(value: unknown): EquipmentSaleStatus {
+  return typeof value === "string" && SALE_STATUSES.has(value as EquipmentSaleStatus)
+    ? (value as EquipmentSaleStatus)
+    : "not_available";
+}
+
+function toSalePriceMode(value: unknown): EquipmentSalePriceMode {
+  return typeof value === "string" && SALE_PRICE_MODES.has(value as EquipmentSalePriceMode)
+    ? (value as EquipmentSalePriceMode)
+    : "request_quote";
+}
+
+function toSaleFulfillmentModes(value: unknown): EquipmentSaleFulfillmentMode[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const modes = value.filter((item): item is EquipmentSaleFulfillmentMode =>
+    typeof item === "string" && SALE_FULFILLMENT_MODES.has(item as EquipmentSaleFulfillmentMode)
+  );
+  return modes.length ? [...new Set(modes)] : undefined;
 }
 
 function toSpecs(value: unknown): Record<string, string> {
@@ -154,6 +204,19 @@ function toEquipment(row: RentalEquipmentRow): RentalEquipment {
     catalogueUrl: row.catalogue_url ?? undefined,
     trainingVideoUrl: row.training_video_url ?? undefined,
     displayOrder: Number(row.display_order ?? 0),
+    sale: {
+      enabled: Boolean(row.sale_enabled),
+      status: toSaleStatus(row.sale_status),
+      priceCents:
+        row.sale_price_cents === null || row.sale_price_cents === undefined
+          ? undefined
+          : Math.max(0, Math.floor(Number(row.sale_price_cents))),
+      priceMode: toSalePriceMode(row.sale_price_mode),
+      condition: row.sale_condition ?? undefined,
+      warranty: row.sale_warranty ?? undefined,
+      notes: row.sale_notes ?? undefined,
+      fulfillmentModes: toSaleFulfillmentModes(row.sale_fulfillment_modes),
+    },
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

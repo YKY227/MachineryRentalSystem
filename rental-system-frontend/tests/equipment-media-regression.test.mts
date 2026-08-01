@@ -29,6 +29,32 @@ test('publish-only PATCH does not emit unrelated equipment fields', () => {
   });
 });
 
+test('sale metadata is presence-aware for PATCH payloads', () => {
+  const publishOnlyPayload = buildRentalEquipmentPayload(
+    normalizeEquipmentPatchBody({ isPublished: true }),
+    '2026-08-01T00:00:00.000Z'
+  );
+  assert.equal('sale_enabled' in publishOnlyPayload, false);
+  assert.equal('sale_status' in publishOnlyPayload, false);
+  assert.equal('sale_price_cents' in publishOnlyPayload, false);
+
+  const salePayload = buildRentalEquipmentPayload(
+    normalizeEquipmentPatchBody({
+      saleEnabled: true,
+      saleStatus: 'available_for_sale',
+      salePriceMode: 'fixed',
+      salePriceCents: 2500000,
+      saleFulfillmentModes: ['deliver', 'self_collect'],
+    }),
+    '2026-08-01T00:00:00.000Z'
+  );
+  assert.equal(salePayload.sale_enabled, true);
+  assert.equal(salePayload.sale_status, 'available_for_sale');
+  assert.equal(salePayload.sale_price_mode, 'fixed');
+  assert.equal(salePayload.sale_price_cents, 2500000);
+  assert.deepEqual(salePayload.sale_fulfillment_modes, ['deliver', 'self_collect']);
+});
+
 test('explicit optional-field clears remain database null writes', () => {
   const patch = normalizeEquipmentPatchBody({
     brand: '',
