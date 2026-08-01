@@ -24,6 +24,7 @@ import {
 
 import type { Equipment, EquipmentSaleSettings, EquipmentSaleStatus } from "@/lib/rental/types";
 import { toSafeHttpResourceUrl } from "@/lib/rental/equipment/resource-urls";
+import { resolveEquipmentCatalogueSource } from "@/lib/rental/equipment/catalogue-pdfs";
 import {
   calculateAuthoritativeRentalPricing,
   calculateRentalDaysInclusive,
@@ -321,7 +322,7 @@ export default function RentalDetailPage() {
     setCataloguePreviewError(null);
     setCataloguePreviewUrl("");
     setCatalogueDownloadUrl("");
-    if (!equipment.catalogueStoragePath) return;
+    if (resolveEquipmentCatalogueSource(equipment.catalogueStoragePath, safeCatalogueUrl) !== "uploaded_pdf") return;
 
     setCataloguePreviewLoading(true);
     try {
@@ -405,8 +406,12 @@ export default function RentalDetailPage() {
 
   const heroImg = equipment.images?.[selectedImg] ?? equipment.images?.[0] ?? "";
   const safeCatalogueUrl = toSafeHttpResourceUrl(equipment.catalogueUrl);
-  const hasCatalogue = Boolean(safeCatalogueUrl || equipment.catalogueStoragePath);
-  const catalogueModalUrl = cataloguePreviewUrl || safeCatalogueUrl;
+  const catalogueSource = resolveEquipmentCatalogueSource(
+    equipment.catalogueStoragePath,
+    safeCatalogueUrl
+  );
+  const hasCatalogue = catalogueSource !== "none";
+  const catalogueModalUrl = catalogueSource === "uploaded_pdf" ? cataloguePreviewUrl : safeCatalogueUrl;
   const safeTrainingUrl = toSafeHttpResourceUrl(equipment.trainingVideoUrl);
   const youTubeEmbedUrl = safeTrainingUrl ? toYouTubeEmbedUrl(safeTrainingUrl) : "";
   const showGalleryControls = equipment.images.length >= 5;

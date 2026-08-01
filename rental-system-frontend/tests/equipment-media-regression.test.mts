@@ -21,6 +21,7 @@ import {
   getEquipmentCataloguePdfValidationError,
   hasExpectedEquipmentCataloguePdfSignature,
   isEquipmentCatalogueStoragePath,
+  resolveEquipmentCatalogueSource,
 } from '../src/lib/rental/equipment/catalogue-pdfs.ts';
 
 test('publish-only PATCH does not emit unrelated equipment fields', () => {
@@ -272,4 +273,35 @@ test('catalogue uploads require a bounded PDF and use a scoped storage path', ()
     true
   );
   assert.equal(isEquipmentCatalogueStoragePath('invoices/secret.pdf'), false);
+});
+
+test('uploaded catalogue storage clears stale URLs and remains the public source of truth', () => {
+  const storagePath = 'equipment-catalogues/scissor-lift/11111111-1111-1111-1111-111111111111.pdf';
+  const uploadPayload = buildRentalEquipmentPayload(
+    normalizeEquipmentPatchBody({
+      catalogueUrl: null,
+      catalogueStoragePath: storagePath,
+      catalogueFileName: 'scissor-lift-catalogue.pdf',
+    }),
+    '2026-08-01T00:00:00.000Z'
+  );
+  assert.equal(uploadPayload.catalogue_url, null);
+  assert.equal(uploadPayload.catalogue_storage_path, storagePath);
+  assert.equal(uploadPayload.catalogue_file_name, 'scissor-lift-catalogue.pdf');
+  assert.equal(
+    resolveEquipmentCatalogueSource(storagePath, 'https://safe.menlosecurity.com/legacy.pdf'),
+    'uploaded_pdf'
+  );
+  assert.equal(
+    resolveEquipmentCatalogueSource(null, 'https://example.com/catalogue.pdf'),
+    'manual_url'
+  );
+
+  const publishOnlyPayload = buildRentalEquipmentPayload(
+    normalizeEquipmentPatchBody({ isPublished: true }),
+    '2026-08-01T00:00:00.000Z'
+  );
+  assert.equal('catalogue_url' in publishOnlyPayload, false);
+  assert.equal('catalogue_storage_path' in publishOnlyPayload, false);
+  assert.equal('catalogue_file_name' in publishOnlyPayload, false);
 });

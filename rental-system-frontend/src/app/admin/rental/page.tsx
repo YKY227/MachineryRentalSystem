@@ -274,7 +274,9 @@ function buildPayload(editor: EditorState) {
     minDays: editor.minDays,
     depositAmount: editor.depositAmount,
     imageUrls: editor.images.map((item) => item.url.trim()).filter(Boolean),
-    catalogueUrl: editor.catalogueUrl.trim() || null,
+    // An attached managed PDF is the authoritative catalogue source. Clearing any
+    // legacy manual URL here prevents old external links surviving a PDF replacement.
+    catalogueUrl: editor.catalogue.storagePath ? null : editor.catalogueUrl.trim() || null,
     catalogueStoragePath: editor.catalogue.storagePath ?? null,
     catalogueFileName: editor.catalogue.fileName ?? null,
     trainingVideoUrl: editor.trainingVideoUrl.trim() || null,

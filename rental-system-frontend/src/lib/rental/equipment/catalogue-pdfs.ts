@@ -22,6 +22,17 @@ export function isEquipmentCatalogueStoragePath(value: string) {
   return /^equipment-catalogues\/[a-z0-9-]{1,100}\/[0-9a-f-]{36}\.pdf$/i.test(value);
 }
 
+export type EquipmentCatalogueSource = 'uploaded_pdf' | 'manual_url' | 'none';
+
+export function resolveEquipmentCatalogueSource(
+  storagePath: string | null | undefined,
+  manualUrl: string | null | undefined
+): EquipmentCatalogueSource {
+  if (storagePath && isEquipmentCatalogueStoragePath(storagePath)) return 'uploaded_pdf';
+  if (manualUrl?.trim()) return 'manual_url';
+  return 'none';
+}
+
 export function catalogueFileNameFromPath(path: string) {
   return path.split('/').pop() || 'catalogue.pdf';
 }
