@@ -1,5 +1,7 @@
 import "server-only";
 
+import { buildReturnReminderTemplate } from "@/lib/email/email-template-registry";
+import { getConfiguredEmailProvider } from "@/lib/email/server-email";
 import { EXTENSION_REVIEW_CLARIFICATION_MESSAGE } from "@/lib/rental/extensions/customer-messages";
 import { dbRentalOrderExtensionRepo } from "@/lib/rental/extensions/db-rental-order-extension-repo";
 import { deliverRentalEmail } from "@/lib/rental/invoices/email-delivery";
@@ -13,12 +15,6 @@ import type { RentalOrder } from "@/lib/rental/orders/types";
 const DEFAULT_RETURN_REMINDER_DAYS = [3, 1] as const;
 const DEFAULT_RETURN_REMINDER_BATCH_LIMIT = 50;
 const APP_BASE_URL = process.env.APP_BASE_URL ?? "";
-
-function getConfiguredEmailProvider() {
-  const provider = (process.env.EMAIL_PROVIDER ?? "resend").toLowerCase();
-  if (provider === "mock" || provider === "ses" || provider === "postmark") return provider;
-  return "resend";
-}
 
 export type ReturnReminderReasonCode =
   | "not_active"
@@ -140,7 +136,13 @@ function buildPortalInstruction(hasOpenExtensionRequest: boolean) {
   return `If you need more time, you may request an extension from your customer portal. ${EXTENSION_REVIEW_CLARIFICATION_MESSAGE}`;
 }
 
-async function buildReminderHtml(input: {
+function buildPortalUrl() {
+  return APP_BASE_URL
+    ? `${APP_BASE_URL.replace(/\/+$/, "")}/rental/account`
+    : "";
+}
+
+async function buildReminderTemplate(input: {
   order: RentalOrder;
   reminderStage: RentalOrderReturnReminderStage;
   hasOpenExtensionRequest: boolean;
@@ -150,15 +152,15 @@ async function buildReminderHtml(input: {
     input.order.customerSnapshot?.companyName?.trim() ||
     "Customer";
 
-  return `
-    <div style="font-family:Arial,sans-serif; line-height:1.5">
-      <p>Dear ${customerName},</p>
-      <p><strong>${getStageLabel(input.reminderStage)}:</strong> your rental for <strong>${input.order.equipmentTitle}</strong> is currently scheduled to end on <strong>${formatDate(input.order.end)}</strong>.</p>
-      <p>Please arrange for the equipment to be returned by the current return date unless a separate extension request is approved.</p>
-      <p>${buildPortalInstruction(input.hasOpenExtensionRequest)}</p>
-      <p>Thank you.</p>
-    </div>
-  `;
+  return buildReturnReminderTemplate({
+    stageLabel: getStageLabel(input.reminderStage),
+    orderId: input.order.id,
+    customerName,
+    equipmentTitle: input.order.equipmentTitle,
+    rentalEnd: input.order.end,
+    portalUrl: buildPortalUrl(),
+    extensionMessage: buildPortalInstruction(input.hasOpenExtensionRequest),
+  });
 }
 
 async function processSingleOrder(input: {
@@ -218,17 +220,16 @@ async function processSingleOrder(input: {
     return { ...baseResult, reasonCode: "dry_run" };
   }
 
-  const subject = `${getStageLabel(stage)} for Rental Order ${input.order.id}`;
-
   try {
+    const template = await buildReminderTemplate({
+      order: input.order,
+      reminderStage: stage,
+      hasOpenExtensionRequest,
+    });
     const delivery = await deliverRentalEmail({
       to: recipient,
-      subject,
-      html: await buildReminderHtml({
-        order: input.order,
-        reminderStage: stage,
-        hasOpenExtensionRequest,
-      }),
+      subject: template.subject,
+      html: template.html,
     });
     const sentAt = new Date().toISOString();
 
@@ -238,7 +239,7 @@ async function processSingleOrder(input: {
       reminderKind: "return",
       reminderStage: stage,
       recipientEmail: recipient,
-      subject,
+      subject: template.subject,
       provider: delivery.provider,
       providerMessageId: delivery.providerMessageId ?? undefined,
       status: "sent",
@@ -259,7 +260,7 @@ async function processSingleOrder(input: {
       reminderKind: "return",
       reminderStage: stage,
       recipientEmail: recipient,
-      subject,
+      subject: `${getStageLabel(stage)} for Rental Order ${input.order.id}`,
       provider: getConfiguredEmailProvider(),
       status: "failed",
       errorMessage: error instanceof Error ? error.message : "Return reminder send failed",

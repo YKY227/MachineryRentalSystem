@@ -28,6 +28,7 @@ import {
 } from "lucide-react";
 
 import type { RentalCustomerPortalOverview } from "@/lib/rental/customers/portal-types";
+import type { RentalCustomerDamageReviewStatus } from "@/lib/rental/damage-assessments/types";
 import type { RentalOrderDepositStatus } from "@/lib/rental/deposits/types";
 import {
   EXTENSION_REVIEW_CLARIFICATION_MESSAGE,
@@ -106,6 +107,17 @@ function labelForDepositStatus(status: RentalOrderDepositStatus) {
   }
 }
 
+function labelForDamageReviewStatus(status?: RentalCustomerDamageReviewStatus) {
+  switch (status) {
+    case "issues_under_review":
+      return "Issues under review";
+    case "assessment_completed":
+      return "Assessment completed";
+    default:
+      return "-";
+  }
+}
+
 function labelForCreditStatus(status: RentalCustomerPortalOverview["creditSummary"]["status"]) {
   switch (status) {
     case "blocked_manual_hold":
@@ -173,7 +185,15 @@ function portalExtensionMessage(extension: RentalCustomerPortalOverview["recentE
   return extension.customerMessage;
 }
 
-function RentalCustomerAccountContent() {
+export default function RentalCustomerAccountPage() {
+  return (
+    <Suspense fallback={<RentalCustomerAccountFallback />}>
+      <RentalCustomerAccountPageInner />
+    </Suspense>
+  );
+}
+
+function RentalCustomerAccountPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [loading, setLoading] = useState(true);
@@ -616,6 +636,7 @@ function RentalCustomerAccountContent() {
               <div className="mt-3 grid gap-2 text-xs text-slate-600 sm:grid-cols-2">
                 <div>Return status: {labelForReturnStatus(order.returnStatus)}</div>
                 <div>Inspection: {labelForInspectionStatus(order.inspectionStatus)}</div>
+                <div>Damage review: {labelForDamageReviewStatus(order.damageReviewStatus)}</div>
                 <div>Returned on: {formatDate(order.returnedAt)}</div>
                 <div>Workflow completed: {formatDate(order.completedAt)}</div>
               </div>
@@ -858,11 +879,13 @@ function RentalCustomerAccountContent() {
   );
 }
 
-export default function RentalCustomerAccountPage() {
+function RentalCustomerAccountFallback() {
   return (
-    <Suspense fallback={<div className="p-4 text-sm text-slate-600">Loading your account...</div>}>
-      <RentalCustomerAccountContent />
-    </Suspense>
+    <div className="mx-auto max-w-6xl p-4">
+      <div className="rounded-2xl border border-slate-200 bg-white p-6 text-sm text-slate-600 shadow-sm">
+        Loading your account...
+      </div>
+    </div>
   );
 }
 
@@ -968,3 +991,4 @@ function ListSection(input: {
     </section>
   );
 }
+

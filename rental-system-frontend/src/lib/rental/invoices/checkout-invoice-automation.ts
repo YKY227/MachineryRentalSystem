@@ -1,11 +1,14 @@
+﻿//src/lib/rental/invoices/checkout-invoice-automation.ts
 import "server-only";
 
+import { buildCheckoutPaidInvoiceTemplate } from "@/lib/email/email-template-registry";
 import { dbInvoiceRepo } from "@/lib/rental/invoices/db-invoice-repo";
 import { dbPaymentRepo } from "@/lib/rental/invoices/db-payment-repo";
 import { deliverInvoiceEmail } from "@/lib/rental/invoices/email-delivery";
 import { dbRentalDepositRepo } from "@/lib/rental/deposits/db-rental-deposit-repo";
 import { markAvailabilityHoldConsumed } from "@/lib/rental/holds/db-rental-availability-service";
 import { dbOrderRepo } from "@/lib/rental/orders/db-order-repo";
+import { sendNewOrderNotificationIfNeeded } from "@/lib/rental/orders/new-order-notification-service";
 import { dbOrderPaymentSessionRepo } from "@/lib/rental/orders/db-order-payment-session-repo";
 
 type CheckoutInvoiceAutomationResult = {
@@ -25,6 +28,14 @@ function moneyFromCents(cents: number) {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(v / 100);
+}
+
+function maskEmail(email: string) {
+  const trimmed = email.trim();
+  const [local = "", domain = ""] = trimmed.split("@");
+  if (!local || !domain) return "invalid";
+  if (local.length <= 2) return `${local[0] ?? "*"}***@${domain}`;
+  return `${local.slice(0, 2)}***@${domain}`;
 }
 
 function extractCustomerEmail(payload?: Record<string, unknown>) {
@@ -111,6 +122,16 @@ export async function processPaidCheckoutSession(
     order.customerSnapshot?.contactName?.trim() ||
     order.customerSnapshot?.companyName?.trim() ||
     "";
+
+  console.info("[checkout-invoice-automation] processing paid checkout", {
+    paymentSessionId,
+    orderId: order.id,
+    provider: session.provider,
+    providerPaymentRequestIdPresent: Boolean(session.providerPaymentRequestId),
+    invoiceAppliedAt: session.invoiceAppliedAt ?? null,
+    invoiceEmailSentAt: session.invoiceEmailSentAt ?? null,
+    customerEmail: customerEmail ? maskEmail(customerEmail) : null,
+  });
 
   if (invoice.status === "draft") {
     try {
@@ -206,6 +227,16 @@ export async function processPaidCheckoutSession(
     throw stageError("idempotency_marker_update_after_payment", error);
   }
 
+  try {
+    await sendNewOrderNotificationIfNeeded(order.id);
+  } catch (error) {
+    console.error("[checkout-invoice-automation] new order notification failed", {
+      paymentSessionId,
+      orderId: order.id,
+      error: error instanceof Error ? error.message : "unknown error",
+    });
+  }
+
   if (session.invoiceEmailSentAt) {
     console.info("[checkout-invoice-automation] already marked invoice email sent", {
       paymentSessionId,
@@ -297,28 +328,27 @@ export async function processPaidCheckoutSession(
     };
   }
 
-  const subject = `Tax Invoice ${invoice.invoiceNo ?? invoice.id}`;
+  const emailTemplate = await buildCheckoutPaidInvoiceTemplate({
+    customerName: customerName || invoice.billTo?.name || "Customer",
+    invoiceNo: invoice.invoiceNo ?? invoice.id,
+    totalCents: invoice.totalInclGstCents,
+    paidCents: paymentResult.totals.paidCents,
+    balanceCents: paymentResult.totals.balanceCents,
+    depositCents: depositAmountCents,
+  });
   let delivery;
   try {
+    console.info("[checkout-invoice-automation] sending checkout invoice email", {
+      paymentSessionId,
+      orderId: order.id,
+      invoiceId: invoice.id,
+      recipient: maskEmail(recipient),
+    });
     delivery = await deliverInvoiceEmail({
       invoice,
       to: recipient,
-      subject,
-      html: `
-        <div style="font-family:Arial,sans-serif; line-height:1.5">
-          <p>Dear ${customerName || invoice.billTo?.name || "Customer"},</p>
-          <p>Thank you for your payment. Please find attached your tax invoice <strong>${invoice.invoiceNo ?? invoice.id}</strong>.</p>
-          <p><strong>Total Amount:</strong> ${moneyFromCents(invoice.totalInclGstCents)}</p>
-          <p><strong>Invoice Amount Paid:</strong> ${moneyFromCents(paymentResult.totals.paidCents)}</p>
-          <p><strong>Outstanding Balance:</strong> ${moneyFromCents(paymentResult.totals.balanceCents)}</p>
-          ${
-            depositAmountCents > 0
-              ? `<p><strong>Refundable Deposit Held:</strong> ${moneyFromCents(depositAmountCents)}</p>`
-              : ""
-          }
-          <p>We have attached the invoice PDF for your records.</p>
-        </div>
-      `,
+      subject: emailTemplate.subject,
+      html: emailTemplate.html,
     });
   } catch (error) {
     logAutomationFailure("invoice_email_send", { paymentSessionId, orderId: order.id, invoiceId: invoice.id }, error);
@@ -331,7 +361,7 @@ export async function processPaidCheckoutSession(
       invoiceId: invoice.id,
       type: "sent",
       to: recipient,
-      subject,
+      subject: emailTemplate.subject,
       provider: delivery.provider,
       status: "sent",
       providerMessageId: delivery.providerMessageId ?? undefined,
@@ -341,7 +371,7 @@ export async function processPaidCheckoutSession(
     await dbInvoiceRepo.appendEmailLog(invoice.id, {
       type: "sent",
       to: recipient,
-      subject,
+      subject: emailTemplate.subject,
       provider: delivery.provider,
       status: "sent",
       providerMessageId: delivery.providerMessageId ?? undefined,
@@ -400,7 +430,7 @@ export async function processPaidCheckoutSession(
     invoiceId: invoice.id,
     invoicePaymentId: paymentResult.payment.id,
     allocationId: paymentResult.allocation.id,
-    recipient,
+    recipient: maskEmail(recipient),
   });
 
   return {

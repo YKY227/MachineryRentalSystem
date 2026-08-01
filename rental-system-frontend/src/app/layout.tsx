@@ -4,7 +4,7 @@ import type { Metadata } from "next";
 import { DriverIdentityProvider } from "@/lib/use-driver-identity";
 
 export const metadata: Metadata = {
-  title: "Courier Management System",
+  title: "Machinery Rental System",
   description: "Same-day and multi-stop courier booking.",
 };
 

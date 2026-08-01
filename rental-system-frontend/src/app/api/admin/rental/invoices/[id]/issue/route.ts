@@ -1,3 +1,5 @@
+//src/app/api/admin/rental/invoices/[id]/issue/route.ts
+
 import { NextResponse } from "next/server";
 
 import { dbInvoiceRepo } from "@/lib/rental/invoices/db-invoice-repo";

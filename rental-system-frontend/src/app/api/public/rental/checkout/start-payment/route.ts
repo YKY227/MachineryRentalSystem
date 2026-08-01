@@ -323,7 +323,10 @@ export async function POST(req: Request) {
         providerReferenceNumber: paymentRequest.referenceNumber,
         redirectUrl: paymentRequest.url,
         status: paymentRequest.status,
-        webhookPayload: paymentRequest.raw,
+        webhookPayload: {
+          ...(session.webhookPayload ?? {}),
+          providerRequest: paymentRequest.raw,
+        },
       });
 
       return NextResponse.json({
@@ -344,6 +347,7 @@ export async function POST(req: Request) {
         await dbOrderPaymentSessionRepo.update(session.id, {
           status: "failed",
           webhookPayload: {
+            ...(session.webhookPayload ?? {}),
             error: error instanceof Error ? error.message : "HitPay create payment request failed",
           },
         }).catch(() => null);

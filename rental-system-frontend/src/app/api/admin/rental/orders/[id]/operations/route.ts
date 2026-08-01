@@ -45,6 +45,10 @@ const INSPECTION_STATUSES = new Set<RentalOrderInspectionStatus>([
   "issues_found",
 ]);
 
+function isInspectionFinal(status: RentalOrderInspectionStatus) {
+  return status === "passed" || status === "issues_found";
+}
+
 export async function POST(req: Request, ctx: RouteContext) {
   try {
     assertAdmin(req);
@@ -64,6 +68,15 @@ export async function POST(req: Request, ctx: RouteContext) {
       return NextResponse.json({ error: "Invalid inspection status" }, { status: 400 });
     }
 
+    if (nextReturnStatus === "out" && nextInspectionStatus !== "not_started") {
+      return NextResponse.json(
+        {
+          error: "Inspection cannot start or finish while the equipment is still out on rent",
+        },
+        { status: 400 }
+      );
+    }
+
     const now = new Date().toISOString();
     const returnedAt =
       nextReturnStatus === "out"
@@ -75,15 +88,22 @@ export async function POST(req: Request, ctx: RouteContext) {
     let completedAt: string | null | undefined = order.completedAt ?? null;
     let normalizedReturnStatus = nextReturnStatus;
     if (body.markCompleted) {
-      if ((nextReturnStatus === "out" && !returnedAt) || nextInspectionStatus === "not_started" || nextInspectionStatus === "pending") {
+      if (nextReturnStatus === "out" || !returnedAt || !isInspectionFinal(nextInspectionStatus)) {
         return NextResponse.json(
-          { error: "Inspection must be completed before closing the workflow" },
+          { error: "Record the return and finish inspection before closing the order workflow" },
           { status: 400 }
         );
       }
       normalizedReturnStatus = "completed";
       completedAt = order.completedAt ?? now;
-    } else if (nextReturnStatus !== "completed") {
+    } else if (nextReturnStatus === "completed") {
+      if (!returnedAt || !isInspectionFinal(nextInspectionStatus)) {
+        return NextResponse.json(
+          { error: "Record the return and finish inspection before marking the order operationally closed" },
+          { status: 400 }
+        );
+      }
+    } else {
       completedAt = null;
     }
 

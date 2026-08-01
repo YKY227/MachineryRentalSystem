@@ -79,6 +79,40 @@ export default function AdminSettingsNotificationsPage() {
               placeholder="ops@company.com"
             />
           </label>
+
+          <label className="flex flex-col gap-1">
+            <span className="text-sm font-medium text-slate-700">
+              New order recipients (CSV)
+            </span>
+            <input
+              type="text"
+              value={settings.newOrderRecipientsCsv}
+              onChange={(e) => settings.setNewOrderRecipientsCsv(e.target.value)}
+              disabled={settings.loading}
+              className={settingsInputClass}
+              placeholder="ops@company.com, rentals@company.com"
+            />
+            <span className="text-xs text-slate-500">
+              Event-specific override for newly received rental orders.
+            </span>
+          </label>
+
+          <label className="flex flex-col gap-1 md:col-span-2">
+            <span className="text-sm font-medium text-slate-700">
+              Contact form recipients (CSV)
+            </span>
+            <input
+              type="text"
+              value={settings.contactFormRecipientsCsv}
+              onChange={(e) => settings.setContactFormRecipientsCsv(e.target.value)}
+              disabled={settings.loading}
+              className={settingsInputClass}
+              placeholder="sales@company.com, ops@company.com"
+            />
+            <span className="text-xs text-slate-500">
+              Event-specific override for public website contact enquiries.
+            </span>
+          </label>
         </div>
       </SettingsCard>
 

@@ -36,6 +36,8 @@ export type AdminSettings = {
   testerEmails: string[];
   bookingPaidRecipients: string[];
   overdueRecipients: string[];
+  newOrderRecipients: string[];
+  contactFormRecipients: string[];
   reminderPolicy: ReminderPolicySettings;
   operationsPolicy: {
     defaultMaintenanceBufferDays: number;
@@ -69,6 +71,8 @@ type AdminNotificationSettingsValue = {
   testerEmails: string[];
   bookingPaidRecipients: string[];
   overdueRecipients: string[];
+  newOrderRecipients: string[];
+  contactFormRecipients: string[];
 };
 
 const DEFAULT_ADMIN_ORG_SETTINGS: AdminOrgSettingsValue = {
@@ -90,6 +94,8 @@ const DEFAULT_ADMIN_NOTIFICATION_SETTINGS: AdminNotificationSettingsValue = {
   testerEmails: [],
   bookingPaidRecipients: [],
   overdueRecipients: [],
+  newOrderRecipients: [],
+  contactFormRecipients: [],
 };
 
 export const DEFAULT_OPERATIONS_POLICY_SETTINGS = {
@@ -222,6 +228,8 @@ function sanitizeAdminNotificationSettings(value: unknown): AdminNotificationSet
     testerEmails: sanitizeStringArray(raw.testerEmails),
     bookingPaidRecipients: sanitizeStringArray(raw.bookingPaidRecipients),
     overdueRecipients: sanitizeStringArray(raw.overdueRecipients),
+    newOrderRecipients: sanitizeStringArray(raw.newOrderRecipients),
+    contactFormRecipients: sanitizeStringArray(raw.contactFormRecipients),
   };
 }
 

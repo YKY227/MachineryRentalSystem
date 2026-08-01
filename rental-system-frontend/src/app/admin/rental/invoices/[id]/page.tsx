@@ -20,6 +20,7 @@ import {
 
 import type {
   Invoice,
+  InvoiceBillToSnapshot,
   InvoiceEmailEventType,
   InvoiceEmailLogItem,
   InvoicePayment,
@@ -57,6 +58,10 @@ function toDateInputValue(iso?: string) {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return new Date().toISOString().slice(0, 10);
   return d.toISOString().slice(0, 10);
+}
+
+function billToAddressText(billTo?: InvoiceBillToSnapshot | null) {
+  return (billTo?.addressLines ?? []).join("\n");
 }
 
 function statusChip(status: Invoice["status"]) {
@@ -180,6 +185,7 @@ export default function AdminInvoiceDetailPage() {
   const [loading, setLoading] = useState(true);
   const [paymentsLoading, setPaymentsLoading] = useState(false);
   const [activeAction, setActiveAction] = useState<InvoiceActionKey | null>(null);
+  const [issuingInvoice, setIssuingInvoice] = useState(false);
   const [banner, setBanner] = useState<BannerState | null>(null);
   const bannerTimeoutRef = useRef<number | null>(null);
 
@@ -187,10 +193,15 @@ export default function AdminInvoiceDetailPage() {
   const [billToEmail, setBillToEmail] = useState("");
   const [billToUen, setBillToUen] = useState("");
   const [billToAddress, setBillToAddress] = useState("");
+  const [customerAccountBillTo, setCustomerAccountBillTo] = useState<InvoiceBillToSnapshot | null>(null);
+  const [loadingCustomerBillTo, setLoadingCustomerBillTo] = useState(false);
 
   const isDraft = inv?.status === "draft";
   const isIssued = inv?.status === "issued";
   const isVoid = inv?.status === "void";
+  const damageChargeContext = inv?.metadata?.damageCharge;
+  const isDamageChargeInvoice =
+    inv?.metadata?.contextType === "damage_charge" || damageChargeContext?.kind === "damage_charge";
 
   const [showEmailModal, setShowEmailModal] = useState(false);
   const [emailTo, setEmailTo] = useState("");
@@ -277,12 +288,13 @@ export default function AdminInvoiceDetailPage() {
         : [];
       setInv(found);
       setEmails(nextEmails);
+      setCustomerAccountBillTo((data?.customerAccountBillTo ?? null) as InvoiceBillToSnapshot | null);
 
       if (found) {
         setBillToName(found.billTo?.name ?? "");
         setBillToEmail(found.billTo?.email ?? "");
         setBillToUen(found.billTo?.uen ?? "");
-        setBillToAddress((found.billTo?.addressLines ?? []).join("\n"));
+        setBillToAddress(billToAddressText(found.billTo));
         await loadPayments(found.id);
       } else {
         setPayments([]);
@@ -291,6 +303,7 @@ export default function AdminInvoiceDetailPage() {
     } catch (e) {
       setInv(null);
       setEmails([]);
+      setCustomerAccountBillTo(null);
       setPayments([]);
       setPaymentTotals(EMPTY_PAYMENT_TOTALS);
       const message = e instanceof Error ? e.message : "Failed to load invoice";
@@ -427,8 +440,44 @@ export default function AdminInvoiceDetailPage() {
     }
   }
 
+  async function onLoadBillToFromCustomerAccount() {
+    if (!inv || inv.status !== "draft" || !customerAccountBillTo || loadingCustomerBillTo) return;
+
+    try {
+      setLoadingCustomerBillTo(true);
+      const res = await fetch(
+        `/api/admin/rental/invoices/${encodeURIComponent(inv.id)}/load-customer-bill-to`,
+        {
+          method: "POST",
+          credentials: "include",
+        }
+      );
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error ?? "Failed to load Bill To from customer account");
+
+      const nextInvoice = (data?.invoice ?? null) as Invoice | null;
+      const nextCustomerBillTo = (data?.customerAccountBillTo ?? null) as InvoiceBillToSnapshot | null;
+      setCustomerAccountBillTo(nextCustomerBillTo);
+
+      if (nextInvoice) {
+        setInv(nextInvoice);
+        setBillToName(nextInvoice.billTo?.name ?? "");
+        setBillToEmail(nextInvoice.billTo?.email ?? "");
+        setBillToUen(nextInvoice.billTo?.uen ?? "");
+        setBillToAddress(billToAddressText(nextInvoice.billTo));
+      }
+
+      flash("Loaded Bill To from customer account.", "success");
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "Failed to load Bill To from customer account";
+      flash(message, "error");
+    } finally {
+      setLoadingCustomerBillTo(false);
+    }
+  }
+
   async function onIssue() {
-    if (!inv || inv.status !== "draft") return;
+    if (!inv || inv.status !== "draft" || issuingInvoice) return;
 
     const ok = window.confirm(
       "Issue Tax Invoice?\n\nOnce issued, an invoice number will be assigned and the invoice will be locked."
@@ -436,6 +485,7 @@ export default function AdminInvoiceDetailPage() {
     if (!ok) return;
 
     try {
+      setIssuingInvoice(true);
       const res = await fetch(`/api/admin/rental/invoices/${encodeURIComponent(inv.id)}/issue`, {
         method: "POST",
         credentials: "include",
@@ -450,6 +500,8 @@ export default function AdminInvoiceDetailPage() {
     } catch (e) {
       const message = e instanceof Error ? e.message : "Failed to issue invoice";
       flash(message, "error");
+    } finally {
+      setIssuingInvoice(false);
     }
   }
 
@@ -759,18 +811,18 @@ export default function AdminInvoiceDetailPage() {
                   </button>
                   <button
                     type="button"
-                    disabled={!canIssue}
+                    disabled={!canIssue || issuingInvoice}
                     onClick={onIssue}
                     className={[
                       "inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold",
-                      canIssue
+                      canIssue && !issuingInvoice
                         ? "bg-[#D24338] text-white hover:bg-[#B9382E]"
                         : "bg-slate-200 text-slate-500",
                     ].join(" ")}
-                    title={!canIssue ? "Fill Bill To name and ensure items exist." : "Issue and lock invoice"}
+                    title={issuingInvoice ? "Issuing invoice..." : !canIssue ? "Fill Bill To name and ensure items exist." : "Issue and lock invoice"}
                   >
                     <Receipt className="h-4 w-4" />
-                    Issue Invoice
+                    {issuingInvoice ? "Issuing..." : "Issue Invoice"}
                   </button>
                 </>
               )}
@@ -1136,14 +1188,31 @@ export default function AdminInvoiceDetailPage() {
                 title="Bill To"
                 subtitle={isDraft ? "Editable while draft." : "Locked after issue or void."}
               />
-              {!isDraft && (
-                <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-600">
-                  Locked
-                </span>
-              )}
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                {isDraft && customerAccountBillTo && (
+                  <button
+                    type="button"
+                    disabled={loadingCustomerBillTo}
+                    onClick={onLoadBillToFromCustomerAccount}
+                    className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400"
+                  >
+                    {loadingCustomerBillTo ? "Loading customer..." : "Load from customer account"}
+                  </button>
+                )}
+                {!isDraft && (
+                  <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-600">
+                    Locked
+                  </span>
+                )}
+              </div>
             </div>
 
             <div className="mt-4 grid gap-3">
+              {isDraft && customerAccountBillTo ? (
+                <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+                  Linked registered customer account details are available for this draft invoice. Loading from customer account updates the invoice snapshot only.
+                </div>
+              ) : null}
               <div>
                 <label className="text-xs font-semibold text-slate-600">Company Name</label>
                 <input
@@ -1335,9 +1404,34 @@ export default function AdminInvoiceDetailPage() {
                       <span className="text-slate-600">Order Ref</span>
                       <span className="font-mono text-xs font-semibold text-slate-900">{inv.orderId}</span>
                     </div>
+                    {isDamageChargeInvoice && (
+                      <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                        Manual damage charge receivable. Assessment and deposit references below are advisory audit links only.
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
+
+              {isDamageChargeInvoice && (
+                <div className="mt-6 rounded-xl border border-slate-200 bg-slate-50 p-4">
+                  <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Damage Charge Context</div>
+                  <div className="mt-3 space-y-2 text-sm text-slate-700">
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-slate-600">Assessment Ref</span>
+                      <span className="font-mono text-xs text-slate-900">{damageChargeContext?.damageAssessmentId ?? "-"}</span>
+                    </div>
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-slate-600">Deposit Ref</span>
+                      <span className="font-mono text-xs text-slate-900">{damageChargeContext?.depositTransactionId ?? "-"}</span>
+                    </div>
+                    <div>
+                      <span className="text-slate-600">Notes</span>
+                      <div className="mt-1 text-slate-900">{damageChargeContext?.notes?.trim() || "-"}</div>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               <div className="mt-6 overflow-hidden rounded-xl border border-slate-200">
                 <table className="w-full text-left text-sm">

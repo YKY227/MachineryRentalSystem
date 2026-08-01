@@ -4,6 +4,11 @@ import {
   computeRentalCustomerCreditControlSummary,
   type RentalCustomerCreditControlSummary,
 } from "@/lib/rental/credit-control/db-rental-credit-control";
+import { dbRentalDamageAssessmentRepo } from "@/lib/rental/damage-assessments/db-rental-damage-assessment-repo";
+import type {
+  RentalCustomerDamageReviewStatus,
+  RentalDamageAssessmentSummary,
+} from "@/lib/rental/damage-assessments/types";
 import { dbRentalCustomerRepo } from "@/lib/rental/customers/db-rental-customer-repo";
 import { dbRentalDepositRepo } from "@/lib/rental/deposits/db-rental-deposit-repo";
 import type { RentalOrderDepositStatus } from "@/lib/rental/deposits/types";
@@ -90,6 +95,7 @@ export type RentalCustomerRecentOrder = {
   returnStatus: RentalOrderReturnStatus;
   returnedAt?: string;
   inspectionStatus: RentalOrderInspectionStatus;
+  damageReviewStatus?: RentalCustomerDamageReviewStatus;
   completedAt?: string;
   createdAt: string;
 };
@@ -212,6 +218,17 @@ function deriveOrderStatus(input: {
   }
 }
 
+function deriveDamageReviewStatus(input: {
+  inspectionStatus: RentalOrderInspectionStatus;
+  assessment: RentalDamageAssessmentSummary;
+}): RentalCustomerDamageReviewStatus | undefined {
+  if (input.assessment.status === "finalized") return "assessment_completed";
+  if (input.inspectionStatus === "issues_found" || input.assessment.exists) {
+    return "issues_under_review";
+  }
+  return undefined;
+}
+
 export async function loadRentalCustomerOverview(customerId: string): Promise<RentalCustomerOverview> {
   const customer = await dbRentalCustomerRepo.getById(customerId);
   if (!customer) throw new Error("Customer not found");
@@ -318,6 +335,7 @@ export async function loadRentalCustomerOverview(customerId: string): Promise<Re
     }))
   );
   const depositSummariesByOrderId = await dbRentalDepositRepo.listByOrderIds(allOrderIds);
+  const assessmentSummariesByOrderId = await dbRentalDamageAssessmentRepo.listSummariesByOrderIds(allOrderIds);
   const extensionsByOrderId = await dbRentalOrderExtensionRepo.listByOrderIds(allOrderIds);
 
   const recentInvoices = allInvoices.slice(0, recentInvoiceLimit).map((invoice) => ({
@@ -408,6 +426,7 @@ export async function loadRentalCustomerOverview(customerId: string): Promise<Re
       const balance = totals?.balanceCents ?? Math.max(0, Number(invoice.total_incl_gst_cents ?? 0));
       const isOpen = balance > 0;
       const isOverdue = totals?.status === "overdue";
+
       return {
         totalInvoices: summary.totalInvoices + 1,
         totalPaidCents: summary.totalPaidCents + totalPaid,
@@ -496,6 +515,12 @@ export async function loadRentalCustomerOverview(customerId: string): Promise<Re
         unresolvedAmountCents: 0,
         status: "not_required" as const,
       };
+      const assessment = assessmentSummariesByOrderId[order.id] ?? {
+        orderId: order.id,
+        exists: false,
+        issueCategories: [],
+        estimatedRetentionCents: 0,
+      };
 
       return {
         id: order.id,
@@ -515,6 +540,10 @@ export async function loadRentalCustomerOverview(customerId: string): Promise<Re
         returnStatus: order.return_status ?? "out",
         returnedAt: order.returned_at ?? undefined,
         inspectionStatus: order.inspection_status ?? "not_started",
+        damageReviewStatus: deriveDamageReviewStatus({
+          inspectionStatus: order.inspection_status ?? "not_started",
+          assessment,
+        }),
         completedAt: order.completed_at ?? undefined,
         createdAt: order.created_at,
       };

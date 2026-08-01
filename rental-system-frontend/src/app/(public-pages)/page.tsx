@@ -6,6 +6,7 @@ import {
   ArrowRight,
   CalendarDays,
   Gauge,
+  Mail,
   PackageSearch,
   ShieldCheck,
   Truck,
@@ -109,6 +110,12 @@ export default function LandingPage() {
 
           <div className="flex flex-wrap items-center gap-2 text-sm">
             <Link
+              href="/contact"
+              className="rounded-xl border border-slate-200 bg-white px-4 py-2 font-medium text-slate-700 hover:bg-slate-50"
+            >
+              Contact Us
+            </Link>
+            <Link
               href="/rental"
               className="rounded-xl border border-slate-200 bg-white px-4 py-2 font-medium text-slate-700 hover:bg-slate-50"
             >
@@ -173,6 +180,13 @@ export default function LandingPage() {
               >
                 Browse rental items
                 <ArrowRight className="ml-2 h-5 w-5" />
+              </Link>
+              <Link
+                href="/contact"
+                className="inline-flex items-center rounded-2xl border border-slate-200 bg-white px-6 py-3 text-base font-semibold text-slate-700 hover:bg-slate-50"
+              >
+                <Mail className="mr-2 h-5 w-5 text-[#D24338]" />
+                Contact us
               </Link>
               {landingMode === "customer" && (
                 <Link
@@ -272,6 +286,29 @@ export default function LandingPage() {
                 <p className="mt-2 text-sm leading-6 text-slate-600">{card.description}</p>
               </div>
             ))}
+          </div>
+        </section>
+
+        <section className="py-12">
+          <div className="rounded-[32px] border border-slate-200 bg-white/90 p-8 shadow-sm md:flex md:items-center md:justify-between md:gap-8">
+            <div className="max-w-2xl">
+              <div className="text-sm font-semibold uppercase tracking-[0.18em] text-[#D24338]">Need a faster answer?</div>
+              <h2 className="mt-3 text-3xl font-semibold tracking-tight text-[#2A2A2A]">
+                Send your rental enquiry to our team.
+              </h2>
+              <p className="mt-3 text-sm leading-7 text-slate-600">
+                Use the contact form to ask about availability, site requirements, account setup, or anything you need clarified before booking.
+              </p>
+            </div>
+            <div className="mt-6 md:mt-0">
+              <Link
+                href="/contact"
+                className="inline-flex items-center rounded-2xl bg-slate-900 px-6 py-3 text-base font-semibold text-white hover:bg-slate-800"
+              >
+                Open contact form
+                <ArrowRight className="ml-2 h-5 w-5" />
+              </Link>
+            </div>
           </div>
         </section>
       </div>

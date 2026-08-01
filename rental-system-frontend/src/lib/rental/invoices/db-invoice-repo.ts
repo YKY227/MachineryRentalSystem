@@ -7,19 +7,25 @@ import type {
   InvoiceListSortBy,
   InvoiceListSortDir,
   InvoiceItem,
+  InvoiceMetadata,
   InvoicePdfStorage,
   InvoiceStatus,
   InvoiceSupplierSnapshot,
 } from "@/lib/rental/invoices/types";
 import { calculateRentalCharges, RENTAL_GST_RATE } from "@/lib/rental/orders/pricing";
+import { resolveInvoiceBillToContext } from "@/lib/rental/invoices/invoice-bill-to";
+import type { RentalOrderCustomerSnapshot } from "@/lib/rental/orders/types";
 import { supabaseAdmin } from "@/lib/supabase/server";
 
 const INVOICE_TABLE = process.env.SUPABASE_INVOICES_TABLE ?? "rental_invoices";
 const INVOICE_EMAILS_TABLE = process.env.SUPABASE_INVOICE_EMAILS_TABLE ?? "rental_invoice_emails";
+const ALLOCATE_INVOICE_NO_RPC = "allocate_rental_invoice_no";
 const ORDER_NOT_VOID_FILTER = "void";
 
 export type DraftFromOrderInput = {
   orderId: string;
+  customerId?: string;
+  customerSnapshot?: RentalOrderCustomerSnapshot;
   equipmentTitle: string;
   qty: number;
   start: string;
@@ -41,6 +47,7 @@ export type CreateCustomDraftInvoiceInput = {
   description: string;
   amountExclGstCents: number;
   depositCents?: number;
+  metadata?: InvoiceMetadata;
 };
 
 export type InvoiceListFilters = {
@@ -72,6 +79,7 @@ type InvoiceRow = {
   gst_amount_cents: number | null;
   total_incl_gst_cents: number | null;
   deposit_cents: number | null;
+  metadata: InvoiceMetadata | null;
   email_log: InvoiceEmailLogItem[] | null;
   void_reason: string | null;
   voided_at: string | null;
@@ -86,7 +94,7 @@ type InvoiceEmailRow = {
   to: string;
   cc: string | null;
   subject: string;
-  provider: "mock" | "resend" | "ses" | "postmark";
+  provider: "mock" | "sendgrid" | "resend" | "ses" | "postmark";
   status: "sent" | "queued" | "failed";
   provider_message_id: string | null;
   pdf_sha256: string | null;
@@ -112,6 +120,7 @@ const BASE_COLUMNS = [
   "gst_amount_cents",
   "total_incl_gst_cents",
   "deposit_cents",
+  "metadata",
   "email_log",
   "void_reason",
   "voided_at",
@@ -123,15 +132,23 @@ function nowIso() {
   return new Date().toISOString();
 }
 
-function pad5(n: number) {
-  return String(n).padStart(5, "0");
-}
-
 function monthKeyFromISO(iso: string) {
   const d = new Date(iso);
   const y = d.getUTCFullYear();
   const m = String(d.getUTCMonth() + 1).padStart(2, "0");
   return `${y}${m}`;
+}
+
+async function allocateInvoiceNumber(period: string) {
+  const supabase = supabaseAdmin();
+  const { data, error } = await supabase.rpc(ALLOCATE_INVOICE_NO_RPC, { p_period_key: period });
+
+  if (error) throw new Error(`Invoice number allocation failed: ${error.message}`);
+  if (typeof data !== "string" || !data.trim()) {
+    throw new Error("Invoice number allocation failed: empty allocator response");
+  }
+
+  return data;
 }
 
 function toInvoice(row: InvoiceRow): Invoice {
@@ -153,6 +170,7 @@ function toInvoice(row: InvoiceRow): Invoice {
     gstAmountCents: Number(row.gst_amount_cents ?? 0),
     totalInclGstCents: Number(row.total_incl_gst_cents ?? 0),
     depositCents: typeof row.deposit_cents === "number" ? row.deposit_cents : undefined,
+    metadata: row.metadata ?? undefined,
     emailLog: Array.isArray(row.email_log) ? row.email_log : [],
     voidReason: row.void_reason ?? undefined,
     voidedAt: row.voided_at ?? undefined,
@@ -205,6 +223,7 @@ function toDbPatch(patch: Partial<Invoice>) {
   if (patch.gstAmountCents !== undefined) db.gst_amount_cents = patch.gstAmountCents;
   if (patch.totalInclGstCents !== undefined) db.total_incl_gst_cents = patch.totalInclGstCents;
   if (patch.depositCents !== undefined) db.deposit_cents = patch.depositCents;
+  if (patch.metadata !== undefined) db.metadata = patch.metadata;
   if (patch.emailLog !== undefined) db.email_log = patch.emailLog;
   if (patch.voidReason !== undefined) db.void_reason = patch.voidReason;
   if (patch.voidedAt !== undefined) db.voided_at = patch.voidedAt;
@@ -415,18 +434,7 @@ export const dbInvoiceRepo = {
 
     const issueDate = nowIso();
     const period = monthKeyFromISO(issueDate);
-    let invoiceNo = current.invoice_no;
-
-    if (!invoiceNo) {
-      const supabase = supabaseAdmin();
-      const { count, error: countError } = await supabase
-        .from(INVOICE_TABLE)
-        .select("id", { count: "exact", head: true })
-        .like("invoice_no", `INV-${period}-%`);
-
-      if (countError) throw new Error(`Invoice issue count failed: ${countError.message}`);
-      invoiceNo = `INV-${period}-${pad5((count ?? 0) + 1)}`;
-    }
+    const invoiceNo = current.invoice_no ?? (await allocateInvoiceNumber(period));
 
     const supabase = supabaseAdmin();
     const { data, error } = await supabase
@@ -438,10 +446,12 @@ export const dbInvoiceRepo = {
         updated_at: issueDate,
       })
       .eq("id", id)
+      .eq("status", "draft")
       .select(BASE_COLUMNS)
-      .single<InvoiceRow>();
+      .maybeSingle<InvoiceRow>();
 
     if (error) throw new Error(`Invoice issue failed: ${error.message}`);
+    if (!data) return toInvoice(await readByIdOrThrow(id));
     return toInvoice(data);
   },
 
@@ -508,7 +518,7 @@ export const dbInvoiceRepo = {
     to: string;
     cc?: string;
     subject: string;
-    provider: "mock" | "resend" | "ses" | "postmark";
+    provider: "mock" | "sendgrid" | "resend" | "ses" | "postmark";
     status: "sent" | "queued" | "failed";
     providerMessageId?: string;
     pdfSha256?: string;
@@ -550,6 +560,10 @@ export const dbInvoiceRepo = {
     const createdAt = nowIso();
 
     const qty = Math.max(1, Number(order.qty) || 1);
+    const billToContext = await resolveInvoiceBillToContext({
+      customerId: order.customerId,
+      customerSnapshot: order.customerSnapshot,
+    });
 
     const insertPayload = {
       status: "draft" as InvoiceStatus,
@@ -568,11 +582,7 @@ export const dbInvoiceRepo = {
         addressLines: ["Address line 1", "Singapore"],
         email: "billing@yourcompany.com",
       } satisfies InvoiceSupplierSnapshot,
-      bill_to: {
-        name: "Customer (Demo)",
-        addressLines: ["-"],
-        email: "",
-      } satisfies InvoiceBillToSnapshot,
+      bill_to: billToContext.billTo,
       items: [
         {
           description: `${order.equipmentTitle} (Rental ${order.start} -> ${order.end})`,
@@ -585,6 +595,7 @@ export const dbInvoiceRepo = {
       gst_amount_cents: gstAmountCents,
       total_incl_gst_cents: totalInclGstCents,
       deposit_cents: depositCents > 0 ? depositCents : null,
+      metadata: {},
       email_log: [] as InvoiceEmailLogItem[],
       void_reason: null,
       voided_at: null,
@@ -646,6 +657,7 @@ export const dbInvoiceRepo = {
       gst_amount_cents: gstAmountCents,
       total_incl_gst_cents: totalInclGstCents,
       deposit_cents: depositCents > 0 ? depositCents : null,
+      metadata: input.metadata ?? {},
       email_log: [] as InvoiceEmailLogItem[],
       void_reason: null,
       voided_at: null,

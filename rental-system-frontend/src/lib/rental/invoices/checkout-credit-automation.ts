@@ -1,8 +1,9 @@
-import "server-only";
+﻿import "server-only";
 
 import { dbRentalDepositRepo } from "@/lib/rental/deposits/db-rental-deposit-repo";
 import { dbInvoiceRepo } from "@/lib/rental/invoices/db-invoice-repo";
 import { sendIssuedInvoiceEmail } from "@/lib/rental/invoices/send-issued-invoice";
+import { sendNewOrderNotificationIfNeeded } from "@/lib/rental/orders/new-order-notification-service";
 import { dbOrderRepo } from "@/lib/rental/orders/db-order-repo";
 
 type CreditCheckoutResult = {
@@ -25,6 +26,8 @@ export async function processCreditCheckoutOrder(orderId: string): Promise<Credi
   if (!invoice) {
     invoice = await dbInvoiceRepo.createDraftFromOrder({
       orderId: order.id,
+      customerId: order.customerId,
+      customerSnapshot: order.customerSnapshot,
       equipmentTitle: order.equipmentTitle,
       qty: order.qty,
       start: order.start,
@@ -52,6 +55,15 @@ export async function processCreditCheckoutOrder(orderId: string): Promise<Credi
     sourceInvoiceId: invoice.id,
   });
 
+  try {
+    await sendNewOrderNotificationIfNeeded(order.id);
+  } catch (error) {
+    console.error("[checkout-credit-automation] new order notification failed", {
+      orderId: order.id,
+      error: error instanceof Error ? error.message : "unknown error",
+    });
+  }
+
   const emails = await dbInvoiceRepo.listEmails(invoice.id);
   const alreadySent = emails.some((item) => item.type === "sent" || item.type === "resent");
   if (alreadySent) {
@@ -78,3 +90,5 @@ export async function processCreditCheckoutOrder(orderId: string): Promise<Credi
     invoiceEmailSent: true,
   };
 }
+
+

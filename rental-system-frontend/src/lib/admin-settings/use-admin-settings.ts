@@ -22,6 +22,8 @@ export type OrgSettingsDto = {
   testerEmails: string[];
   bookingPaidRecipients: string[];
   overdueRecipients: string[];
+  newOrderRecipients: string[];
+  contactFormRecipients: string[];
   operationsPolicy: {
     defaultMaintenanceBufferDays: number;
     enableDeveloperDeleteTools: boolean;
@@ -70,6 +72,8 @@ export function useAdminSettings() {
   const [adminNotificationEmailsCsv, setAdminNotificationEmailsCsv] = useState("");
   const [bookingPaidRecipientsCsv, setBookingPaidRecipientsCsv] = useState("");
   const [overdueRecipientsCsv, setOverdueRecipientsCsv] = useState("");
+  const [newOrderRecipientsCsv, setNewOrderRecipientsCsv] = useState("");
+  const [contactFormRecipientsCsv, setContactFormRecipientsCsv] = useState("");
   const [bccTesterEnabled, setBccTesterEnabled] = useState(false);
   const [testerEmailsCsv, setTesterEmailsCsv] = useState("");
   const [defaultMaintenanceBufferDays, setDefaultMaintenanceBufferDays] = useState("7");
@@ -119,6 +123,8 @@ export function useAdminSettings() {
       setAdminNotificationEmailsCsv(toCsv(data.adminNotificationEmails));
       setBookingPaidRecipientsCsv(toCsv(data.bookingPaidRecipients));
       setOverdueRecipientsCsv(toCsv(data.overdueRecipients));
+      setNewOrderRecipientsCsv(toCsv(data.newOrderRecipients));
+      setContactFormRecipientsCsv(toCsv(data.contactFormRecipients));
       setBccTesterEnabled(Boolean(data.bccTesterEnabled));
       setTesterEmailsCsv(toCsv(data.testerEmails));
       setDefaultMaintenanceBufferDays(
@@ -165,6 +171,8 @@ export function useAdminSettings() {
         adminNotificationEmails: parseEmailsCsv(adminNotificationEmailsCsv),
         bookingPaidRecipients: parseEmailsCsv(bookingPaidRecipientsCsv),
         overdueRecipients: parseEmailsCsv(overdueRecipientsCsv),
+        newOrderRecipients: parseEmailsCsv(newOrderRecipientsCsv),
+        contactFormRecipients: parseEmailsCsv(contactFormRecipientsCsv),
         bccTesterEnabled,
         testerEmails: parseEmailsCsv(testerEmailsCsv),
         operationsPolicy: {
@@ -211,6 +219,7 @@ export function useAdminSettings() {
     companyGstRegNo,
     companyPhone,
     companyUen,
+    contactFormRecipientsCsv,
     defaultMaintenanceBufferDays,
     enableDeveloperDeleteTools,
     finalReminderDays,
@@ -219,6 +228,7 @@ export function useAdminSettings() {
     load,
     orgName,
     overdueRecipientsCsv,
+    newOrderRecipientsCsv,
     reminderBatchLimit,
     reminderGuardWindowHours,
     remindersEnabled,
@@ -291,6 +301,10 @@ export function useAdminSettings() {
     setBookingPaidRecipientsCsv,
     overdueRecipientsCsv,
     setOverdueRecipientsCsv,
+    newOrderRecipientsCsv,
+    setNewOrderRecipientsCsv,
+    contactFormRecipientsCsv,
+    setContactFormRecipientsCsv,
     bccTesterEnabled,
     setBccTesterEnabled,
     testerEmailsCsv,

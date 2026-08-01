@@ -1,20 +1,15 @@
 import { NextResponse } from "next/server";
-import { Resend } from "resend";
 
 import {
   adminUnauthorizedResponse,
   assertAdmin,
   isAdminUnauthorized,
 } from "@/lib/auth/admin";
+import { buildAdminTestEmailTemplate } from "@/lib/email/email-template-registry";
+import { getEmailConfigDiagnostics, sendServerEmail } from "@/lib/email/server-email";
 import { dbAdminSettingsRepo } from "@/lib/settings/db-admin-settings-repo";
 
 export const runtime = "nodejs";
-
-function mustEnv(name: string) {
-  const value = process.env[name];
-  if (!value) throw new Error(`Missing env: ${name}`);
-  return value;
-}
 
 export async function POST(req: Request) {
   try {
@@ -26,7 +21,9 @@ export async function POST(req: Request) {
       settings.testerEmails[0] ||
       settings.adminNotificationEmails[0] ||
       settings.bookingPaidRecipients[0] ||
-      settings.overdueRecipients[0];
+      settings.overdueRecipients[0] ||
+      settings.newOrderRecipients[0] ||
+      settings.contactFormRecipients[0];
 
     if (!recipient) {
       return NextResponse.json(
@@ -47,41 +44,37 @@ export async function POST(req: Request) {
       });
     }
 
-    if (provider !== "resend") {
-      return NextResponse.json(
-        { error: `Unsupported EMAIL_PROVIDER for test email: ${provider}` },
-        { status: 400 }
-      );
-    }
-
-    const resend = new Resend(mustEnv("RESEND_API_KEY"));
-    const result = await resend.emails.send({
-      from: mustEnv("RESEND_FROM"),
-      to: recipient,
-      subject: `Admin settings test email - ${settings.orgName || "Rental System"}`,
-      html: `
-        <div style="font-family:Arial,sans-serif;line-height:1.5">
-          <p>This is a test email from the admin settings page.</p>
-          <p><strong>Organisation:</strong> ${settings.orgName || "-"}</p>
-          <p><strong>Sent At:</strong> ${sentAt}</p>
-        </div>
-      `,
+    const template = await buildAdminTestEmailTemplate({
+      organisation: settings.orgName || "Rental System",
+      sentAt,
     });
-
-    if (result.error) {
-      throw new Error(result.error.message);
-    }
+    const delivery = await sendServerEmail({
+      templateId: "admin_test_email",
+      to: recipient,
+      subject: template.subject,
+      html: template.html,
+    });
 
     return NextResponse.json({
       ok: true,
-      provider: "resend",
+      provider: delivery.provider,
       recipient,
-      providerMessageId: result.data?.id ?? null,
+      providerMessageId: delivery.providerMessageId,
       sentAt,
     });
   } catch (error) {
     if (isAdminUnauthorized(error)) return adminUnauthorizedResponse();
     const message = error instanceof Error ? error.message : "Test email failed";
-    return NextResponse.json({ error: message }, { status: 400 });
+    const config = getEmailConfigDiagnostics();
+    return NextResponse.json(
+      {
+        error: message,
+        provider: config.provider,
+        senderDomain: config.fromDomain ?? null,
+        hasResendApiKey: config.hasResendApiKey,
+      },
+      { status: 400 }
+    );
   }
 }
+

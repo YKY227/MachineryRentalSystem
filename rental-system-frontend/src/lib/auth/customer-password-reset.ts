@@ -2,9 +2,9 @@ import "server-only";
 
 import crypto from "crypto";
 
-import { Resend } from "resend";
-
+import { buildCustomerPasswordResetTemplate } from "@/lib/email/email-template-registry";
 import { customerPasswordResetRepo } from "@/lib/auth/customer-password-reset-repo";
+import { sendServerEmail } from "@/lib/email/server-email";
 import { dbRentalCustomerRepo } from "@/lib/rental/customers/db-rental-customer-repo";
 import type { RentalCustomer } from "@/lib/rental/orders/types";
 import { supabaseAdmin } from "@/lib/supabase/server";
@@ -14,16 +14,8 @@ const RESET_GUARD_WINDOW_MS = 15 * 60 * 1000;
 const RESET_RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000;
 const RESET_RATE_LIMIT_MAX_REQUESTS = 5;
 
-type EmailProvider = "mock" | "resend" | "ses" | "postmark";
-
 function normalizeEmail(value: string) {
   return value.trim().toLowerCase();
-}
-
-function mustEnv(name: string) {
-  const value = process.env[name];
-  if (!value) throw new Error(`Missing env: ${name}`);
-  return value;
 }
 
 function hashToken(token: string) {
@@ -32,13 +24,6 @@ function hashToken(token: string) {
 
 function generateToken() {
   return crypto.randomBytes(32).toString("hex");
-}
-
-function createProvider() {
-  const provider = (process.env.EMAIL_PROVIDER ?? "resend").toLowerCase() as EmailProvider;
-  const from = provider === "resend" ? mustEnv("RESEND_FROM") : "mock";
-  const resend = provider === "resend" ? new Resend(mustEnv("RESEND_API_KEY")) : null;
-  return { provider, from, resend };
 }
 
 function deriveAppOrigin(req: Request) {
@@ -52,38 +37,22 @@ async function sendPasswordResetEmail(input: {
   customer: RentalCustomer;
   token: string;
 }) {
-  const { provider, from, resend } = createProvider();
   const resetLink = `${deriveAppOrigin(input.req)}/rental/reset-password?token=${encodeURIComponent(input.token)}`;
-  const subject = "Reset your rental account password";
   const customerName = input.customer.contactName.trim() || input.customer.companyName.trim() || "Customer";
-
-  if (provider === "mock") {
-    return { provider, providerMessageId: `mock_${Date.now()}`, resetLink };
-  }
-
-  const result = await resend!.emails.send({
-    from,
-    to: input.customer.email,
-    subject,
-    html: `
-      <div style="font-family:Arial,sans-serif; line-height:1.5">
-        <p>Dear ${customerName},</p>
-        <p>We received a request to reset your rental customer account password.</p>
-        <p>
-          <a href="${resetLink}">Reset your password</a>
-        </p>
-        <p>This link expires in 1 hour. If you did not request this reset, you can ignore this email.</p>
-      </div>
-    `,
+  const template = await buildCustomerPasswordResetTemplate({
+    customerName,
+    resetUrl: resetLink,
   });
 
-  if (result.error) {
-    throw new Error(result.error.message);
-  }
+  const delivery = await sendServerEmail({
+    to: input.customer.email,
+    subject: template.subject,
+    html: template.html,
+  });
 
   return {
-    provider,
-    providerMessageId: result.data?.id ?? null,
+    provider: delivery.provider,
+    providerMessageId: delivery.providerMessageId,
     resetLink,
   };
 }

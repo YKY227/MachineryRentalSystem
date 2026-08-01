@@ -1,5 +1,9 @@
 import "server-only";
 
+import {
+  buildExtensionApprovedInvoiceTemplate,
+  buildExtensionPaymentReceivedTemplate,
+} from "@/lib/email/email-template-registry";
 import type { RentalCreditCheckoutEvaluation } from "@/lib/rental/credit-control/checkout-credit-evaluator";
 import { evaluateRentalCreditCheckout } from "@/lib/rental/credit-control/checkout-credit-evaluator";
 import { dbRentalCustomerRepo } from "@/lib/rental/customers/db-rental-customer-repo";
@@ -397,12 +401,19 @@ export async function approveRentalExtension(input: {
           extension,
           chargeExclGstCents: finalCharge.exclGstCents,
         });
+        const emailTemplate = await buildExtensionApprovedInvoiceTemplate({
+          customerName:
+            liveCustomer.contactName.trim() || liveCustomer.companyName.trim() || "Customer",
+          invoiceNo: invoice.invoiceNo ?? invoice.id,
+          requestedRentalEnd: extension.requestedRentalEnd,
+          billTo: invoice.billTo?.name ?? "-",
+        });
 
         await sendIssuedInvoiceEmail({
           invoiceId: invoice.id,
           to: liveCustomer.email.trim(),
-          subject: `Tax Invoice ${invoice.invoiceNo ?? invoice.id}`,
-          message: `Dear ${liveCustomer.contactName.trim() || liveCustomer.companyName.trim() || "Customer"},\n\nYour rental extension has been approved through ${extension.requestedRentalEnd}. Please find attached the extension invoice ${invoice.invoiceNo ?? invoice.id}.\n\nThank you.`,
+          subject: emailTemplate.subject,
+          html: emailTemplate.html,
           mode: "send",
         });
 
@@ -581,12 +592,21 @@ export async function confirmPaidRentalExtension(sessionId: string) {
     invoicePaymentId: paymentResult.payment.id,
     invoiceAppliedAt: nowIso(),
   });
+  const emailTemplate = await buildExtensionPaymentReceivedTemplate({
+    customerName:
+      order.customerSnapshot?.contactName?.trim() ||
+      order.customerSnapshot?.companyName?.trim() ||
+      "Customer",
+    invoiceNo: invoice.invoiceNo ?? invoice.id,
+    requestedRentalEnd: extension.requestedRentalEnd,
+    billTo: invoice.billTo?.name ?? "-",
+  });
 
   await sendIssuedInvoiceEmail({
     invoiceId: invoice.id,
     to: order.customerSnapshot?.email?.trim() || invoice.billTo?.email || "",
-    subject: `Tax Invoice ${invoice.invoiceNo ?? invoice.id}`,
-    message: `Dear ${order.customerSnapshot?.contactName?.trim() || order.customerSnapshot?.companyName?.trim() || "Customer"},\n\nYour rental extension payment has been received and your extension is now confirmed through ${extension.requestedRentalEnd}. Please find attached invoice ${invoice.invoiceNo ?? invoice.id}.\n\nThank you.`,
+    subject: emailTemplate.subject,
+    html: emailTemplate.html,
     mode: "send",
   });
 

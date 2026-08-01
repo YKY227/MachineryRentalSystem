@@ -1,12 +1,9 @@
-import { Resend } from "resend";
-
+import { sendServerEmail } from "@/lib/email/server-email";
 import type { Invoice } from "@/lib/rental/invoices/types";
 import { renderInvoicePdf } from "@/lib/rental/invoices/invoice-pdf";
 import { sha256OfBytes } from "@/lib/rental/invoices/hash";
 import { dbInvoiceRepo } from "@/lib/rental/invoices/db-invoice-repo";
 import { supabaseAdmin, supabaseBucket } from "@/lib/supabase/server";
-
-type EmailProvider = "mock" | "resend" | "ses" | "postmark";
 
 function mustEnv(name: string) {
   const v = process.env[name];
@@ -47,44 +44,15 @@ async function uploadToStorage(path: string, bytes: Uint8Array) {
   if (error) throw new Error(`Storage upload failed: ${error.message}`);
 }
 
-function createProvider() {
-  const provider = (process.env.EMAIL_PROVIDER ?? "resend").toLowerCase() as EmailProvider;
-  const from = provider === "resend" ? mustEnv("RESEND_FROM") : "mock";
-  const resend = provider === "resend" ? new Resend(mustEnv("RESEND_API_KEY")) : null;
-  return { provider, from, resend };
-}
-
 export async function deliverRentalEmail(input: {
-  to: string;
-  cc?: string;
+  to: string | string[];
+  cc?: string | string[];
+  bcc?: string | string[];
+  replyTo?: string;
   subject: string;
   html: string;
 }) {
-  const { provider, from, resend } = createProvider();
-
-  let providerMessageId: string | null = null;
-  if (provider === "mock") {
-    providerMessageId = `mock_${Date.now()}`;
-  } else {
-    const result = await resend!.emails.send({
-      from,
-      to: input.to,
-      cc: input.cc ? [input.cc] : undefined,
-      subject: input.subject,
-      html: input.html,
-    });
-
-    if (result.error) {
-      throw new Error(result.error.message);
-    }
-
-    providerMessageId = result.data?.id ?? null;
-  }
-
-  return {
-    provider,
-    providerMessageId,
-  };
+  return sendServerEmail(input);
 }
 
 export async function deliverInvoiceEmail(input: {
@@ -98,7 +66,6 @@ export async function deliverInvoiceEmail(input: {
   mustEnv("SUPABASE_SERVICE_ROLE_KEY");
   mustEnv("SUPABASE_STORAGE_BUCKET");
 
-  const { provider, from, resend } = createProvider();
   const inv = input.invoice;
   const storagePath = inv.pdfStorage?.path || defaultPdfPath(inv);
 
@@ -140,35 +107,23 @@ export async function deliverInvoiceEmail(input: {
   }
 
   const filename = `${sanitizeFilename(inv.invoiceNo ?? inv.id)}.pdf`;
-  let providerMessageId: string | null = null;
-
-  if (provider === "mock") {
-    providerMessageId = `mock_${Date.now()}`;
-  } else {
-    const result = await resend!.emails.send({
-      from,
-      to: input.to,
-      cc: input.cc ? [input.cc] : undefined,
-      subject: input.subject,
-      html: input.html,
-      attachments: [
-        {
-          filename,
-          content: Buffer.from(pdfBytes).toString("base64"),
-        },
-      ],
-    });
-
-    if (result.error) {
-      throw new Error(result.error.message);
-    }
-
-    providerMessageId = result.data?.id ?? null;
-  }
+  const delivery = await sendServerEmail({
+    to: input.to,
+    cc: input.cc,
+    subject: input.subject,
+    html: input.html,
+    attachments: [
+      {
+        filename,
+        content: pdfBytes,
+        type: "application/pdf",
+      },
+    ],
+  });
 
   return {
-    provider,
-    providerMessageId,
+    provider: delivery.provider,
+    providerMessageId: delivery.providerMessageId,
     pdf: {
       path: storagePath,
       generatedAt: storageMeta?.generatedAt ?? inv.pdfStorage?.generatedAt ?? new Date().toISOString(),
